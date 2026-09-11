@@ -64,11 +64,12 @@ export function createClubServer({ database = resolve(root, 'data/club.sqlite') 
             return json({ filename: `club-${kind}-${Date.now()}.csv`, content: `\uFEFF${csv}`, mime: 'text/csv;charset=utf-8' });
           }
           if (analytics) return json(store.analytics(user, analytics[1], Object.fromEntries(url.searchParams)));
-          const resources = { orders: 'order:view', accounts: 'account:manage', topups: 'finance:manage', ledger: 'finance:manage', withdrawals: 'finance:manage', conversations: 'conversation:manage' };
+          const resources = { orders: 'order:view', accounts: 'account:manage', topups: 'finance:manage', ledger: 'finance:manage', withdrawals: 'finance:manage', conversations: 'conversation:manage', assessments: 'assessment:view', 'assessment-records': 'assessment:view', examinations: 'assessment:view' };
           const resource = url.pathname.slice(5);
           requireThat(resources[resource], '接口不存在', 404);
           requireThat(can(user, resources[resource]), '你的职责没有此操作权限', 403);
-          return json(store.workspace(user)[resource]);
+          const workspace = store.workspace(user);
+          return json(['assessments', 'assessment-records', 'examinations'].includes(resource) ? (workspace.assessments || []) : workspace[resource]);
         }
         if (url.pathname === '/api/orders') return json(store.createOrder(user, body), 201);
         if (url.pathname === '/api/refunds') return json(store.createRefund(user, body), 201);
@@ -86,6 +87,9 @@ export function createClubServer({ database = resolve(root, 'data/club.sqlite') 
         if (url.pathname === '/api/online') return json(store.setOnline(user, body));
         const examiner = url.pathname.match(/^\/api\/examiners\/([^/]+)$/);
         if (examiner) return json(store.examinerAction(user, examiner[1], body));
+        if (url.pathname === '/api/assessments' || url.pathname === '/api/examinations') return json(store.createAssessment(user, body), 201);
+        const assessment = url.pathname.match(/^\/api\/(?:assessments|examinations|assessment-records)\/([^/]+)$/);
+        if (assessment) return json(store.updateAssessment(user, assessment[1], body));
         if (url.pathname === '/api/levels') return json(store.configureLevels(user, body));
         if (url.pathname === '/api/commissions') return json(store.configureCommissions(user, body));
         if (url.pathname === '/api/members/skills') return json(store.bindSkills(user, body));

@@ -57,4 +57,10 @@ const conversations = [
   { boss: '陈思齐', last: '已收到，谢谢安排', time: '昨天 21:06', unread: 0, channel: '站内信', state: '已结束' },
 ];
 
-export { escorts, orders, games, products, topups, flows, settlements, conversations };
+// Sample records used by the examiner workspace. Runtime IDs are attached by the store.
+const assessments = [
+  { id: 'EX20240618001', member: '米粒', type: '质检', game: '王者荣耀', score: 92, result: '通过', wins: 9, losses: 1, kills: 18, deaths: 4, mvp: 3, note: '近期服务稳定，保持当前等级。' },
+  { id: 'EX20240618002', member: '桃桃', type: '入店考核', game: '王者荣耀', score: null, result: null, wins: null, losses: null, kills: null, deaths: null, mvp: null, note: '' },
+];
+
+export { escorts, orders, games, products, topups, flows, settlements, conversations, assessments };
