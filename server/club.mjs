@@ -44,9 +44,12 @@ function initialState() {
   const users = [
     { id: 'admin', username: 'admin', name: '杨澄', role: 'admin' },
     { id: 'service', username: 'service', name: '小林', role: 'service' },
+    { id: 'finance', username: 'finance', name: '周财务', role: 'finance' },
+    { id: 'examiner', username: 'examiner', name: '阿泽', role: 'examiner' },
+    { id: 'afterSales', username: 'afterSales', name: '小许', role: 'afterSales' },
     ...seed.escorts.map((e, i) => ({ id: logins[i], username: logins[i], name: e.name, role: 'escort', games: e.games.split(' · '), shareBps: parseInt(e.share) * 100 || 7000, online: ['在线', '陪玩中'].includes(e.state), active: e.state !== '待审核', depositCents: 100000, balanceCents: cents(e.balance) })),
   ].map(u => {
-    const password = ['admin', 'service', 'escort'].includes(u.username) ? '123456' : randomBytes(24).toString('hex');
+    const password = ['admin', 'service', 'finance', 'examiner', 'afterSales', 'escort'].includes(u.username) ? '123456' : randomBytes(24).toString('hex');
     return { active: true, online: false, games: [], balanceCents: 0, frozenBalanceCents: 0, depositCents: 0, shareBps: 0, ...u, passwordHash: passwordHash(password) };
   });
   const games = [...seed.games, { name: 'Apex', category: 'FPS', multiplier: '1.00x', min: 1, max: 3, state: '上架', tone: 'green' }].map(g => ({ ...g, multiplierBps: Math.round(parseFloat(g.multiplier) * 10000), ...(Number.isInteger(g.commissionBps) ? { commissionBps: g.commissionBps } : {}) }));
@@ -86,6 +89,17 @@ export class ClubStore {
     if (!this.db.prepare('SELECT id FROM club').get()) this.db.prepare('INSERT INTO club VALUES (1, ?)').run(JSON.stringify(initialState()));
     const data = this.read();
     let migrated = false;
+    const demoStaff = [
+      { id: 'finance', username: 'finance', name: '周财务', role: 'finance' },
+      { id: 'examiner', username: 'examiner', name: '阿泽', role: 'examiner' },
+      { id: 'afterSales', username: 'afterSales', name: '小许', role: 'afterSales' },
+    ];
+    for (const staff of demoStaff) {
+      if (data.users.some(user => user.username === staff.username)) continue;
+      const memberNo = String(Math.max(81000000, ...data.users.map(user => Number(user.memberNo) || 0)) + 1);
+      data.users.push({ ...staff, memberNo, memberVersion: 0, passwordHash: passwordHash('123456'), active: true, online: false, games: [], balanceCents: 0, frozenBalanceCents: 0, depositCents: 0, shareBps: 0 });
+      migrated = true;
+    }
     if (!Array.isArray(data.refunds)) {
       data.refunds = data.orders.filter(o => o.status === '退款审核').map((o, i) => ({ id: `RF${String(i + 1).padStart(6, '0')}`, orderId: o.id, customer: o.boss, amountCents: Number(o.amountCents || 0), reason: '客户申请退款，等待售后审核', status: '待审核', originalStatus: '已完成', requestedAt: now(), channel: o.pay === '余额支付' ? '余额原路' : '线下人工' }));
       migrated = true;

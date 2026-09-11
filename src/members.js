@@ -5,7 +5,7 @@ const filters = { clubMembers: { id:'', name:'', role:'' }, clubEscorts: { id:''
 const selected = new Set();
 const pages = { clubMembers:1, clubEscorts:1 };
 const money = n => (Number(n || 0)/100).toLocaleString('en-US',{maximumFractionDigits:2});
-const roleName = u => u.role==='admin'?'俱乐部会长':u.role==='service'?'俱乐部客服':u.role==='afterSales'?'俱乐部售后':u.role==='examiner'?'俱乐部考官':u.role==='escort'?'俱乐部陪玩':u.roleLabel;
+const roleName = u => u.role==='admin'?'俱乐部会长':u.role==='service'?'俱乐部客服':u.role==='finance'?'俱乐部财务':u.role==='afterSales'?'俱乐部售后':u.role==='examiner'?'俱乐部考官':u.role==='escort'?'俱乐部陪玩':u.roleLabel;
 const pill = (text, tone='blue') => `<span class="member-pill ${tone}">${e(text)}</span>`;
 const avatar = u => `<span class="member-avatar avatar-${u.tone}" aria-label="${e(u.name)}的头像">${e(u.name.slice(0,1))}</span>`;
 const action = (verb,label,u,cls='') => `<button class="member-link ${cls}" data-member-action="${verb}" data-member-id="${e(u.id)}">${label}</button>`;
@@ -23,7 +23,7 @@ export function membersMarkup(context,page) {
       ${escorts?select('游戏','game',f.game,w.games.map(g=>[g.name,g.name]),'请选择游戏'):''}
       <div class="member-search-actions"><button class="owner-primary">${icon('search',14)} 搜索</button><button type="button" class="member-reset" id="resetMembers">↻ 重置</button></div>
     </form>
-    <div class="member-toolbar"><div>${escorts?'<button class="member-button green" id="batchSkills">批量绑定游戏</button>':'<button class="member-button" id="createMember">新增俱乐部成员</button>'}</div><button class="member-round" id="refreshMembers" aria-label="刷新成员列表">↻</button></div>
+    <div class="member-toolbar"><div>${escorts?'<button class="member-button green" id="batchSkills">批量绑定游戏</button>':'<button class="member-button" id="createMember">新增俱乐部成员</button><button class="member-button purple" id="createStaff">新增工作人员账号</button>'}</div><button class="member-round" id="refreshMembers" aria-label="刷新成员列表">↻</button></div>
     ${escorts?`<div class="member-level-strip">${w.levels.map(l=>`<span><b>${l.name}</b></span>`).join('<i>›</i>')}<small>等级仅用于接单门槛；抽成按游戏配置</small></div>`:''}
     <div class="member-table-wrap" id="memberResults"></div>
   </section>`;
@@ -51,6 +51,7 @@ export function bindMembers(page) {
   document.querySelector('#resetMembers').onclick=()=>{Object.keys(filters[page]).forEach(k=>filters[page][k]='');pages[page]=1;selected.clear();ctx.navigate(page);};
   document.querySelector('#refreshMembers').onclick=async()=>{try{await ctx.refresh();ctx.toast('成员资料已刷新');}catch(err){ctx.toast(err.message);}};
   document.querySelector('#createMember')?.addEventListener('click',createMember);
+  document.querySelector('#createStaff')?.addEventListener('click',createStaff);
   document.querySelector('#batchSkills')?.addEventListener('click',()=>{
     const members=ctx.state.workspace.members.filter(u=>selected.has(u.id));if(!members.length)return ctx.toast('请先勾选需要绑定游戏的陪玩');
     const dialog=ctx.dialog('批量绑定游戏',`<p>已选择 ${members.length} 位陪玩，新增所选游戏，保留原有游戏。</p>${gameFields([])}`,'保存游戏',form=>ctx.api('/members/skills',{members:members.map(u=>({id:u.id,memberVersion:u.memberVersion})),games:form.getAll('games')}));dialog.classList.add('member-dialog');
@@ -90,6 +91,11 @@ function openAction(action,u) {
 }
 function createMember() {
   const modal=ctx.dialog('新增俱乐部成员',`<label class="form-field">用户 ID<input name="userId" required maxlength="80" placeholder="请输入对方用户 ID" autocomplete="off"></label><p class="detail-note">输入已注册用户 ID 即可加入俱乐部，无需创建登录账号。系统会自动带入对方昵称和账号资料。</p>`,'加入俱乐部',form=>ctx.api('/accounts',{action:'joinById',userId:form.get('userId')}));modal.classList.add('member-dialog');
+}
+function createStaff() {
+  const roles=[['service','俱乐部客服'],['finance','俱乐部财务'],['examiner','俱乐部考官'],['afterSales','俱乐部售后']];
+  const modal=ctx.dialog('新增工作人员账号',`${input('成员姓名','name','','请输入工作人员姓名')} ${input('登录账号','username','','3–30 位英文、数字或下划线')} ${input('初始密码','password','','至少 8 位')}${select('职责','role','',roles,'请选择工作人员职责')}<p class="detail-note">账号创建后立即拥有对应工作台权限。一个账号只能担任一种职责，后续可在成员管理中调整。</p>`,'创建账号',form=>ctx.api('/accounts',{name:form.get('name'),username:form.get('username'),password:form.get('password'),role:form.get('role'),active:true,games:[]}));
+  modal.classList.add('member-dialog');
 }
 function levelDialog() {
   const w=ctx.state.workspace;

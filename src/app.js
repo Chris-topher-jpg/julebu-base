@@ -43,6 +43,12 @@ function renderLogin() {
   leaveOwner();
   state.workspace = null; history.replaceState(null, '', '#/login');
   document.querySelector('#app').innerHTML = loginMarkup();
+  const demo = document.querySelector('.demo-accounts');
+  if (demo) {
+    demo.insertAdjacentHTML('beforeend', '<button type="button" class="demo-account" data-username="finance"><span class="mini-avatar purple">周</span><span><strong>财务</strong><small>充值 / 流水 / 提现</small></span></button><button type="button" class="demo-account" data-username="examiner"><span class="mini-avatar navy">泽</span><span><strong>考官</strong><small>陪玩游戏资料</small></span></button><button type="button" class="demo-account" data-username="afterSales"><span class="mini-avatar pink">许</span><span><strong>售后</strong><small>退款 / 验收 / 会话</small></span></button>');
+  }
+  const hint = document.querySelector('.login-hint');
+  if (hint) hint.innerHTML = '演示账号：<strong>admin / service / finance / examiner / afterSales / escort</strong><br>统一密码：<strong>123456</strong>';
   document.querySelector('#loginError').setAttribute('role', 'alert');
   document.querySelectorAll('.demo-account').forEach(el => el.onclick = () => {
     document.querySelector('#loginUsername').value = el.dataset.username;
