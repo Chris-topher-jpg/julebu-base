@@ -43,12 +43,9 @@ function initialState() {
   const users = [
     { id: 'admin', username: 'admin', name: '杨澄', role: 'admin' },
     { id: 'service', username: 'service', name: '小林', role: 'service' },
-    { id: 'member01', username: 'member01', name: '星河体验官', role: 'member', memberNo: 'M10001' },
-    { id: 'member02', username: 'member02', name: '开黑玩家', role: 'member', memberNo: 'M10002' },
-    { id: 'member03', username: 'member03', name: '峡谷旅人', role: 'member', memberNo: 'M10003' },
     ...seed.escorts.map((e, i) => ({ id: logins[i], username: logins[i], name: e.name, role: 'escort', games: e.games.split(' · '), shareBps: parseInt(e.share) * 100 || 7000, online: ['在线', '陪玩中'].includes(e.state), active: e.state !== '待审核', depositCents: 100000, balanceCents: cents(e.balance) })),
   ].map(u => {
-    const password = ['admin', 'service', 'escort', 'member01', 'member02', 'member03'].includes(u.username) ? '123456' : randomBytes(24).toString('hex');
+    const password = ['admin', 'service', 'escort'].includes(u.username) ? '123456' : randomBytes(24).toString('hex');
     return { active: true, online: false, games: [], balanceCents: 0, frozenBalanceCents: 0, depositCents: 0, shareBps: 0, ...u, passwordHash: passwordHash(password) };
   });
   const games = [...seed.games, { name: 'Apex', category: 'FPS', multiplier: '1.00x', min: 1, max: 3, state: '上架', tone: 'green' }].map(g => ({ ...g, multiplierBps: Math.round(parseFloat(g.multiplier) * 10000), ...(Number.isInteger(g.commissionBps) ? { commissionBps: g.commissionBps } : {}) }));
@@ -86,20 +83,6 @@ export class ClubStore {
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS club (id INTEGER PRIMARY KEY CHECK (id=1), data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires INTEGER NOT NULL);');
     if (!this.db.prepare('SELECT id FROM club').get()) this.db.prepare('INSERT INTO club VALUES (1, ?)').run(JSON.stringify(initialState()));
     const data = this.read();
-    // Backfill member demo accounts for databases created before the member home was added.
-    const demos = [
-      { id: 'member01', username: 'member01', name: '星河体验官', memberNo: 'M10001' },
-      { id: 'member02', username: 'member02', name: '开黑玩家', memberNo: 'M10002' },
-      { id: 'member03', username: 'member03', name: '峡谷旅人', memberNo: 'M10003' },
-    ];
-    let changed = false;
-    for (const demo of demos) {
-      if (!data.users.some(u => u.username === demo.username)) {
-        data.users.push({ ...demo, role: 'member', active: true, online: false, games: [], balanceCents: 0, frozenBalanceCents: 0, depositCents: 0, shareBps: 0, memberVersion: 0, passwordHash: passwordHash('123456') });
-        changed = true;
-      }
-    }
-    if (changed) this.db.prepare('UPDATE club SET data=? WHERE id=1').run(JSON.stringify(data));
     if (migrateMembership(data)) this.db.prepare('UPDATE club SET data=? WHERE id=1').run(JSON.stringify(data));
     this.db.exec('CREATE TABLE IF NOT EXISTS analytics_cache (key TEXT PRIMARY KEY, data TEXT NOT NULL)');
     this.dummyHash = passwordHash(randomBytes(24).toString('hex'));
@@ -174,7 +157,10 @@ export class ClubStore {
     const users = data.customers.map((customer, index) => {
       const customerOrders = data.orders.filter(order => order.boss === customer.name || order.customerId === customer.id);
       const completed = customerOrders.filter(order => order.status === '已完成');
-      return { ...customer, id: customer.id || `customer-${index + 1}`, customerNo: customer.customerNo || `U${String(100001 + index).padStart(6, '0')}`, username: customer.username || customer.customerNo || customer.name, phone: customer.phone || '', active: customer.active !== false, orderCount: customerOrders.length, completedOrderCount: completed.length, totalSpentCents: customerOrders.reduce((sum, order) => sum + Number(order.amountCents || 0), 0) };
+      const id = customer.id || `customer-${index + 1}`;
+      const customerNo = customer.customerNo || `U${String(100001 + index).padStart(6, '0')}`;
+      const member = data.users.find(candidate => candidate.externalUserId === id || candidate.memberNo === customerNo);
+      return { ...customer, id, customerNo, username: customer.username || customer.customerNo || customer.name, phone: customer.phone || '', active: customer.active !== false, orderCount: customerOrders.length, completedOrderCount: completed.length, totalSpentCents: customerOrders.reduce((sum, order) => sum + Number(order.amountCents || 0), 0), joinedClub: Boolean(member), clubMemberId: member?.id || '', memberRole: member?.role || '', memberRoleLabel: member ? roles[member.role]?.label || '' : '' };
     });
     const response = { ...common, orders: data.orders, games: data.games, products: data.products, conversations: data.conversations, members: data.users.filter(u => u.role === 'escort').map(publicUser), customers: data.customers };
     if (user.role === 'admin') Object.assign(response, { accounts: data.users.map(u => memberRecord(data, u, publicUser)), members: data.users.filter(u => u.role === 'escort').map(u => memberRecord(data, u, publicUser)), roleOptions: Object.entries(roles).map(([id, r]) => ({ id, label: r.label, pages: r.pages, permissions: r.permissions })), topups: data.topups, ledger: data.ledger, withdrawals: data.withdrawals, settlements: data.settlements, audit: data.audit.slice(0, 30), users });

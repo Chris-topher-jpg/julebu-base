@@ -89,7 +89,7 @@ function bindStaffManagement(role) {
 function userManagementPage(w) {
   const users = w.users || [];
   const money = value => `¥ ${(Number(value || 0) / 100).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}`;
-  return `<section class="owner-panel user-management-panel"><div class="owner-section-head"><div><h2>用户管理</h2><p class="owner-update">俱乐部下单用户 · 共 ${users.length} 人</p></div><label class="owner-user-search">${icon('search',15)}<input id="userSearch" type="search" placeholder="搜索用户 ID、昵称、账号或联系方式" aria-label="搜索用户" autocomplete="off"></label></div><div class="owner-standard-table"><table><thead><tr><th>用户 ID</th><th>昵称</th><th>账号标识</th><th>联系方式</th><th>余额（元）</th><th>订单数</th><th>已完成订单</th><th>累计消费（元）</th><th>状态</th></tr></thead><tbody id="userResults"></tbody></table></div></section>`;
+  return `<section class="owner-panel user-management-panel"><div class="owner-section-head"><div><h2>用户管理</h2><p class="owner-update">俱乐部下单用户 · 共 ${users.length} 人</p></div><label class="owner-user-search">${icon('search',15)}<input id="userSearch" type="search" placeholder="搜索用户 ID、昵称、账号或联系方式" aria-label="搜索用户" autocomplete="off"></label></div><div class="owner-standard-table"><table><thead><tr><th>用户 ID</th><th>昵称</th><th>账号标识</th><th>联系方式</th><th>俱乐部身份</th><th>余额（元）</th><th>订单数</th><th>已完成订单</th><th>累计消费（元）</th><th>状态</th></tr></thead><tbody id="userResults"></tbody></table></div></section>`;
 }
 function bindUserManagement() {
   const input = document.querySelector('#userSearch');
@@ -99,8 +99,8 @@ function bindUserManagement() {
   const money = value => `¥ ${(Number(value || 0) / 100).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}`;
   const draw = () => {
     const query = input.value.trim().toLowerCase();
-    const rows = users.filter(user => [user.id, user.customerNo, user.name, user.username, user.phone].some(value => String(value || '').toLowerCase().includes(query)));
-    body.innerHTML = rows.map(user => `<tr><td><strong>${e(user.customerNo || user.id)}</strong><small>${e(user.id)}</small></td><td><span class="owner-staff-avatar" aria-label="${e(user.name)}的头像">${e(String(user.name || '?').slice(0, 1))}</span><b class="user-name-cell">${e(user.name)}</b></td><td>${e(user.username || '—')}</td><td>${e(user.phone || '未填写')}</td><td>${money(user.balanceCents)}</td><td>${number(user.orderCount)}</td><td>${number(user.completedOrderCount)}</td><td>${money(user.totalSpentCents)}</td><td><span class="owner-status ${user.active ? '' : 'off'}">${user.active ? '正常' : '停用'}</span></td></tr>`).join('') || '<tr><td colspan="9"><div class="owner-empty">没有找到符合条件的用户</div></td></tr>';
+    const rows = users.filter(user => [user.id, user.customerNo, user.name, user.username, user.phone, user.memberRoleLabel].some(value => String(value || '').toLowerCase().includes(query)));
+    body.innerHTML = rows.map(user => `<tr><td><strong>${e(user.customerNo || user.id)}</strong><small>${e(user.id)}</small></td><td><span class="owner-staff-avatar" aria-label="${e(user.name)}的头像">${e(String(user.name || '?').slice(0, 1))}</span><b class="user-name-cell">${e(user.name)}</b></td><td>${e(user.username || '—')}</td><td>${e(user.phone || '未填写')}</td><td><span class="owner-status ${user.joinedClub ? '' : 'off'}">${user.joinedClub ? e(user.memberRoleLabel || '已加入') : '未加入'}</span></td><td>${money(user.balanceCents)}</td><td>${number(user.orderCount)}</td><td>${number(user.completedOrderCount)}</td><td>${money(user.totalSpentCents)}</td><td><span class="owner-status ${user.active ? '' : 'off'}">${user.active ? '正常' : '停用'}</span></td></tr>`).join('') || '<tr><td colspan="10"><div class="owner-empty">没有找到符合条件的用户</div></td></tr>';
   };
   input.oninput = draw;
   draw();

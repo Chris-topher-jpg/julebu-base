@@ -85,10 +85,6 @@ function bindSharedActions() {
     document.querySelectorAll('[data-searchable]').forEach(item => { const visible = item.textContent.toLowerCase().includes(query); item.hidden = !visible; if (visible) count++; });
     document.querySelector('#noSearchResults').hidden = count > 0 || !query;
   });
-  document.querySelectorAll('[data-club-action]').forEach(el => el.onclick = () => {
-    if (el.dataset.clubAction === 'scroll') document.querySelector('#club-games')?.scrollIntoView({ behavior: 'smooth' });
-    if (el.dataset.clubAction === 'toast') toast(`已向 ${el.dataset.name || '陪玩'} 发起聊天，客服会尽快响应`);
-  });
 }
 function pageContent() {
   const pages = { examinerCandidates: examinerCandidatesPage, overview, orders: () => orderPage(false), orderList: () => orderPage(false), transferOrders: () => orderPage(false), dispatchOrders: dispatchPage, myOrders: () => orderPage(true), dispatch: dispatchPage, availableOrders: availablePage, conversations: conversationPage, myEarnings: earningsPage, accounts: accountsPage, escorts: membersPage, catalog: catalogPage, flows: flowPage, topups: topupsPage, settlements: settlementsPage };
@@ -100,37 +96,13 @@ function overview() {
   if(w.user.role==='examiner') return intro('考官工作台','查看俱乐部陪玩的等级与游戏资料。') + panel('考核资料','由负责人在成员管理中统一维护',`<div class="owner-subnav"><button data-page="examinerCandidates">陪玩游戏资料 →</button></div>`);
   if(w.user.role==='afterSales') return intro('售后工作台','跟进退款、订单验收和客户会话。') + `<section class="stats">${metric('退款待跟进',w.orders.filter(o=>o.status==='退款审核').length,'及时处理售后申请','orange','receipt')}${metric('待验收订单',w.orders.filter(o=>o.status==='待验收').length,'核对服务完成情况','green','trend')}${metric('待跟进会话',w.conversations.filter(c=>c.state!=='已结束').length,'回复客户并记录结果','blue','users')}</section>` + panel('售后业务','选择要处理的事项',`<div class="owner-subnav"><button data-page="orders">订单管理 →</button><button data-page="conversations">会话中心 →</button></div>`);
   if(w.user.role==='finance') return intro('财务工作台','处理充值审核、资金流水与提现结算。') + `<section class="stats">${metric('待审核充值',w.topups.filter(t=>t.state==='待审核').length,'核实实际收款后入账','blue','wallet')}${metric('待审核提现',w.withdrawals.filter(t=>t.status==='待审核').length,'审核后安排线下打款','orange','receipt')}</section>` + panel('财务业务','按实际凭证核验',`<div class="owner-subnav"><button data-page="topups">充值审核</button><button data-page="flows">资金流水</button><button data-page="settlements">提现与结算</button></div>`);
-  if(w.user.role==='member') return clubHomePage();
+  if(w.user.role==='member') return intro('我的成员信息','你已加入星河游戏俱乐部。') + panel('当前身份',w.user.roleLabel,`<p>成员：${e(w.user.name)}</p><p>用户ID：${e(w.user.memberNo)}</p><p>业务权限由俱乐部会长设置，开通陪玩后可使用接单功能。</p>`);
   const pending = w.orders.filter(o => ['待接单', '待确认', '待服务'].includes(o.status));
   const live = w.orders.filter(o => o.status === '陪玩中');
   const review = w.orders.filter(o => o.status === '待验收');
   const day = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
   const stats = mine ? metric('可接订单', w.availableOrders.length, '匹配你的游戏项目', 'orange', 'game') + metric('我的待办', pending.length, '待确认或待开始服务', 'purple', 'receipt') + metric('可提现收益', money(w.wallet.balanceCents), '验收通过后入账', 'green', 'wallet') + metric('进行中的服务', live.length, '同一时段专心服务一单', 'blue', 'headset') : metric('待派单', w.orders.filter(o => o.status === '待接单').length, '已收款，等待匹配成员', 'orange', 'game') + metric('服务进行中', live.length, '及时跟进服务状态', 'purple', 'headset') + metric('完单待验收', review.length, '核验后计入成员收益', 'green', 'receipt') + metric('待跟进会话', w.conversations.filter(c => c.state !== '已结束').length, '客户咨询与售后记录', 'blue', 'users');
   return `<section class="welcome"><div><p class="eyebrow">${day}</p><h1>欢迎回来，${e(w.user.name)}<span>。</span></h1><p class="subline">${mine ? '你的接单、服务与收益，都在这里。' : '从客户咨询到服务验收，让每一单都有着落。'}</p></div><span class="workspace-tag">${mine ? '我的专属工作台' : '俱乐部运营概况'}</span></section><section class="stats">${stats}</section><section class="grid-row">${panel(mine ? '我的服务待办' : '需要跟进的订单', '按订单状态推进下一步', orderList([...review, ...live, ...pending].slice(0, 4), mine), `<button class="text-btn" data-page="${mine ? 'myOrders' : 'orders'}">查看全部 →</button>`)}${panel(mine ? '接单机会' : '协作流程', mine ? '只展示你支持的游戏' : '职责独立，订单信息同步', mine ? (w.availableOrders.slice(0, 3).map(o => `<div class="dispatch-mini-row"><div class="event-date ${o.tone || 'purple'}">${icon('game')}</div><div class="event-info"><strong>${e(o.game)} · ${e(o.product)}</strong><span>${o.hours} 小时 · ${money(o.amountCents)}</span></div><button class="text-btn" data-page="availableOrders">查看 →</button></div>`).join('') || empty('暂时没有匹配的新订单')) : `<div class="workflow"><div><b>01</b><strong>客服创建订单</strong><span>确认游戏、时长和收款</span></div><div><b>02</b><strong>匹配与确认接单</strong><span>按游戏匹配在线成员</span></div><div><b>03</b><strong>打手服务与完单</strong><span>记录服务过程，提交完单说明</span></div><div><b>04</b><strong>客服验收，收益入账</strong><span>管理员独立审核充值和提现</span></div></div>`)}</section>${panel('我的权限', '由俱乐部管理员统一分配', `<div class="permission-chips">${w.role.pages.map(p => `<span>${labels[p]}</span>`).join('')}</div>`)}`;
-}
-function clubHomePage() {
-  const w = state.workspace;
-  const games = [
-    { name: '王者荣耀', icon: '王', tone: 'purple', desc: '排位上分 · 娱乐开黑', online: 18 },
-    { name: '无畏契约', icon: '无', tone: 'orange', desc: '竞技上分 · 战术配合', online: 9 },
-    { name: '和平精英', icon: '和', tone: 'green', desc: '开黑吃鸡 · 轻松陪伴', online: 12 },
-    { name: '英雄联盟', icon: '英', tone: 'blue', desc: '双排陪玩 · 默契上分', online: 7 },
-  ];
-  const members = [
-    { name: '米粒', initials: '米', tone: 'purple', game: '王者荣耀', price: 68, rating: '4.9', orders: 42, state: '在线' },
-    { name: '小满', initials: '小', tone: 'orange', game: '英雄联盟', price: 88, rating: '4.8', orders: 36, state: '陪玩中' },
-    { name: '阿九', initials: '阿', tone: 'green', game: '无畏契约', price: 78, rating: '4.7', orders: 29, state: '在线' },
-    { name: '七喜', initials: '七', tone: 'navy', game: '和平精英', price: 58, rating: '4.6', orders: 18, state: '在线' },
-    { name: '桃桃', initials: '桃', tone: 'pink', game: '王者荣耀', price: 62, rating: '4.9', orders: 24, state: '在线' },
-    { name: '星野', initials: '星', tone: 'blue', game: 'Apex', price: 72, rating: '4.8', orders: 31, state: '在线' },
-  ];
-  return `<div class="club-home">
-    <header class="club-home-nav"><div class="club-home-brand"><span class="club-home-mark">C</span><strong>星河陪玩俱乐部</strong><small>专业 · 有趣 · 随时开黑</small></div><nav><a class="active" href="#/overview">首页</a><a href="#/overview">陪玩大厅</a><a href="#/overview">我的订单</a><a href="#/overview">会员中心</a></nav><div class="club-home-user"><span class="club-home-avatar">${e(w.user.name.slice(0,1))}</span><span>${e(w.user.name)}</span><button class="club-home-logout" data-action="logout">退出</button></div></header>
-    <section class="club-hero"><div><p class="club-kicker">WELCOME TO STAR RIVER CLUB</p><h1>今晚，和喜欢的人<br><em>一起赢下每一局。</em></h1><p>王者荣耀、无畏契约、和平精英等热门游戏，<br>在线陪玩随时响应，找到适合你的开黑搭子。</p><div class="club-hero-actions"><button class="club-primary" data-club-action="scroll">寻找陪玩 ${icon('arrow', 16)}</button><button class="club-secondary" data-club-action="scroll">浏览游戏</button></div></div><div class="club-hero-art"><div class="hero-bubble bubble-one">今晚一起上分吗？</div><div class="hero-bubble bubble-two">已为你匹配到 12 位在线陪玩</div><div class="hero-orbit orbit-one"></div><div class="hero-orbit orbit-two"></div><div class="hero-character">✦</div></div></section>
-    <section class="club-section" id="club-games"><div class="club-section-head"><div><p class="club-kicker">EXPLORE GAMES</p><h2>选择你想玩的游戏</h2></div><button class="club-link" data-club-action="scroll">查看全部 ${icon('arrow', 14)}</button></div><div class="club-game-grid">${games.map(g => `<article class="club-game-card ${g.tone}"><div class="club-game-icon">${g.icon}</div><div><h3>${g.name}</h3><p>${g.desc}</p><small><i></i>${g.online} 位陪玩在线</small></div><span class="club-card-arrow">${icon('arrow', 15)}</span></article>`).join('')}</div></section>
-    <section class="club-section"><div class="club-section-head"><div><p class="club-kicker">ONLINE COMPANIONS</p><h2>正在在线的陪玩</h2></div><div class="club-filter"><button class="active">综合推荐</button><button>评分最高</button><button>价格优先</button></div></div><div class="club-member-grid">${members.map(m => `<article class="club-member-card"><div class="club-member-cover ${m.tone}"><span class="club-member-avatar">${m.initials}</span><span class="club-online ${m.state==='在线'?'is-online':''}"><i></i>${m.state}</span><span class="club-cover-spark">✦</span></div><div class="club-member-body"><div class="club-member-title"><h3>${m.name}</h3><span>Lv. ${m.rating}</span></div><p>${m.game} · 技术陪玩</p><div class="club-member-meta"><span>★ ${m.rating} <small>好评率</small></span><span>${m.orders} 单 <small>已完成</small></span><strong>¥${m.price}<small>/小时</small></strong></div><button class="club-order-btn" data-club-action="toast" data-name="${m.name}">聊一聊 ${icon('arrow', 14)}</button></div></article>`).join('')}</div></section>
-    <footer class="club-footer"><span>© 2026 星河游戏俱乐部</span><span>服务时间 09:00 - 02:00 · 客服在线</span></footer>
-  </div>`;
 }
 function orderList(list, mine) {
   if (!list.length) return empty('暂无待处理订单');

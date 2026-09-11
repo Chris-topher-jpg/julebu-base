@@ -125,3 +125,23 @@ test('成员可冻结不超过可提现余额的金额，冻结余额单独展�
   const status = store.membershipAction(admin, member.id, 'status', { active: false, memberVersion: frozen.memberVersion });
   assert.equal(status.active, false); assert.equal(store.session(token), undefined);
 });
+
+test('用户按 ID 入会不创建登录账号，并在用户管理同步职责', () => {
+  const store = new ClubStore(':memory:');
+  try {
+    const admin = store.read().users.find(u => u.id === 'admin');
+    const before = store.read().users.length;
+    const added = store.accountAction(admin, null, { action: 'joinById', userId: 'U100001' });
+    assert.equal(store.read().users.length, before + 1);
+    assert.equal(added.memberNo, 'U100001');
+    assert.equal(store.read().users.some(u => u.username === 'zhouzhiyuan'), false);
+    let user = store.workspace(admin).users.find(u => u.customerNo === 'U100001');
+    assert.equal(user.joinedClub, true);
+    assert.equal(user.memberRoleLabel, '普通成员');
+    const member = store.read().users.find(u => u.id === added.id);
+    store.membershipAction(admin, added.id, 'escort', { memberVersion: member.memberVersion, games: ['王者荣耀'], levelId: 'gold', depositCents: 100000 });
+    user = store.workspace(admin).users.find(u => u.customerNo === 'U100001');
+    assert.equal(user.memberRoleLabel, '打手');
+    assert.throws(() => store.accountAction(admin, null, { action: 'joinById', userId: 'U100001' }), /已经是俱乐部成员/);
+  } finally { store.close(); }
+});
