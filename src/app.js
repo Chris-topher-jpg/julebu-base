@@ -87,7 +87,7 @@ function bindSharedActions() {
   });
 }
 function pageContent() {
-  const pages = { examinerCandidates: examinerCandidatesPage, overview, orders: () => orderPage(false), myOrders: () => orderPage(true), dispatch: dispatchPage, availableOrders: availablePage, conversations: conversationPage, myEarnings: earningsPage, accounts: accountsPage, escorts: membersPage, catalog: catalogPage, flows: flowPage, topups: topupsPage, settlements: settlementsPage };
+  const pages = { examinerCandidates: examinerCandidatesPage, overview, orders: () => orderPage(false), orderList: () => orderPage(false), transferOrders: () => orderPage(false), dispatchOrders: dispatchPage, myOrders: () => orderPage(true), dispatch: dispatchPage, availableOrders: availablePage, conversations: conversationPage, myEarnings: earningsPage, accounts: accountsPage, escorts: membersPage, catalog: catalogPage, flows: flowPage, topups: topupsPage, settlements: settlementsPage };
   return pages[state.page]();
 }
 function examinerCandidatesPage() { return intro('陪玩技能资料','查看陪玩的统一等级、游戏技能及账号状态。') + panel('陪玩技能资料','由负责人设置考官身份后使用。',table(['成员','等级','游戏技能','状态'],(state.workspace.members||[]).map(u=>row([e(u.name),e(u.levelName||'—'),e(u.games.join(' / ')),badge(u.active?'启用':'停用')])))); }

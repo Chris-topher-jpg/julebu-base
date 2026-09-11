@@ -7,7 +7,7 @@ import { FOUR_HOURS, clubDay, metrics, dateRange, trend, ranking, analyticsOptio
 import { defaultLevels, levelOf, meetsLevel, rateOf, hasOpenOrders, profileConflicts, migrateMembership, memberRecord, lockEarnings } from './membership.mjs';
 
 export const roles = {
-  admin: { label: '最高负责人', tone: 'purple', pages: ['overview', 'clubConfig', 'memberManagement', 'clubMembers', 'clubEscorts', 'serviceManagement', 'examinerManagement', 'afterSales', 'orders', 'dispatch', 'conversations', 'escorts', 'catalog', 'topups', 'flows', 'settlements', 'accounts'], permissions: ['analytics:view', 'order:view', 'order:create', 'order:dispatch', 'order:review', 'conversation:manage', 'finance:manage', 'account:manage'] },
+  admin: { label: '最高负责人', tone: 'purple', pages: ['overview', 'clubConfig', 'memberManagement', 'clubMembers', 'clubEscorts', 'serviceManagement', 'examinerManagement', 'afterSales', 'financeManagement', 'financeList', 'commissionConfig', 'orderManagement', 'orderList', 'transferOrders', 'dispatchOrders', 'orders', 'dispatch', 'conversations', 'escorts', 'catalog', 'topups', 'flows', 'settlements', 'accounts'], permissions: ['analytics:view', 'order:view', 'order:create', 'order:dispatch', 'order:review', 'conversation:manage', 'finance:manage', 'account:manage'] },
   service: { label: '俱乐部客服', tone: 'orange', pages: ['overview', 'orders', 'conversations', 'dispatch'], permissions: ['order:view', 'order:create', 'order:dispatch', 'order:review', 'conversation:manage'] },
   examiner: { label: '俱乐部考官', tone: 'blue', pages: ['overview', 'examinerCandidates'], permissions: ['member:skills:view'] },
   afterSales: { label: '俱乐部售后', tone: 'pink', pages: ['overview', 'orders', 'conversations'], permissions: ['order:view', 'order:review', 'conversation:manage'] },
@@ -45,7 +45,7 @@ function initialState() {
     { id: 'service', username: 'service', name: '小林', role: 'service' },
     ...seed.escorts.map((e, i) => ({ id: logins[i], username: logins[i], name: e.name, role: 'escort', games: e.games.split(' · '), shareBps: parseInt(e.share) * 100 || 7000, online: ['在线', '陪玩中'].includes(e.state), active: e.state !== '待审核', depositCents: 100000, balanceCents: cents(e.balance) })),
   ].map(u => ({ active: true, online: false, games: [], balanceCents: 0, depositCents: 0, shareBps: 0, ...u, passwordHash: passwordHash(['admin', 'service', 'escort'].includes(u.username) ? '123456' : randomBytes(24).toString('hex')) }));
-  const games = [...seed.games, { name: 'Apex', category: 'FPS', multiplier: '1.00x', min: 1, max: 3, state: '上架', tone: 'green' }].map(g => ({ ...g, multiplierBps: Math.round(parseFloat(g.multiplier) * 10000) }));
+  const games = [...seed.games, { name: 'Apex', category: 'FPS', multiplier: '1.00x', min: 1, max: 3, state: '上架', tone: 'green' }].map(g => ({ ...g, multiplierBps: Math.round(parseFloat(g.multiplier) * 10000), ...(Number.isInteger(g.commissionBps) ? { commissionBps: g.commissionBps } : {}) }));
   const products = seed.products.map((p, i) => ({ ...p, id: `product-${i + 1}`, priceCents: cents(p.price) }));
   const time = Date.now();
   const orders = seed.orders.map((o, i) => {
@@ -138,11 +138,11 @@ export class ClubStore {
     requireThat(user, '账号已停用', 401);
     const mine = data.orders.filter(o => o.participants.some(p => p.userId === user.id)).map(o => ({ ...o, participants: o.participants.map(p => p.userId === user.id ? p : { userId: p.userId, name: p.name, accepted: p.accepted, finished: p.finished }) }));
     const available = data.orders.filter(o => o.status === '待接单' && !o.participants.length && !user.escortFrozen && user.games.includes(o.game) && meetsLevel(data, user, o) && data.games.find(g => g.name === o.game)?.state === '上架').map(o => {
-      const rate = rateOf(data, user);
+      const rate = rateOf(data, user, o.game);
       return { ...o, expectedShareBps: rate, expectedIncomeCents: Math.round(o.amountCents * rate / 10000) };
     });
     const common = { user: publicUser(user), role: roles[user.role], levels: data.levels, revision: data.revision, clubName: '星河游戏俱乐部' };
-    if (user.role === 'escort') return { ...common, orders: mine, availableOrders: available, wallet: { balanceCents: user.balanceCents, depositCents: user.depositCents, frozenCents: data.withdrawals.filter(w => w.userId === user.id && w.status === '待审核').reduce((a, w) => a + w.amountCents, 0) }, ledger: data.ledger.filter(l => l.userId === user.id), withdrawals: data.withdrawals.filter(w => w.userId === user.id) };
+    if (user.role === 'escort') return { ...common, user: { ...publicUser(user), commissionByGame: Object.fromEntries((user.games || []).map(game => [game, rateOf(data, user, game)])) }, orders: mine, availableOrders: available, wallet: { balanceCents: user.balanceCents, depositCents: user.depositCents, frozenCents: data.withdrawals.filter(w => w.userId === user.id && w.status === '待审核').reduce((a, w) => a + w.amountCents, 0) }, ledger: data.ledger.filter(l => l.userId === user.id), withdrawals: data.withdrawals.filter(w => w.userId === user.id) };
     if (user.role === 'member') return common;
     if (user.role === 'finance') return { ...common, topups: data.topups, ledger: data.ledger, withdrawals: data.withdrawals, settlements: data.settlements };
     if (user.role === 'examiner') return { ...common, levels: data.levels.map(({ id, name, rank }) => ({ id, name, rank })), members: data.users.filter(u => u.role === 'escort').map(u => ({ id: u.id, memberNo: u.memberNo, name: u.name, active: u.active, games: u.games, levelId: u.levelId, levelName: levelOf(data, u.levelId)?.name || '' })) };
@@ -197,7 +197,7 @@ export class ClubStore {
         requireThat(game?.state === '上架' && ids.length >= game.min && ids.length <= game.max, '游戏不可接单或陪玩人数超出游戏限制');
         const members = ids.map(id => data.users.find(u => u.id === id));
         requireThat(members.every(m => this.assignable(data, order, m)), '成员必须已启用、未冻结、在线、支持此游戏，且等级不低于订单等级');
-        const participants = members.map(m => ({ userId: m.id, name: m.name, levelId: m.levelId, levelName: levelOf(data, m.levelId).name, baseShareBps: rateOf(data, m), shareBps: Math.floor(rateOf(data, m) / members.length), accepted: action === 'accept', finished: false, evidence: '' }));
+        const participants = members.map(m => ({ userId: m.id, name: m.name, levelId: m.levelId, levelName: levelOf(data, m.levelId).name, baseShareBps: rateOf(data, m, order.game), shareBps: Math.floor(rateOf(data, m, order.game) / members.length), accepted: action === 'accept', finished: false, evidence: '' }));
         requireThat(participants.reduce((a, p) => a + p.shareBps, 0) <= 10000, '陪玩分成合计超过 100%，请调整成员或分成配置');
         lockEarnings(order.amountCents, participants);
         order.participants = participants;
@@ -324,7 +324,7 @@ export class ClubStore {
     requireThat(levelOf(data, levelId), '请选择有效的陪玩等级');
     const next = { ...target, games: [...new Set(games)], levelId };
     requireThat(!profileConflicts(data, next), '此变更会使成员不再符合已派订单要求，请先退回待确认或待服务订单', 409);
-    Object.assign(target, { games: next.games, levelId, shareBps: rateOf(data, next) });
+    Object.assign(target, { games: next.games, levelId, shareBps: rateOf(data, next, next.games[0]) });
     if (!games.length) { target.online = false; target.examiner = false; }
   }
   membershipAction(user, id, action, input) {
@@ -386,8 +386,18 @@ export class ClubStore {
       const levels = defaultLevels.map(level => ({ ...level, shareBps: input.levels.find(l => l.id === level.id)?.shareBps }));
       requireThat(levels.every((l, i) => Number.isInteger(l.shareBps) && l.shareBps > 0 && l.shareBps <= 10000 && (!i || levels[i-1].shareBps > l.shareBps)), '分成须大于 0 且不超过 100%，从明星到金牌依次递减');
       data.levels = levels;
-      for (const target of data.users.filter(u => u.role === 'escort')) { target.shareBps = rateOf(data, target); target.memberVersion++; }
+      for (const target of data.users.filter(u => u.role === 'escort')) { target.shareBps = rateOf(data, target, target.games?.[0]); target.memberVersion++; }
       return levels;
+    });
+  }
+  configureCommissions(user, input) {
+    return this.transaction(user, 'finance:manage', '更新游戏抽佣配置', data => {
+      requireThat(Array.isArray(input.games) && input.games.length === data.games.length, '抽佣配置数据不完整');
+      const ids = new Set(data.games.map(g => g.name));
+      requireThat(input.games.every(g => ids.has(g.name) && Number.isInteger(g.commissionBps) && g.commissionBps > 0 && g.commissionBps <= 10000), '抽佣比例需为 0.01%–100%');
+      for (const item of input.games) data.games.find(g => g.name === item.name).commissionBps = item.commissionBps;
+      for (const target of data.users.filter(u => u.role === 'escort')) { target.shareBps = rateOf(data, target, target.games?.[0]); target.memberVersion++; }
+      return data.games.map(({ name, commissionBps }) => ({ name, commissionBps }));
     });
   }
   accountAction(user, id, input) {

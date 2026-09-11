@@ -93,3 +93,20 @@ test('负责人陪玩押金使用实际账户金额，与陪玩本人钱包一�
   }
   assert.equal(w.members.find(u => u.id === added.id).depositCents, 0);
 });
+
+test('抽佣配置按游戏技能生效，等级只负责接单门槛且已派订单比例锁定', t => {
+  const store = new ClubStore(':memory:'); t.after(() => store.close());
+  const admin = store.read().users.find(u => u.id === 'admin');
+  const escort = store.read().users.find(u => u.id === 'escort');
+  const game = store.read().games.find(g => g.name === escort.games[0]);
+  store.configureCommissions(admin, { games: store.read().games.map(g => ({ name: g.name, commissionBps: g.name === game.name ? 6100 : 7200 })) });
+  const first = store.workspace(escort);
+  assert.equal(first.user.commissionByGame[game.name], 6100);
+  const order = store.createOrder(admin, { boss:'抽佣测试老板', productId:'product-1', hours:1, requirement:'测试游戏抽佣', pay:'线下已收款', levelId:'gold' });
+  store.setOnline(escort, { online: true });
+  const accepted = store.orderAction(escort, order.id, 'accept', { version: order.version });
+  assert.equal(accepted.participants[0].baseShareBps, 6100);
+  store.configureCommissions(admin, { games: store.read().games.map(g => ({ name: g.name, commissionBps: g.name === game.name ? 6200 : 7200 })) });
+  assert.equal(store.read().orders.find(o => o.id === order.id).participants[0].shareBps, 6100);
+  assert.equal(store.workspace(escort).user.commissionByGame[game.name], 6200);
+});

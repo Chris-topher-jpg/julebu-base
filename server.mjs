@@ -73,6 +73,7 @@ export function createClubServer({ database = resolve(root, 'data/club.sqlite') 
         const examiner = url.pathname.match(/^\/api\/examiners\/([^/]+)$/);
         if (examiner) return json(store.examinerAction(user, examiner[1], body));
         if (url.pathname === '/api/levels') return json(store.configureLevels(user, body));
+        if (url.pathname === '/api/commissions') return json(store.configureCommissions(user, body));
         if (url.pathname === '/api/members/skills') return json(store.bindSkills(user, body));
         const member = url.pathname.match(/^\/api\/members\/([^/]+)\/([^/]+)$/);
         if (member) return json(store.membershipAction(user, member[1], member[2], body));

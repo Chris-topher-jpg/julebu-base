@@ -6,7 +6,10 @@ export const defaultLevels = [
 ];
 export const levelOf = (data, id) => data.levels.find(level => level.id === id);
 export const meetsLevel = (data, user, order) => (levelOf(data, user.levelId)?.rank || 0) >= (levelOf(data, order.levelId)?.rank || Infinity);
-export const rateOf = (data, user) => levelOf(data, user.levelId)?.shareBps || 0;
+export const rateOf = (data, user, gameName = '') => {
+  const game = gameName && data.games.find(g => g.name === gameName);
+  return Number.isInteger(game?.commissionBps) ? game.commissionBps : Number(user.commissionBps ?? levelOf(data, user.levelId)?.shareBps ?? user.shareBps ?? 7000);
+};
 export function lockEarnings(amountCents, participants) {
   const values = participants.map((p, i) => ({ i, numerator: amountCents * p.shareBps }));
   let remainder = Math.round(values.reduce((sum, v) => sum + v.numerator, 0) / 10000);
@@ -20,14 +23,18 @@ export const profileConflicts = (data, user) => data.orders.some(order => ['待�
 
 // Upgrade existing local data once, preserving order prices and locked participant shares.
 export function migrateMembership(data) {
-  if (data.membershipVersion === 1) return false;
+  if (data.membershipVersion === 2) return false;
+  if (data.membershipVersion === 1) {
+    data.membershipVersion = 2;
+    return true;
+  }
   data.levels = structuredClone(defaultLevels);
   data.users.forEach((user, i) => {
     user.memberNo ||= String(81000001 + i);
     user.levelId = user.role === 'escort' ? 'gold' : null;
     user.escortFrozen = false;
     user.memberVersion = 1;
-    if (user.role === 'escort') user.shareBps = rateOf(data, user);
+    if (user.role === 'escort') user.shareBps = rateOf(data, user, user.games?.[0]);
   });
   data.orders.forEach(order => { order.levelId ||= 'gold'; order.levelName ||= '金牌'; });
   const skills = [
@@ -36,7 +43,7 @@ export function migrateMembership(data) {
     { name: '金铲铲之战', category: '策略', state: '上架' },
   ];
   for (const game of skills) if (!data.games.some(g => g.name === game.name)) data.games.push({ ...game, min: 1, max: 3, multiplier: '1.00x', multiplierBps: 10000, tone: 'green' });
-  data.membershipVersion = 1;
+  data.membershipVersion = 2;
   return true;
 }
 
@@ -46,7 +53,8 @@ export function memberRecord(data, user, publicUser) {
   return {
     ...publicUser(user),
     levelName: levelOf(data, user.levelId)?.name || '',
-    shareBps: user.role === 'escort' ? rateOf(data, user) : 0,
+    shareBps: user.role === 'escort' ? rateOf(data, user, user.games?.[0]) : 0,
+    commissionByGame: user.role === 'escort' ? Object.fromEntries((user.games || []).map(name => [name, rateOf(data, user, name)])) : {},
     takingStatus: user.role !== 'escort' ? '未开通' : busy ? '接单中' : user.online ? '空闲' : '离线',
     balanceCents: user.balanceCents,
     depositCents: user.depositCents ?? 0,
