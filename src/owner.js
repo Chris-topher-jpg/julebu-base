@@ -1,5 +1,5 @@
 import { escapeHtml as e, icon } from './ui.js';
-import { membersMarkup, bindMembers, openMemberRole } from './members.js';
+import { membersMarkup, bindMembers } from './members.js';
 
 const names = { overview: '首页', clubConfig: '俱乐部配置', memberManagement: '成员管理', serviceManagement: '客服管理', examinerManagement: '考官管理', afterSales: '售后管理' };
 const navIcons = { overview: 'grid', clubConfig: 'game', memberManagement: 'users', serviceManagement: 'headset', examinerManagement: 'headset', afterSales: 'receipt' };
@@ -49,7 +49,9 @@ function groupContent(page, w) {
 }
 function staffPanel(w, role, title, scope) {
   const rows=w.staffGroups[role];
-  return `<section class="owner-panel"><div class="owner-section-head"><h2>${title}</h2><button class="owner-primary" data-page="clubMembers">设置成员身份</button></div><p class="owner-update">共 ${rows.length} 人 · 在成员管理设置身份后自动同步</p><div class="owner-standard-table"><table><thead><tr><th>用户ID</th><th>成员</th><th>账号</th><th>身份</th><th>状态</th><th>业务范围</th><th>操作</th></tr></thead><tbody>${rows.map(u=>`<tr><td>${e(u.memberNo)}</td><td>${e(u.name)}</td><td>${e(u.username)}</td><td>${e(u.roleLabel)}</td><td><span class="owner-status ${u.active?'':'off'}">${u.active?'正常':'停用'}</span></td><td>${scope}</td><td><button class="owner-link" data-staff-role="${e(u.id)}">设置角色</button></td></tr>`).join('')||`<tr><td colspan="7">暂无${title}成员，请在成员管理设置身份。</td></tr>`}</tbody></table></div></section>`;
+  const status = u => `<span class="owner-status ${u.active?'':'off'}">${u.active?'正常':'停用'}</span>`;
+  const online = u => `<span class="owner-status ${u.online?'online':''}">${u.online?'在线':'离线'}</span>`;
+  return `<section class="owner-panel"><div class="owner-section-head"><h2>${title}</h2><span class="owner-update">共 ${rows.length} 人 · 在成员管理设置身份后自动同步</span></div><div class="owner-standard-table"><table><thead><tr><th>用户ID</th><th>昵称</th><th>头像</th><th>成员状态</th><th>在线状态</th><th>身份</th></tr></thead><tbody>${rows.map(u=>`<tr><td>${e(u.memberNo)}</td><td>${e(u.name)}</td><td><span class="owner-staff-avatar" aria-label="${e(u.name)}的头像">${e(u.name.slice(0,1))}</span></td><td>${status(u)}</td><td>${online(u)}</td><td>${e(u.roleLabel)}</td></tr>`).join('')||`<tr><td colspan="6">暂无${title}成员，请在成员管理设置身份。</td></tr>`}</tbody></table></div></section>`;
 }
 export function renderOwner(ctx) {
   context = ctx; clearTimeout(refreshTimer);
@@ -59,7 +61,6 @@ export function renderOwner(ctx) {
   document.querySelector('#app').innerHTML=`<div class="owner-shell ${view.collapsed?'is-collapsed':''}"><aside class="owner-sidebar"><div class="owner-brand"><span class="owner-brand-symbol">${icon('game',24)}</span><strong>${e(w.clubName)}</strong></div><nav aria-label="最高负责人主导航">${ownerNavigation(active,page)}</nav></aside><main class="owner-main"><header class="owner-topbar"><div><button class="owner-icon-button" id="collapseOwnerNav" aria-label="${view.collapsed?'展开':'收起'}侧边栏" aria-expanded="${!view.collapsed}"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 5h18M3 12h7M3 19h18m5-10-3 3 3 3"/></svg></button><span class="owner-breadcrumb">${title}</span></div><div class="owner-top-actions"><button class="owner-link" id="metricRules">统计口径</button><span class="owner-user-avatar">${icon('users',20)}</span><span class="owner-username">${e(w.user.name)}</span><span class="owner-role">最高负责人</span><button class="owner-icon-button" data-action="logout" aria-label="退出登录">退出</button></div></header><div class="owner-page-tabs"><span class="owner-page-tab"><i></i>${title}</span></div><div class="owner-content" id="ownerContent">${page==='overview'?home():groupContent(page,w)}</div></main></div>`;
   document.querySelector('#collapseOwnerNav').onclick=()=>{ view.collapsed=!view.collapsed; document.querySelector('.owner-shell').classList.toggle('is-collapsed',view.collapsed); document.querySelector('#collapseOwnerNav').setAttribute('aria-expanded',String(!view.collapsed)); };
   document.querySelector('#metricRules').onclick=()=>ctx.dialog('经营数据统计口径', `<p>金额以人民币元展示，内部以整数分汇总。</p><p>完成金额、完成笔数：按完成时间统计当前已完成订单。下单人数：按下单时间对客户去重；历史账号缺少客户 ID 时使用老板称呼。</p><p>日期按北京时间 00:00 至次日 00:00 计算，结束日期包含当天。总数据每四小时更新，日经营数据每五分钟刷新。</p><p>排名只包含已完成订单。陪玩榜每位成员统计参与订单的全额，同一多人订单可出现在多位成员下，成员金额不能相加作为俱乐部 GMV，也不等于个人到手收益。</p><p>旧示例订单未记录完成时间时使用示例下单时间。真实订单缺少完成时间时不纳入日期统计。</p>`);
-  document.querySelectorAll('[data-staff-role]').forEach(btn=>btn.onclick=()=>openMemberRole(ctx,btn.dataset.staffRole));
   document.querySelectorAll('[data-page]').forEach(btn=>btn.onclick=()=>ctx.navigate(btn.dataset.page));
   document.querySelector('#memberNavGroup').onclick=()=>{membersExpanded=!membersExpanded;document.querySelector('#memberSubmenu').hidden=!membersExpanded;document.querySelector('#memberNavGroup').setAttribute('aria-expanded',String(membersExpanded));};
   if(['clubMembers','clubEscorts','memberManagement','accounts','escorts'].includes(page)) bindMembers(['clubEscorts','escorts'].includes(page)?'clubEscorts':'clubMembers');
