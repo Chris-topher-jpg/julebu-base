@@ -121,9 +121,13 @@ export function renderOwner(ctx) {
   const w=ctx.state.workspace; const page=ctx.state.page; const active=parent[page]||page; const title=pageNames[page]||'首页';
   view.generation++;
   if(active==='memberManagement') membersExpanded=true;
-  document.querySelector('#app').innerHTML=`<div class="owner-shell ${view.collapsed?'is-collapsed':''}"><aside class="owner-sidebar"><div class="owner-brand"><span class="owner-brand-symbol">${icon('game',24)}</span><strong>${e(w.clubName)}</strong></div><nav aria-label="最高负责人主导航">${ownerNavigation(active,page)}</nav></aside><main class="owner-main"><header class="owner-topbar"><div><button class="owner-icon-button" id="collapseOwnerNav" aria-label="${view.collapsed?'展开':'收起'}侧边栏" aria-expanded="${!view.collapsed}"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 5h18M3 12h7M3 19h18m5-10-3 3 3 3"/></svg></button><span class="owner-breadcrumb">${title}</span></div><div class="owner-top-actions"><button class="owner-link" id="metricRules">统计口径</button><span class="owner-user-avatar">${icon('users',20)}</span><span class="owner-username">${e(w.user.name)}</span><span class="owner-role">最高负责人</span><button class="owner-icon-button" data-action="logout" aria-label="退出登录">退出</button></div></header><div class="owner-page-tabs"><span class="owner-page-tab"><i></i>${title}</span></div><div class="owner-content" id="ownerContent">${page==='overview'?home():groupContent(page,w)}</div></main></div>`;
+  const admin = w.user.role === 'admin';
+  const content = admin ? (page === 'overview' ? home() : groupContent(page,w)) : context.legacyContent();
+  const navigation = admin ? ownerNavigation(active,page) : restrictedNavigation(w, page);
+  const staffAction = !admin && w.user.role === 'escort' ? `<button class="owner-link" data-action="online">${w.user.online ? '在线接单中' : '离线接单'}</button>` : !admin && w.user.role === 'service' ? `<button class="owner-primary" data-action="newOrder">新建订单</button>` : '';
+  document.querySelector('#app').innerHTML=`<div class="owner-shell ${view.collapsed?'is-collapsed':''}"><aside class="owner-sidebar"><div class="owner-brand"><span class="owner-brand-symbol">${icon('game',24)}</span><strong>${e(w.clubName)}</strong></div><nav aria-label="${admin?'最高负责人':'职责'}主导航">${navigation}</nav></aside><main class="owner-main"><header class="owner-topbar"><div><button class="owner-icon-button" id="collapseOwnerNav" aria-label="${view.collapsed?'展开':'收起'}侧边栏" aria-expanded="${!view.collapsed}"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 5h18M3 12h7M3 19h18m5-10-3 3 3 3"/></svg></button><span class="owner-breadcrumb">${title}</span></div><div class="owner-top-actions">${admin?'<button class="owner-link" id="metricRules">统计口径</button>':''}${staffAction}<button class="owner-link" data-action="refresh">刷新</button><span class="owner-user-avatar">${icon('users',20)}</span><span class="owner-username">${e(w.user.name)}</span><span class="owner-role">${e(w.user.roleLabel)}</span><button class="owner-icon-button" data-action="logout" aria-label="退出登录">退出</button></div></header><div class="owner-page-tabs"><span class="owner-page-tab"><i></i>${title}</span></div><div class="owner-content" id="ownerContent">${content}</div></main></div>`;
   document.querySelector('#collapseOwnerNav').onclick=()=>{ view.collapsed=!view.collapsed; document.querySelector('.owner-shell').classList.toggle('is-collapsed',view.collapsed); document.querySelector('#collapseOwnerNav').setAttribute('aria-expanded',String(!view.collapsed)); };
-  document.querySelector('#metricRules').onclick=()=>ctx.dialog('经营数据统计口径', `<p>金额以人民币元展示，内部以整数分汇总。</p><p>完成金额、完成笔数：按完成时间统计当前已完成订单。下单人数：按下单时间对客户去重；历史账号缺少客户 ID 时使用老板称呼。</p><p>日期按北京时间 00:00 至次日 00:00 计算，结束日期包含当天。总数据每四小时更新，日经营数据每五分钟刷新。</p><p>排名只包含已完成订单。陪玩榜每位成员统计参与订单的全额，同一多人订单可出现在多位成员下，成员金额不能相加作为俱乐部 GMV，也不等于个人到手收益。</p><p>旧示例订单未记录完成时间时使用示例下单时间。真实订单缺少完成时间时不纳入日期统计。</p>`);
+  if(admin) document.querySelector('#metricRules').onclick=()=>ctx.dialog('经营数据统计口径', `<p>金额以人民币元展示，内部以整数分汇总。</p><p>完成金额、完成笔数：按完成时间统计当前已完成订单。下单人数：按下单时间对客户去重；历史账号缺少客户 ID 时使用老板称呼。</p><p>日期按北京时间 00:00 至次日 00:00 计算，结束日期包含当天。总数据每四小时更新，日经营数据每五分钟刷新。</p><p>排名只包含已完成订单。陪玩榜每位成员统计参与订单的全额，同一多人订单可出现在多位成员下，成员金额不能相加作为俱乐部 GMV，也不等于个人到手收益。</p><p>旧示例订单未记录完成时间时使用示例下单时间。真实订单缺少完成时间时不纳入日期统计。</p>`);
   document.querySelectorAll('[data-page]').forEach(btn=>btn.onclick=()=>ctx.navigate(btn.dataset.page));
   const toggleNav = (id,submenu) => { const button=document.querySelector(`#${id}`), menu=document.querySelector(`#${submenu}`); if(!button||!menu)return; button.onclick=()=>{const open=menu.hidden; menu.hidden=!open; button.setAttribute('aria-expanded',String(open));}; };
   toggleNav('memberNavGroup','memberManagementSubmenu');
@@ -135,10 +139,23 @@ export function renderOwner(ctx) {
   if(page==='financeList') bindFinanceSearch();
   if(['orderList','transferOrders','dispatchOrders'].includes(page)) bindOrderManagementSearch();
   if(['serviceManagement','examinerManagement','afterSales'].includes(page)) bindStaffManagement(page==='serviceManagement'?'service':page==='examinerManagement'?'examiner':'afterSales');
-  if(page==='overview') bindDashboard();
-  if(page==='overview') bindExports();
+  if(admin && page==='overview') bindDashboard();
+  if(admin && page==='overview') bindExports();
   if(page==='auditLog') bindAudit();
   if(page==='commissionConfig') document.querySelector('#commissionForm').onsubmit=async ev=>{ev.preventDefault();const form=ev.currentTarget;try{await ctx.api('/commissions',{games:w.games.map(g=>({name:g.name,commissionBps:Math.round(Number(form.elements[g.name].value)*100)}))});await ctx.refresh();ctx.toast('抽佣配置已保存');}catch(err){document.querySelector('#commissionError').textContent=err.message;}};
+}
+
+const restrictedGroups = {
+  service: [['overview','工作台'],['orders','订单管理'],['conversations','会话中心'],['dispatch','派单台']],
+  examiner: [['overview','工作台'],['examinerCandidates','陪玩游戏资料']],
+  afterSales: [['overview','工作台'],['orders','订单管理'],['conversations','会话中心']],
+  finance: [['overview','工作台'],['topups','充值审核'],['flows','资金流水'],['settlements','提现与结算']],
+  escort: [['overview','工作台'],['availableOrders','接单大厅'],['myOrders','我的订单'],['myEarnings','我的收益']],
+  member: [['overview','工作台']],
+};
+function restrictedNavigation(w, page) {
+  const items = restrictedGroups[w.user.role] || [['overview','工作台']];
+  return items.map(([target, label]) => `<button class="owner-nav-item ${page===target?'active':''}" data-page="${target}" aria-label="${label}" ${page===target?'aria-current="page"':''}>${icon(target==='overview'?'grid':target==='availableOrders'?'game':target==='myEarnings'?'wallet':target==='conversations'?'users':target==='dispatch'?'trend':target==='topups'?'wallet':target==='flows'?'trend':target==='settlements'?'wallet':target==='examinerCandidates'?'users':'receipt',17)}<span>${label}</span></button>`).join('');
 }
 export function leaveOwner() { clearTimeout(refreshTimer); view.generation++; }
 async function request(section, values={}) { return context.api(`/analytics/${section}?${new URLSearchParams(values)}`); }

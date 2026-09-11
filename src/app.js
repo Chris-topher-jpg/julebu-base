@@ -65,14 +65,7 @@ function renderApp() {
   const w = state.workspace; if (!w) return renderLogin();
   if (!w.role.pages.includes(state.page)) { state.page = 'overview'; history.replaceState(null, '', '#/overview'); }
   const u = w.user;
-  if (u.role === 'admin') {
-    renderOwner({ state, api, navigate, refresh, dialog, orderDetail, toast, legacyContent: pageContent });
-    bindSharedActions();
-    return;
-  }
-  leaveOwner();
-  const sidebar = w.role.pages.map(p => `<button class="nav-item ${state.page === p ? 'active' : ''}" data-page="${p}" aria-label="${labels[p]}" ${state.page === p ? 'aria-current="page"' : ''}>${icon(symbols[p], 18)}<span>${labels[p]}</span>${p === 'dispatch' ? `<em>${w.orders.filter(o => o.status === '待接单').length}</em>` : ''}</button>`).join('');
-  document.querySelector('#app').innerHTML = `<div class="shell role-shell"><aside class="sidebar"><div class="brand"><span class="brand-mark">C</span><span>clubhouse</span></div><div class="club-switch"><div class="club-avatar">星</div><div><strong>星河游戏俱乐部</strong><small>专属俱乐部工作空间</small></div></div><nav class="nav" aria-label="主导航"><div class="nav-label">${e(u.roleLabel)}工作台</div>${sidebar}</nav><div class="sidebar-footer"><div class="help-icon">✓</div><div><strong>职责清晰 · 协作有序</strong><small>仅显示当前账号授权的业务</small></div></div><div class="profile"><div class="avatar ${u.tone}">${e(u.name.slice(0, 1))}</div><div><strong>${e(u.name)}</strong><small>${e(u.roleLabel)}</small></div><button class="icon-btn logout-btn" data-action="logout" aria-label="退出登录">退出</button></div></aside><main class="main"><header class="topbar"><div class="crumb"><span>${e(u.roleLabel)}</span><b>/</b><strong id="pageTitle">${labels[state.page]}</strong></div><div class="top-actions"><div class="role-badge ${u.tone}">${icon(symbols[state.page], 14)} ${e(u.roleLabel)}</div><button class="ghost-btn" data-action="refresh">${icon('trend', 15)} 刷新</button>${u.role === 'escort' ? button('online', `${badge(u.online ? '在线' : '离线')}`) : has('order:create') ? button('newOrder', `${icon('plus', 15)} 新建订单`, '', true) : ''}</div></header><div class="content">${pageContent()}</div></main></div>`;
+  renderOwner({ state, api, navigate, refresh, dialog, orderDetail, toast, legacyContent: pageContent });
   bindSharedActions();
 }
 function bindSharedActions() {
