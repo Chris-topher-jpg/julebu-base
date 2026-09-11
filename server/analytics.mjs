@@ -39,6 +39,17 @@ export function metrics(data, range = { from: -Infinity, to: Infinity }, at = Da
   const placed = orders.filter(o => inRange(Date.parse(o.createdAt), range, at));
   return { amountCents: sum(done), orderCount: done.length, buyerCount: new Set(placed.map(buyerKey)).size };
 }
+export function dailyBusinessMetrics(data, range, at = Date.now()) {
+  const orders = uniqueOrders(data.orders);
+  const placed = orders.filter(order => inRange(Date.parse(order.createdAt), range, at));
+  const completed = orders.filter(order => order.status === '已完成' && inRange(completionTime(order), range, at));
+  const createdStatus = status => placed.filter(order => order.status === status).length;
+  const unpaid = placed.filter(order => order.paymentStatus === '未支付' || order.pay === '未支付').length;
+  const accepted = placed.filter(order => order.participants?.some(participant => participant.accepted)).length;
+  const refunded = placed.filter(order => ['已退款', '退款审核'].includes(order.status)).length;
+  const amountCents = sum(completed);
+  return { uv: new Set(placed.map(buyerKey)).size, unpaidOrderCount: unpaid, acceptedOrderCount: accepted, completedOrderCount: completed.length, cancelledOrderCount: createdStatus('已取消'), refundedOrderCount: refunded, completedAmountCents: amountCents, completedBuyerCount: new Set(completed.map(buyerKey)).size, averageOrderCents: completed.length ? Math.round(amountCents / completed.length) : 0 };
+}
 export function trend(data, query, at = Date.now()) {
   const range = dateRange(query.start, query.end);
   const points = Array.from({ length: range.days }, (_, i) => ({ day: clubDay(range.from + i * DAY), orderCount: 0, amountCents: 0 }));

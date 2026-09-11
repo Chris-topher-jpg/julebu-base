@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { metrics, trend, ranking, dateRange, FOUR_HOURS, analyticsOptions } from '../server/analytics.mjs';
+import { metrics, dailyBusinessMetrics, trend, ranking, dateRange, FOUR_HOURS, analyticsOptions } from '../server/analytics.mjs';
 import { ClubStore } from '../server/club.mjs';
 import { createClubServer } from '../server.mjs';
 
@@ -23,6 +23,20 @@ test('经营数据按完成/下单时间区分，边界为北京时间零点，�
   assert.deepEqual(metrics(fixtures,dateRange('2026-09-11','2026-09-11'),at),{amountCents:12550,orderCount:2,buyerCount:2});
   assert.deepEqual(metrics({...fixtures,orders:[...fixtures.orders,fixtures.orders[0]]},undefined,at),totals);
   assert.deepEqual(metrics(fixtures,dateRange('2026-09-09','2026-09-09'),at),{amountCents:0,orderCount:0,buyerCount:0});
+});
+test('日经营数据覆盖九项指标并按订单状态与时间口径统计',()=>{
+  const data = { orders: [
+    order('done-a', { customerId: 'daily-a', createdAt: '2026-09-11T01:00:00+08:00', completedAt: '2026-09-11T02:00:00+08:00', amountCents: 10000, participants: [{ ...person('one'), accepted: true }] }),
+    order('done-b', { customerId: 'daily-b', createdAt: '2026-09-11T03:00:00+08:00', completedAt: '2026-09-11T04:00:00+08:00', amountCents: 5500, participants: [{ ...person('two'), accepted: true }] }),
+    order('unpaid', { customerId: 'daily-c', status: '待接单', paymentStatus: '未支付', createdAt: '2026-09-11T05:00:00+08:00', completedAt: null, participants: [] }),
+    order('cancelled', { customerId: 'daily-d', status: '已取消', createdAt: '2026-09-11T06:00:00+08:00', completedAt: null, participants: [] }),
+    order('refund', { customerId: 'daily-e', status: '退款审核', createdAt: '2026-09-11T07:00:00+08:00', completedAt: '2026-09-11T08:00:00+08:00', participants: [] }),
+  ] };
+  assert.deepEqual(dailyBusinessMetrics(data, dateRange('2026-09-11', '2026-09-11'), at), {
+    uv: 5, unpaidOrderCount: 1, acceptedOrderCount: 2, completedOrderCount: 2,
+    cancelledOrderCount: 1, refundedOrderCount: 1, completedAmountCents: 15500,
+    completedBuyerCount: 2, averageOrderCents: 7750,
+  });
 });
 test('曲线连续补零、单日查询、双轴合计与金额分精度',()=>{
   const result=trend(fixtures,{start:'2026-09-09',end:'2026-09-11'},at);

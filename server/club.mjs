@@ -3,7 +3,7 @@ import { randomBytes, randomUUID, scryptSync, timingSafeEqual, createHash } from
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import * as seed from './seed.mjs';
-import { FOUR_HOURS, clubDay, metrics, dateRange, trend, ranking, analyticsOptions } from './analytics.mjs';
+import { FOUR_HOURS, clubDay, metrics, dailyBusinessMetrics, dateRange, trend, ranking, analyticsOptions } from './analytics.mjs';
 import { defaultLevels, levelOf, meetsLevel, rateOf, hasOpenOrders, profileConflicts, migrateMembership, memberRecord, lockEarnings } from './membership.mjs';
 
 export const roles = {
@@ -159,7 +159,7 @@ export class ClubStore {
     const at = Date.now();
     if (section === 'summary') {
       const day = input.day || clubDay(at); const range = dateRange(day, day);
-      return { totals: this.totalSnapshot(at), daily: { ...metrics(data, range, at), day, asOf: new Date(at).toISOString() }, today: clubDay(at), options: analyticsOptions(data) };
+      return { totals: this.totalSnapshot(at), daily: { ...metrics(data, range, at), ...dailyBusinessMetrics(data, range, at), day, asOf: new Date(at).toISOString() }, today: clubDay(at), options: analyticsOptions(data) };
     }
     if (section === 'trend') return trend(data, input, at);
     if (section === 'rankings' || section === 'details') return ranking(data, input, at, section === 'details');

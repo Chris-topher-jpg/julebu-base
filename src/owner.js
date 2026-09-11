@@ -20,14 +20,16 @@ const nextRequest = key => requestVersions[key] = (requestVersions[key] || 0) + 
 const rankNames = {escorts:'陪玩接单排名', buyers:'下单用户排名', orders:'已完成订单排名'};
 const defaultFilter = () => ({start:view.start,end:view.end,game:'',tag:'',sort:'amount',page:1});
 const empty = text => `<div class="owner-empty">${icon('receipt',26)}<p>${e(text)}</p></div>`;
-function metricCards(data) {
-  return `<div class="owner-metrics"><div class="owner-metric"><p>已完成订单总金额 ${info('按订单完成时间统计已完成订单的实付金额；待验收、取消和退款中订单不计入。')}</p><strong>${data ? yuan(data.amountCents) : '—'}</strong><span>元</span></div><div class="owner-metric"><p>完成订单总笔数 ${info('每个已完成订单只计一次，不因陪玩人数增加而重复计数。')}</p><strong>${data ? number(data.orderCount) : '—'}</strong><span>笔</span></div><div class="owner-metric"><p>下单总用户人数 ${info('按下单时间去重统计所有下单用户，包含尚未完成的订单；现有旧订单按老板称呼去重。')}</p><strong>${data ? number(data.buyerCount) : '—'}</strong><span>人</span></div></div>`;
+function metricCards(data, daily = false) {
+  if (!daily) return `<div class="owner-metrics"><div class="owner-metric"><p>已完成订单总金额 ${info('按订单完成时间统计已完成订单的实付金额；待验收、取消和退款中订单不计入。')}</p><strong>${data ? yuan(data.amountCents) : '—'}</strong><span>元</span></div><div class="owner-metric"><p>完成订单总笔数 ${info('每个已完成订单只计一次，不因陪玩人数增加而重复计数。')}</p><strong>${data ? number(data.orderCount) : '—'}</strong><span>笔</span></div><div class="owner-metric"><p>下单总用户人数 ${info('按下单时间去重统计所有下单用户，包含尚未完成的订单；现有旧订单按老板称呼去重。')}</p><strong>${data ? number(data.buyerCount) : '—'}</strong><span>人</span></div></div>`;
+  const cards = [['进店人数（UV）', data?.uv, '人', '按日去重下单用户统计'], ['未支付订单数', data?.unpaidOrderCount, '笔', '当前标记为未支付的订单'], ['已接单订单数', data?.acceptedOrderCount, '笔', '已有陪玩确认接单'], ['已完成订单数', data?.completedOrderCount, '笔', '通过验收并入账'], ['已取消订单数', data?.cancelledOrderCount, '笔', '订单状态为已取消'], ['已免单订单数', data?.refundedOrderCount, '笔', '退款审核或已退款订单'], ['已完成订单金额', data?.completedAmountCents == null ? null : yuan(data.completedAmountCents), '元', '已完成订单的实付金额'], ['已完成订单用户数', data?.completedBuyerCount, '人', '完成订单用户去重'], ['人均客单价', data?.averageOrderCents == null ? null : yuan(data.averageOrderCents), '元', '完成金额除以完成订单数']];
+  return `<div class="owner-metrics daily-business-metrics">${cards.map(([title,value,unit,note])=>`<div class="owner-metric"><p>${title} ${info(note)}</p><strong>${data && value != null ? (typeof value === 'string' ? value : number(value)) : '—'}</strong><span>${unit}</span></div>`).join('')}</div>`;
 }
 const dateInput = (name,value,label) => `<input type="date" name="${name}" value="${e(value)}" aria-label="${label}" required>`;
 function rangeFields(start,end,prefix) { return `<div class="owner-date-range">${icon('calendar',14)}${dateInput('start',start,`${prefix}开始日期`)}<span>—</span>${dateInput('end',end,`${prefix}结束日期`)}</div>`; }
 function home() {
   return `<section class="owner-panel totals-panel" aria-labelledby="totalHeading"><div class="owner-section-head"><h2 id="totalHeading">经营总数据 ${info('累计数据每四小时生成一次快照。页面显示本次统计截止时间，刷新页面不会提前重算。')}</h2><div><button class="owner-link" id="exportSummary">导出 CSV</button><span class="owner-update" id="totalUpdate">正在获取经营数据…</span></div></div><div id="totalMetrics">${metricCards(null)}</div></section>
-  <section class="owner-panel daily-panel" aria-labelledby="dayHeading"><div class="owner-section-head"><div class="owner-title-line"><h2 id="dayHeading">日经营数据 ${info('按北京时间 00:00–次日 00:00 查询，每五分钟刷新；今天只包含截至查询时刻的数据。')}</h2><span class="owner-update" id="dailyUpdate"></span></div><form class="owner-query" id="dailyForm"><div class="owner-date-range">${icon('calendar',14)}${dateInput('day',view.day,'日经营数据日期')}</div><button class="owner-primary">查询</button></form></div><div id="dailyMetrics">${metricCards(null)}</div><p id="dailyError" class="owner-error" role="alert"></p></section>
+  <section class="owner-panel daily-panel" aria-labelledby="dayHeading"><div class="owner-section-head"><div class="owner-title-line"><h2 id="dayHeading">日经营数据 ${info('按北京时间 00:00–次日 00:00 查询，每五分钟刷新；今天只包含截至查询时刻的数据。')}</h2><span class="owner-update" id="dailyUpdate"></span></div><form class="owner-query" id="dailyForm"><div class="owner-date-range">${icon('calendar',14)}${dateInput('day',view.day,'日经营数据日期')}</div><button class="owner-primary">查询</button></form></div><div id="dailyMetrics">${metricCards(null, true)}</div><p id="dailyError" class="owner-error" role="alert"></p></section>
   <section class="owner-panel curve-panel" aria-labelledby="curveHeading"><div class="owner-section-head"><h2 id="curveHeading">订单流水趋势 ${info('蓝线为已完成订单笔数（左轴），绿线为已完成订单金额 GMV（右轴）；无订单日期补零。')}</h2><form class="owner-query" id="curveForm">${rangeFields(view.start,view.end,'经营曲线')}<button class="owner-primary">查询</button></form></div><p id="curveError" class="owner-error" role="alert"></p><div id="curveChart" aria-live="polite">${empty('正在加载经营曲线…')}</div></section>
   <section class="owner-panel ranking-panel" aria-labelledby="rankingHeading"><div class="owner-section-head"><div><h2 id="rankingHeading">经营排名数据 ${info('各榜单可独立设置日期、游戏和 Tag。点击名称或订单号可查看该项在当前筛选条件下的已完成订单。')}</h2><p class="owner-update" id="rankUpdate">当前时间 ${timestamp(Date.now())}</p></div><span class="owner-rank-hint">点击排名查看订单明细</span></div><div class="owner-rank-grid">${Object.keys(rankNames).map(kind=>rankCard(kind)).join('')}</div></section>`;
 }
@@ -144,7 +146,6 @@ export function renderOwner(ctx) {
   if(page==='auditLog') bindAudit();
   if(page==='commissionConfig') document.querySelector('#commissionForm').onsubmit=async ev=>{ev.preventDefault();const form=ev.currentTarget;try{await ctx.api('/commissions',{games:w.games.map(g=>({name:g.name,commissionBps:Math.round(Number(form.elements[g.name].value)*100)}))});await ctx.refresh();ctx.toast('抽佣配置已保存');}catch(err){document.querySelector('#commissionError').textContent=err.message;}};
 }
-
 const restrictedGroups = {
   service: [['overview','工作台'],['orders','订单管理'],['conversations','会话中心'],['dispatch','派单台']],
   examiner: [['overview','工作台'],['examinerCandidates','陪玩游戏资料']],
@@ -165,7 +166,7 @@ function setSummary(result) {
   document.querySelector('#totalMetrics').innerHTML=metricCards(result.totals);
   document.querySelector('#totalUpdate').textContent=`统计截止 ${timestamp(result.totals.asOf)}，此数据每 4 小时更新一次`;
   document.querySelector('#totalUpdate').title=`下次更新：${timestamp(result.totals.nextUpdateAt)}`;
-  document.querySelector('#dailyMetrics').innerHTML=metricCards(result.daily);
+  document.querySelector('#dailyMetrics').innerHTML=metricCards(result.daily, true);
   document.querySelector('#dailyUpdate').textContent=`${result.daily.day} · 更新于 ${timestamp(result.daily.asOf).slice(11)}`;
   for (const kind of Object.keys(rankNames)) populateSelects(kind);
 }
@@ -282,3 +283,4 @@ function ownerNavigation(active,page) {
   const groups={clubConfig:[['catalog','游戏与商品'],['auditLog','操作审计']],memberManagement:[['clubMembers','俱乐部成员管理'],['clubEscorts','俱乐部陪玩管理']],financeManagement:[['financeList','财务列表'],['commissionConfig','抽佣配置'],['topups','充值审核'],['flows','资金流水'],['settlements','提现与结算']],orderManagement:[['orderList','订单列表'],['transferOrders','转单列表'],['dispatchOrders','派单列表']]};
   return Object.entries(names).map(([p,n])=>groups[p] ? `<button class="owner-nav-item ${p===active?'active':''}" id="${p==='memberManagement'?'memberNavGroup':p+'NavGroup'}" aria-label="${n}" aria-expanded="${p===active}">${icon(navIcons[p],17)}<span>${n}</span>${icon('chevron',12)}</button><div class="owner-member-submenu" id="${p}Submenu" ${p===active?'':'hidden'}>${groups[p].map(([sub,label])=>`<button data-page="${sub}" class="owner-submenu-item ${page===sub?'active':''}" title="${label}"><i></i><span>${label}</span></button>`).join('')}</div>` : `<button class="owner-nav-item ${p===active?'active':''}" data-page="${p}" aria-label="${n}" ${p===active?'aria-current="page"':''}>${icon(navIcons[p],17)}<span>${n}</span>${p==='overview'?'':icon('chevron',12)}</button>`).join('');
 }
+
