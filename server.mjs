@@ -51,7 +51,18 @@ export function createClubServer({ database = resolve(root, 'data/club.sqlite') 
         requireThat(user, '登录已失效，请重新登录', 401);
         if (req.method === 'GET') {
           if (url.pathname === '/api/workspace') return json(store.workspace(user));
+          if (url.pathname === '/api/audit') return json(store.auditList(user, Object.fromEntries(url.searchParams)));
+          const analyticsExport = url.pathname === '/api/analytics/export';
           const analytics = url.pathname.match(/^\/api\/analytics\/([a-z]+)$/);
+          if (analyticsExport) {
+            const query = Object.fromEntries(url.searchParams);
+            const kind = query.kind || 'orders';
+            const result = store.analytics(user, kind === 'summary' ? 'summary' : kind === 'trend' ? 'trend' : 'rankings', kind === 'rankings' ? { ...query, kind: query.rankKind || 'orders' } : query);
+            const rows = kind === 'summary' ? [{ metric: '完成订单总金额', value: result.daily.amountCents / 100 }, { metric: '完成订单总笔数', value: result.daily.orderCount }, { metric: '下单总用户人数', value: result.daily.buyerCount }] : kind === 'trend' ? result.points.map(point => ({ date: point.day, orderCount: point.orderCount, amountCents: point.amountCents / 100 })) : result.rows.map(row => ({ rank: row.rank, name: row.name, orderCount: row.orderCount, amountCents: row.amountCents / 100 }));
+            const keys = Object.keys(rows[0] || { value: '' });
+            const csv = [keys.join(','), ...rows.map(row => keys.map(key => JSON.stringify(row[key] ?? '')).join(','))].join('\n');
+            return json({ filename: `club-${kind}-${Date.now()}.csv`, content: `\uFEFF${csv}`, mime: 'text/csv;charset=utf-8' });
+          }
           if (analytics) return json(store.analytics(user, analytics[1], Object.fromEntries(url.searchParams)));
           const resources = { orders: 'order:view', accounts: 'account:manage', topups: 'finance:manage', ledger: 'finance:manage', withdrawals: 'finance:manage', conversations: 'conversation:manage' };
           const resource = url.pathname.slice(5);
@@ -60,6 +71,9 @@ export function createClubServer({ database = resolve(root, 'data/club.sqlite') 
           return json(store.workspace(user)[resource]);
         }
         if (url.pathname === '/api/orders') return json(store.createOrder(user, body), 201);
+        if (url.pathname === '/api/refunds') return json(store.createRefund(user, body), 201);
+        const refund = url.pathname.match(/^\/api\/refunds\/([^/]+)$/);
+        if (refund) return json(store.reviewRefund(user, refund[1], body));
         const orderAction = url.pathname.match(/^\/api\/orders\/([^/]+)\/([^/]+)$/);
         if (orderAction) return json(store.orderAction(user, orderAction[1], orderAction[2], body));
         const chat = url.pathname.match(/^\/api\/conversations\/([^/]+)$/);

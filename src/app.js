@@ -7,7 +7,7 @@ const state = { workspace: null, page: 'overview', filter: '全部', query: '', 
 const money = cents => `¥ ${(Number(cents || 0) / 100).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const date = value => value ? new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) : '—';
 const has = permission => state.workspace?.role.permissions.includes(permission);
-const badge = status => `<span class="status ${['已完成','已通过','在线','启用'].includes(status) ? 'active' : ['待接单','待确认','待服务','陪玩中','待验收','待审核','待线下打款'].includes(status) ? 'warning' : 'muted'}"><i></i>${e(status)}</span>`;
+const badge = status => `<span class="status ${['已完成','已通过','已打款','在线','启用'].includes(status) ? 'active' : ['待接单','待确认','待服务','陪玩中','待验收','待审核','待线下打款','退款审核'].includes(status) ? 'warning' : 'muted'}"><i></i>${e(status)}</span>`;
 const button = (action, text, id = '', primary = false, extra = '') => `<button class="${primary ? 'primary-action' : 'ghost-btn'}" data-action="${action}" data-id="${e(id)}" ${extra}>${text}</button>`;
 const empty = message => `<div class="empty-state">${icon('receipt', 28)}<strong>${e(message)}</strong><span>新的业务动态会显示在这里</span></div>`;
 const intro = (title, description, action = '') => `<section class="page-intro"><div><p class="eyebrow">星河游戏俱乐部 / ${e(state.workspace.user.roleLabel)}</p><h1>${title}</h1><p class="subline">${description}</p></div>${action}</section>`;
@@ -121,6 +121,8 @@ function orderButtons(o, mine) {
   } else {
     if (o.status === '待接单' && has('order:dispatch')) actions += button('dispatch', '派单', o.id, true);
     if (o.status === '待验收' && has('order:review')) actions += button('review', '验收订单', o.id, true);
+    if (o.status === '退款审核' && has('order:review')) actions += button('refundReview', '处理退款', o.id, true);
+    if (['已完成', '待验收'].includes(o.status) && has('order:review')) actions += button('refundRequest', '发起退款', o.id);
   }
   return actions;
 }
@@ -139,14 +141,14 @@ function availablePage() {
   return intro('接单大厅', '根据你的游戏和等级展示订单，可接本级及以下订单。接单后进入我的订单，已有服务未结束时无法开始另一单。', button('online', w.user.online ? '在线接单中 · 点击休息' : '当前离线 · 上线接单')) + `<div class="available-order-grid">${w.availableOrders.map(o => `<article class="panel available-order-card" data-searchable><div class="available-order-top"><span class="event-date ${o.tone || 'purple'}">${icon('game', 20)}</span>${badge('待接单')}</div><h2>${e(o.game)} · ${e(o.product)}</h2><p>${e(o.requirement)}</p><div class="available-order-meta"><span>${o.hours} 小时 · ${e(o.boss)}</span><strong>${money(o.amountCents)}</strong></div><small class="muted-text">${e(o.levelName)}及以上 · 预计分成 ${o.expectedShareBps/100}%</small>${button('claim', '查看并接单 →', o.id, true, w.user.online ? '' : 'disabled title="请先切换为在线"')}</article>`).join('') || empty('暂无与你的游戏匹配的订单')}</div>`;
 }
 function conversationPage() {
-  return intro('会话中心', '查看客户咨询与售后记录，记录跟进结果。') + panel('客户会话', '历史会话与人工跟进记录', `<label class="list-search">${icon('search', 16)}<input id="listSearch" type="search" placeholder="搜索用户 ID、昵称或会话内容" aria-label="搜索会话" value="${e(state.query)}"></label><div class="conversation-full-list">${state.workspace.conversations.map(c => `<div class="conversation-full-row" data-searchable><div class="mini-avatar orange">${e(c.boss.slice(0, 1))}</div><div class="conversation-body"><div><strong>${e(c.boss)}</strong><span class="channel-tag">${e(c.channel)}</span>${c.unread ? `<em class="unread">${c.unread} 条待跟进</em>` : ''}</div><p>${e(c.last)}</p></div><div class="conversation-meta">${badge(c.state)}${button('conversation', '查看会话', c.id)}</div></div>`).join('')}</div><div id="noSearchResults" class="empty-state" hidden>没有找到匹配的会话</div>`);
+  return intro('会话中心', '查看客户咨询与售后记录，记录跟进结果。') + panel('客户会话', '历史会话与人工跟进记录', `<label class="list-search">${icon('search', 16)}<input id="listSearch" type="search" placeholder="搜索用户 ID、昵称或会话内容" aria-label="搜索会话" value="${e(state.query)}"></label><div class="conversation-full-list">${state.workspace.conversations.map(c => `<div class="conversation-full-row" data-searchable><div class="mini-avatar orange">${e(c.boss.slice(0, 1))}</div><div class="conversation-body"><div><strong>${e(c.boss)}</strong><span class="channel-tag">${e(c.channel)}</span>${c.unread ? `<em class="unread">${c.unread} 条待跟进</em>` : ''}${c.slaOverdue ? '<em class="unread">SLA 超时</em>' : ''}</div><p>${e(c.last)}</p></div><div class="conversation-meta">${badge(c.state)}${button('conversation', '查看会话', c.id)}</div></div>`).join('')}</div><div id="noSearchResults" class="empty-state" hidden>没有找到匹配的会话</div>`);
 }
 function earningsPage() {
   const w = state.workspace;
   return intro('我的收益', '订单验收后入账。提现申请会冻结对应金额，审核驳回后返还。', button('withdraw', '申请提现', '', true)) + `<section class="stats">${metric('可提现金额', money(w.wallet.balanceCents), '已入账，可申请提现', 'purple', 'wallet')}${metric('提现审核中', money(w.wallet.frozenCents), '已从可提现金额中冻结', 'orange', 'receipt')}${metric('服务待验收', money(w.orders.filter(o => o.status === '待验收').reduce((a,o) => a + myIncome(o), 0)), '验收前不计入可提现余额', 'blue', 'trend')}${metric('当前押金', money(w.wallet.depositCents), '提现要求押金至少 ¥1,000', 'green', 'wallet')}</section>` + panel('我的资金明细', '仅包含当前成员的账户变动', ledgerTable(w.ledger)) + panel('我的提现申请', '审核通过后等待俱乐部线下打款', withdrawalTable(w.withdrawals, false));
 }
 function ledgerTable(list) { return table(['时间', '账户', '业务', '变动金额', '变动后余额', '关联单号'], list.map(l => row([date(l.at), e(l.account), e(l.label), `<strong class="${l.deltaCents < 0 ? 'negative' : 'positive'}">${l.deltaCents > 0 ? '+' : '−'} ${money(Math.abs(l.deltaCents))}</strong>`, money(l.afterCents), e(l.source)]))); }
-function withdrawalTable(list, review) { return table(['申请单号', '成员', '金额', '状态', '申请时间', '操作'], list.map(w => row([e(w.id), e(w.name), money(w.amountCents), badge(w.status), date(w.at), review && w.status === '待审核' ? button('withdrawReview', '审核', w.id) : e(w.reason || '—')]))); }
+function withdrawalTable(list, review) { return table(['申请单号', '成员', '金额', '状态', '申请时间', '操作'], list.map(w => row([e(w.id), e(w.name), money(w.amountCents), badge(w.status), date(w.at), review && w.status === '待审核' ? button('withdrawReview', '审核', w.id) : review && w.status === '待线下打款' ? button('withdrawPaid', '登记打款', w.id, true) : e(w.reason || w.payoutRef || '—')]))); }
 function accountsPage() {
   return intro('成员与权限', '成员只属于星河游戏俱乐部。调整职责或停用账号后，已有登录会话立即失效。', button('newAccount', '新增成员账号', '', true)) + `<section class="role-matrix"><article><span class="role-badge purple">最高负责人</span><p>俱乐部业务、财务审核、成员与权限配置</p></article><article><span class="role-badge orange">客服</span><p>订单、会话、派单、完单验收</p></article><article><span class="role-badge green">打手</span><p>接单、本人订单、本人收益与提现申请</p></article></section>` + panel('俱乐部账号', '账号职责由管理员分配，成员登录时无需选择', table(['成员', '账号', '职责', '状态', '游戏', '操作'], state.workspace.accounts.map(u => row([e(u.name), e(u.username), `<span class="role-badge ${u.tone}">${e(u.roleLabel)}</span>`, badge(u.active ? '启用' : '停用'), e(u.games.join(' / ') || '—'), button('editAccount', '编辑权限', u.id)]))));
 }
@@ -216,6 +218,16 @@ async function perform(el) {
       const chat = w.conversations.find(c => c.id === id);
       await api(`/conversations/${id}`, {}); await refresh();
       return dialog(`${chat.boss} · 会话记录`, `<span class="channel-tag">${e(chat.channel)}历史记录</span><div class="chat-messages">${chat.messages.map(m => `<div><strong>${e(m.author)}</strong><p>${e(m.text)}</p></div>`).join('')}</div><h3>客服跟进记录</h3>${chat.notes.map(n => `<div class="detail-note">${e(n.text)}<small>${e(n.author)} · ${date(n.at)}</small></div>`).join('') || '<p class="muted-text">暂无跟进记录</p>'}${textarea('新增跟进记录', 'note', '记录已沟通的结果、改派安排或退款进展')}<label class="form-field">跟进状态<select name="state"><option value="处理中">处理中</option><option value="已结束">已结束</option></select></label><p class="detail-note">这里保存俱乐部内部跟进记录；客户消息渠道尚未连接。</p>`, '保存跟进', form => api(`/conversations/${id}`, Object.fromEntries(form)));
+    }
+    if (action === 'refundReview') {
+      const refund = (w.refunds || []).find(item => item.orderId === id && item.status === '待审核');
+      if (!refund) throw new Error('没有待审核的退款申请');
+      return dialog('退款审核', `<p>${e(refund.id)} · ${e(refund.customer)} · <strong>${money(refund.amountCents)}</strong></p><p class="detail-note">${e(refund.reason)} · ${e(refund.channel)}</p>${textarea('审核说明 / 驳回原因', 'reason', '请填写处理依据')}`, '确认退款', (form, secondary) => api(`/refunds/${refund.id}`, { action: secondary === 'reject' ? 'reject' : 'approve', reason: form.get('reason') }), '<button type="button" class="ghost-btn" data-dialog-action="reject">驳回</button>');
+    }
+    if (action === 'refundRequest') return dialog('发起退款申请', `<p>${e(o.id)} · ${e(o.boss)} · ${money(o.amountCents)}</p>${field('退款金额（元）', 'amount', 'number', (o.amountCents - (o.refundedCents || 0)) / 100, `min="0.01" max="${(o.amountCents - (o.refundedCents || 0)) / 100}" step="0.01"`)}${textarea('退款原因', 'reason', '记录客户诉求、服务问题或协商结果')}`, '提交退款申请', form => api('/refunds', { orderId: o.id, amountCents: Math.round(Number(form.get('amount')) * 100), reason: form.get('reason') }));
+    if (action === 'withdrawPaid') {
+      const item = (w.withdrawals || []).find(item => item.id === id);
+      return dialog('登记线下打款', `<p>${e(item?.id)} · ${e(item?.name)} · <strong>${money(item?.amountCents)}</strong></p>${field('打款流水号', 'payoutRef', 'text', '', 'maxlength="80"')}<p class="detail-note">登记后该提现进入已打款，流水号用于财务对账。</p>`, '确认已打款', form => api(`/withdrawals/${id}`, { action: 'markPaid', payoutRef: form.get('payoutRef') }));
     }
     if (action === 'withdraw') return dialog('申请提现', `<p>当前可提现 <strong>${money(w.wallet.balanceCents)}</strong></p>${field('提现金额（元）','amount','number','','min="1" step="0.01" max="'+w.wallet.balanceCents/100+'"')}<p class="detail-note">提交后冻结申请金额。管理员审核通过后安排线下打款。</p>`, '提交申请', form => api('/withdrawals', { amount: form.get('amount') }));
     if (action === 'withdrawReview' || action === 'topupReview') {

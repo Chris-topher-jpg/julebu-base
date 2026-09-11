@@ -145,3 +145,36 @@ test('用户按 ID 入会不创建登录账号，并在用户管理同步职责'
     assert.throws(() => store.accountAction(admin, null, { action: 'joinById', userId: 'U100001' }), /已经是俱乐部成员/);
   } finally { store.close(); }
 });
+
+test('退款审核按原支付方式返还并可查询 SLA 与审计', () => {
+  const store = new ClubStore(':memory:');
+  try {
+    const admin = store.read().users.find(u => u.id === 'admin');
+    const refund = store.read().refunds[0];
+    const customer = store.read().customers.find(c => c.name === refund.customer);
+    const before = customer.balanceCents;
+    const approved = store.reviewRefund(admin, refund.id, { action: 'approve', reason: '已核对服务记录' });
+    assert.equal(approved.status, '已通过');
+    assert.equal(store.read().customers.find(c => c.name === refund.customer).balanceCents, before + refund.amountCents);
+    assert.equal(store.read().orders.find(o => o.id === refund.orderId).status, '已退款');
+    assert.equal(store.workspace(admin).conversations.some(c => typeof c.slaOverdue === 'boolean'), true);
+    assert.ok(store.auditList(admin).some(item => item.action.includes('退款')));
+  } finally { store.close(); }
+});
+
+test('提现审核通过后必须登记打款流水号，统计导出返回 CSV', async t => {
+  const { server, store } = createClubServer({ database: ':memory:' });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const login = await fetch(base + '/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base }, body: JSON.stringify({ username: 'admin', password: '123456' }) });
+  const cookie = login.headers.get('set-cookie').split(';')[0];
+  const escort = store.read().users.find(u => u.id === 'escort');
+  store.transaction(store.read().users.find(u => u.id === 'admin'), 'account:manage', '准备提现导出测试', data => { data.users.find(u => u.id === escort.id).balanceCents = 10000; });
+  const request = await store.withdrawal(escort, { amount: '10' });
+  assert.equal((await fetch(base + `/api/withdrawals/${request.id}`, { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json', Origin: base }, body: JSON.stringify({ action: 'approve' }) })).status, 200);
+  const paid = await fetch(base + `/api/withdrawals/${request.id}`, { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json', Origin: base }, body: JSON.stringify({ action: 'markPaid', payoutRef: 'BANK-001' }) });
+  assert.equal(paid.status, 200); assert.equal((await paid.json()).status, '已打款');
+  const exportResponse = await fetch(base + '/api/analytics/export?kind=summary', { headers: { Cookie: cookie } });
+  assert.equal(exportResponse.status, 200); const exported = await exportResponse.json(); assert.match(exported.content, /完成订单总金额/);
+});

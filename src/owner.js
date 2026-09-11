@@ -3,8 +3,8 @@ import { membersMarkup, bindMembers } from './members.js';
 
 const names = { overview: '首页', clubConfig: '俱乐部配置', memberManagement: '成员管理', serviceManagement: '客服管理', examinerManagement: '考官管理', afterSales: '售后管理', financeManagement:'财务管理', orderManagement:'订单管理', userManagement:'用户管理' };
 const navIcons = { overview: 'grid', clubConfig: 'game', memberManagement: 'users', serviceManagement: 'headset', examinerManagement: 'headset', afterSales: 'receipt', financeManagement:'wallet', orderManagement:'receipt', userManagement:'users' };
-const parent = { catalog: 'clubConfig', topups: 'financeManagement', flows: 'financeManagement', settlements: 'financeManagement', accounts: 'memberManagement', escorts: 'memberManagement', clubMembers: 'memberManagement', clubEscorts: 'memberManagement', conversations: 'afterSales', financeList:'financeManagement', commissionConfig:'financeManagement', orderList:'orderManagement', transferOrders:'orderManagement', dispatchOrders:'orderManagement' };
-const pageNames = { ...names, clubMembers:'俱乐部成员管理', clubEscorts:'俱乐部陪玩管理', serviceManagement:'客服管理', financeList:'财务列表', commissionConfig:'抽佣配置', orderList:'订单列表', transferOrders:'转单列表', dispatchOrders:'派单列表', catalog:'游戏与商品', topups:'充值审核', flows:'资金流水', settlements:'提现与结算', accounts:'账号与权限', escorts:'陪玩档案', conversations:'客户会话', orders:'订单记录', dispatch:'派单台' };
+const parent = { catalog: 'clubConfig', auditLog: 'clubConfig', topups: 'financeManagement', flows: 'financeManagement', settlements: 'financeManagement', accounts: 'memberManagement', escorts: 'memberManagement', clubMembers: 'memberManagement', clubEscorts: 'memberManagement', conversations: 'afterSales', financeList:'financeManagement', commissionConfig:'financeManagement', orderList:'orderManagement', transferOrders:'orderManagement', dispatchOrders:'orderManagement' };
+const pageNames = { ...names, auditLog:'操作审计', clubMembers:'俱乐部成员管理', clubEscorts:'俱乐部陪玩管理', serviceManagement:'客服管理', financeList:'财务列表', commissionConfig:'抽佣配置', orderList:'订单列表', transferOrders:'转单列表', dispatchOrders:'派单列表', catalog:'游戏与商品', topups:'充值审核', flows:'资金流水', settlements:'提现与结算', accounts:'账号与权限', escorts:'陪玩档案', conversations:'客户会话', orders:'订单记录', dispatch:'派单台' };
 const dtf = new Intl.DateTimeFormat('sv-SE', {timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
 const timestamp = value => dtf.format(new Date(value));
 const day = () => timestamp(Date.now()).slice(0,10);
@@ -26,7 +26,7 @@ function metricCards(data) {
 const dateInput = (name,value,label) => `<input type="date" name="${name}" value="${e(value)}" aria-label="${label}" required>`;
 function rangeFields(start,end,prefix) { return `<div class="owner-date-range">${icon('calendar',14)}${dateInput('start',start,`${prefix}开始日期`)}<span>—</span>${dateInput('end',end,`${prefix}结束日期`)}</div>`; }
 function home() {
-  return `<section class="owner-panel totals-panel" aria-labelledby="totalHeading"><div class="owner-section-head"><h2 id="totalHeading">经营总数据 ${info('累计数据每四小时生成一次快照。页面显示本次统计截止时间，刷新页面不会提前重算。')}</h2><span class="owner-update" id="totalUpdate">正在获取经营数据…</span></div><div id="totalMetrics">${metricCards(null)}</div></section>
+  return `<section class="owner-panel totals-panel" aria-labelledby="totalHeading"><div class="owner-section-head"><h2 id="totalHeading">经营总数据 ${info('累计数据每四小时生成一次快照。页面显示本次统计截止时间，刷新页面不会提前重算。')}</h2><div><button class="owner-link" id="exportSummary">导出 CSV</button><span class="owner-update" id="totalUpdate">正在获取经营数据…</span></div></div><div id="totalMetrics">${metricCards(null)}</div></section>
   <section class="owner-panel daily-panel" aria-labelledby="dayHeading"><div class="owner-section-head"><div class="owner-title-line"><h2 id="dayHeading">日经营数据 ${info('按北京时间 00:00–次日 00:00 查询，每五分钟刷新；今天只包含截至查询时刻的数据。')}</h2><span class="owner-update" id="dailyUpdate"></span></div><form class="owner-query" id="dailyForm"><div class="owner-date-range">${icon('calendar',14)}${dateInput('day',view.day,'日经营数据日期')}</div><button class="owner-primary">查询</button></form></div><div id="dailyMetrics">${metricCards(null)}</div><p id="dailyError" class="owner-error" role="alert"></p></section>
   <section class="owner-panel curve-panel" aria-labelledby="curveHeading"><div class="owner-section-head"><h2 id="curveHeading">订单流水趋势 ${info('蓝线为已完成订单笔数（左轴），绿线为已完成订单金额 GMV（右轴）；无订单日期补零。')}</h2><form class="owner-query" id="curveForm">${rangeFields(view.start,view.end,'经营曲线')}<button class="owner-primary">查询</button></form></div><p id="curveError" class="owner-error" role="alert"></p><div id="curveChart" aria-live="polite">${empty('正在加载经营曲线…')}</div></section>
   <section class="owner-panel ranking-panel" aria-labelledby="rankingHeading"><div class="owner-section-head"><div><h2 id="rankingHeading">经营排名数据 ${info('各榜单可独立设置日期、游戏和 Tag。点击名称或订单号可查看该项在当前筛选条件下的已完成订单。')}</h2><p class="owner-update" id="rankUpdate">当前时间 ${timestamp(Date.now())}</p></div><span class="owner-rank-hint">点击排名查看订单明细</span></div><div class="owner-rank-grid">${Object.keys(rankNames).map(kind=>rankCard(kind)).join('')}</div></section>`;
@@ -38,13 +38,14 @@ function rankCard(kind) {
 function groupContent(page, w) {
   if(['clubMembers','clubEscorts','memberManagement','accounts','escorts'].includes(page)) return membersMarkup(context, ['clubEscorts','escorts'].includes(page)?'clubEscorts':'clubMembers');
   const subnav = (links) => `<div class="owner-subnav">${links.map(([p,n])=>`<button data-page="${p}">${n} ${icon('arrow',14)}</button>`).join('')}</div>`;
-  if (page==='clubConfig') return `<section class="owner-panel"><div class="owner-section-head"><h2>俱乐部配置</h2><span class="owner-update">单俱乐部专属工作空间</span></div><div class="owner-config-grid"><div><span>俱乐部名称</span><strong>${e(w.clubName)}</strong></div><div><span>经营统计时区</span><strong>北京时间（UTC+08:00）</strong></div><div><span>总数据更新频率</span><strong>每 4 小时更新</strong></div><div><span>抽佣规则</span><strong>按游戏配置</strong></div></div>${subnav([['catalog','游戏与商品']])}</section>`;
+  if (page==='clubConfig') return `<section class="owner-panel"><div class="owner-section-head"><h2>俱乐部配置</h2><span class="owner-update">单俱乐部专属工作空间</span></div><div class="owner-config-grid"><div><span>俱乐部名称</span><strong>${e(w.clubName)}</strong></div><div><span>经营统计时区</span><strong>北京时间（UTC+08:00）</strong></div><div><span>总数据更新频率</span><strong>每 4 小时更新</strong></div><div><span>抽佣规则</span><strong>按游戏配置</strong></div></div>${subnav([['catalog','游戏与商品'],['auditLog','操作审计']])}</section>`;
   if (page==='serviceManagement') return staffPanel(w,'service','客服管理','订单、会话、派单与完单验收');
   if (page==='examinerManagement') return staffPanel(w,'examiner','考官管理','查看陪玩游戏资料与考核范围');
   if (page==='afterSales') {
     return staffPanel(w,'afterSales','售后管理','退款、订单验收与客户会话');
   }
   if (page==='userManagement') return userManagementPage(w);
+  if (page==='auditLog') return auditPage();
   if (page==='financeList') return financeListPage(w);
   if (page==='commissionConfig') return commissionConfigPage(w);
   if (['orderList','transferOrders','dispatchOrders'].includes(page)) return orderManagementPage(page,w);
@@ -105,6 +106,16 @@ function bindUserManagement() {
   input.oninput = draw;
   draw();
 }
+function auditPage() { return `<section class="owner-panel"><div class="owner-section-head"><div><h2>操作审计</h2><span class="owner-update">记录关键权限、订单和资金操作，最多显示最近 200 条</span></div><label class="owner-user-search">${icon('search',15)}<input id="auditSearch" type="search" placeholder="搜索操作、操作人或时间" aria-label="搜索操作审计"></label></div><div class="owner-standard-table"><table><thead><tr><th>时间</th><th>操作人</th><th>操作</th></tr></thead><tbody id="auditResults"><tr><td colspan="3">正在加载审计记录…</td></tr></tbody></table></div></section>`; }
+async function bindAudit() {
+  const input=document.querySelector('#auditSearch'), body=document.querySelector('#auditResults'); if(!input||!body)return;
+  const draw=async()=>{ try { const rows=await context.api(`/audit?query=${encodeURIComponent(input.value.trim())}`); body.innerHTML=rows.map(item=>`<tr><td>${e(timestamp(item.at))}</td><td>${e(item.by)}</td><td>${e(item.action)}</td></tr>`).join('')||'<tr><td colspan="3"><div class="owner-empty">暂无审计记录</div></td></tr>'; } catch(err){ body.innerHTML=`<tr><td colspan="3">${e(err.message)}</td></tr>`; } };
+  input.oninput=draw; await draw();
+}
+function bindExports() {
+  const button=document.querySelector('#exportSummary'); if(!button)return;
+  button.onclick=async()=>{ button.disabled=true; try { const result=await context.api(`/analytics/export?kind=summary&day=${encodeURIComponent(view.day)}`); const link=document.createElement('a'); link.href=URL.createObjectURL(new Blob([result.content],{type:result.mime})); link.download=result.filename; link.click(); setTimeout(()=>URL.revokeObjectURL(link.href),1000); } catch(err){ context.toast(err.message); } finally { button.disabled=false; } };
+}
 export function renderOwner(ctx) {
   context = ctx; clearTimeout(refreshTimer);
   const w=ctx.state.workspace; const page=ctx.state.page; const active=parent[page]||page; const title=pageNames[page]||'首页';
@@ -116,6 +127,7 @@ export function renderOwner(ctx) {
   document.querySelectorAll('[data-page]').forEach(btn=>btn.onclick=()=>ctx.navigate(btn.dataset.page));
   const toggleNav = (id,submenu) => { const button=document.querySelector(`#${id}`), menu=document.querySelector(`#${submenu}`); if(!button||!menu)return; button.onclick=()=>{const open=menu.hidden; menu.hidden=!open; button.setAttribute('aria-expanded',String(open));}; };
   toggleNav('memberNavGroup','memberManagementSubmenu');
+  toggleNav('clubConfigNavGroup','clubConfigSubmenu');
   toggleNav('financeManagementNavGroup','financeManagementSubmenu');
   toggleNav('orderManagementNavGroup','orderManagementSubmenu');
   if(['clubMembers','clubEscorts','memberManagement','accounts','escorts'].includes(page)) bindMembers(['clubEscorts','escorts'].includes(page)?'clubEscorts':'clubMembers');
@@ -124,6 +136,8 @@ export function renderOwner(ctx) {
   if(['orderList','transferOrders','dispatchOrders'].includes(page)) bindOrderManagementSearch();
   if(['serviceManagement','examinerManagement','afterSales'].includes(page)) bindStaffManagement(page==='serviceManagement'?'service':page==='examinerManagement'?'examiner':'afterSales');
   if(page==='overview') bindDashboard();
+  if(page==='overview') bindExports();
+  if(page==='auditLog') bindAudit();
   if(page==='commissionConfig') document.querySelector('#commissionForm').onsubmit=async ev=>{ev.preventDefault();const form=ev.currentTarget;try{await ctx.api('/commissions',{games:w.games.map(g=>({name:g.name,commissionBps:Math.round(Number(form.elements[g.name].value)*100)}))});await ctx.refresh();ctx.toast('抽佣配置已保存');}catch(err){document.querySelector('#commissionError').textContent=err.message;}};
 }
 export function leaveOwner() { clearTimeout(refreshTimer); view.generation++; }
@@ -248,6 +262,6 @@ async function showRankDetails(kind,key,page=1) {
 }
 
 function ownerNavigation(active,page) {
-  const groups={memberManagement:[['clubMembers','俱乐部成员管理'],['clubEscorts','俱乐部陪玩管理']],financeManagement:[['financeList','财务列表'],['commissionConfig','抽佣配置'],['topups','充值审核'],['flows','资金流水'],['settlements','提现与结算']],orderManagement:[['orderList','订单列表'],['transferOrders','转单列表'],['dispatchOrders','派单列表']]};
+  const groups={clubConfig:[['catalog','游戏与商品'],['auditLog','操作审计']],memberManagement:[['clubMembers','俱乐部成员管理'],['clubEscorts','俱乐部陪玩管理']],financeManagement:[['financeList','财务列表'],['commissionConfig','抽佣配置'],['topups','充值审核'],['flows','资金流水'],['settlements','提现与结算']],orderManagement:[['orderList','订单列表'],['transferOrders','转单列表'],['dispatchOrders','派单列表']]};
   return Object.entries(names).map(([p,n])=>groups[p] ? `<button class="owner-nav-item ${p===active?'active':''}" id="${p==='memberManagement'?'memberNavGroup':p+'NavGroup'}" aria-label="${n}" aria-expanded="${p===active}">${icon(navIcons[p],17)}<span>${n}</span>${icon('chevron',12)}</button><div class="owner-member-submenu" id="${p}Submenu" ${p===active?'':'hidden'}>${groups[p].map(([sub,label])=>`<button data-page="${sub}" class="owner-submenu-item ${page===sub?'active':''}" title="${label}"><i></i><span>${label}</span></button>`).join('')}</div>` : `<button class="owner-nav-item ${p===active?'active':''}" data-page="${p}" aria-label="${n}" ${p===active?'aria-current="page"':''}>${icon(navIcons[p],17)}<span>${n}</span>${p==='overview'?'':icon('chevron',12)}</button>`).join('');
 }

@@ -7,7 +7,7 @@ import { FOUR_HOURS, clubDay, metrics, dateRange, trend, ranking, analyticsOptio
 import { defaultLevels, levelOf, meetsLevel, rateOf, hasOpenOrders, profileConflicts, migrateMembership, memberRecord, lockEarnings } from './membership.mjs';
 
 export const roles = {
-  admin: { label: '最高负责人', tone: 'purple', pages: ['overview', 'clubConfig', 'memberManagement', 'clubMembers', 'clubEscorts', 'serviceManagement', 'examinerManagement', 'afterSales', 'financeManagement', 'financeList', 'commissionConfig', 'orderManagement', 'orderList', 'transferOrders', 'dispatchOrders', 'userManagement', 'orders', 'dispatch', 'conversations', 'escorts', 'catalog', 'topups', 'flows', 'settlements', 'accounts'], permissions: ['analytics:view', 'order:view', 'order:create', 'order:dispatch', 'order:review', 'conversation:manage', 'finance:manage', 'account:manage'] },
+  admin: { label: '最高负责人', tone: 'purple', pages: ['overview', 'clubConfig', 'auditLog', 'memberManagement', 'clubMembers', 'clubEscorts', 'serviceManagement', 'examinerManagement', 'afterSales', 'financeManagement', 'financeList', 'commissionConfig', 'orderManagement', 'orderList', 'transferOrders', 'dispatchOrders', 'userManagement', 'orders', 'dispatch', 'conversations', 'escorts', 'catalog', 'topups', 'flows', 'settlements', 'accounts'], permissions: ['analytics:view', 'order:view', 'order:create', 'order:dispatch', 'order:review', 'conversation:manage', 'finance:manage', 'account:manage'] },
   service: { label: '俱乐部客服', tone: 'orange', pages: ['overview', 'orders', 'conversations', 'dispatch'], permissions: ['order:view', 'order:create', 'order:dispatch', 'order:review', 'conversation:manage'] },
   examiner: { label: '俱乐部考官', tone: 'blue', pages: ['overview', 'examinerCandidates'], permissions: ['member:skills:view'] },
   afterSales: { label: '俱乐部售后', tone: 'pink', pages: ['overview', 'orders', 'conversations'], permissions: ['order:view', 'order:review', 'conversation:manage'] },
@@ -35,6 +35,7 @@ function textInput(value, label, max = 100) {
   return value.trim();
 }
 const publicUser = user => ({ id: user.id, memberNo: user.memberNo, memberVersion: user.memberVersion, username: user.username, name: user.name, role: user.role, roleLabel: roles[user.role].label, tone: roles[user.role].tone, active: user.active, online: user.online, games: user.games, shareBps: user.shareBps, levelId: user.levelId, escortFrozen: Boolean(user.escortFrozen), examiner: Boolean(user.examiner) });
+const publicConversation = chat => ({ ...chat, slaOverdue: chat.state !== '已结束' && chat.slaDueAt ? Date.parse(chat.slaDueAt) <= Date.now() : false });
 export const can = (user, permission) => roles[user.role]?.permissions.includes(permission);
 function permit(user, permission) { requireThat(can(user, permission), '你的职责没有此操作权限', 403); }
 
@@ -72,7 +73,8 @@ function initialState() {
     ],
     topups: seed.topups.map(t => ({ ...t, amountCents: cents(t.amount) })),
     settlements: seed.settlements,
-    conversations: seed.conversations.map((c, i) => ({ ...c, id: `chat-${i + 1}`, notes: [], messages: [{ text: c.last, author: c.boss, at: now() }] })),
+    conversations: seed.conversations.map((c, i) => ({ ...c, id: `chat-${i + 1}`, slaDueAt: new Date(time + (i === 0 ? -3600000 : 7200000)).toISOString(), notes: [], messages: [{ text: c.last, author: c.boss, at: now() }] })),
+    refunds: seed.orders.filter(o => o.status === '退款审核').map((o, i) => ({ id: `RF${String(i + 1).padStart(6, '0')}`, orderId: o.id, customer: o.boss, amountCents: cents(o.amount), reason: '客户申请退款，等待售后审核', status: '待审核', originalStatus: '已完成', requestedAt: now(), channel: o.pay === '余额支付' ? '余额原路' : '线下人工' })),
   };
 }
 
@@ -83,6 +85,16 @@ export class ClubStore {
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS club (id INTEGER PRIMARY KEY CHECK (id=1), data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires INTEGER NOT NULL);');
     if (!this.db.prepare('SELECT id FROM club').get()) this.db.prepare('INSERT INTO club VALUES (1, ?)').run(JSON.stringify(initialState()));
     const data = this.read();
+    let migrated = false;
+    if (!Array.isArray(data.refunds)) {
+      data.refunds = data.orders.filter(o => o.status === '退款审核').map((o, i) => ({ id: `RF${String(i + 1).padStart(6, '0')}`, orderId: o.id, customer: o.boss, amountCents: Number(o.amountCents || 0), reason: '客户申请退款，等待售后审核', status: '待审核', originalStatus: '已完成', requestedAt: now(), channel: o.pay === '余额支付' ? '余额原路' : '线下人工' }));
+      migrated = true;
+    }
+    if (!Array.isArray(data.conversations)) { data.conversations = []; migrated = true; }
+    for (const chat of data.conversations) {
+      if (!chat.slaDueAt) { chat.slaDueAt = new Date(Date.parse(chat.time || now()) + 2 * 3600000).toISOString(); migrated = true; }
+    }
+    if (migrated) this.db.prepare('UPDATE club SET data=? WHERE id=1').run(JSON.stringify(data));
     if (migrateMembership(data)) this.db.prepare('UPDATE club SET data=? WHERE id=1').run(JSON.stringify(data));
     this.db.exec('CREATE TABLE IF NOT EXISTS analytics_cache (key TEXT PRIMARY KEY, data TEXT NOT NULL)');
     this.dummyHash = passwordHash(randomBytes(24).toString('hex'));
@@ -151,9 +163,9 @@ export class ClubStore {
     const common = { user: publicUser(user), role: roles[user.role], levels: data.levels, revision: data.revision, clubName: '星河游戏俱乐部' };
     if (user.role === 'escort') return { ...common, user: { ...publicUser(user), commissionByGame: Object.fromEntries((user.games || []).map(game => [game, rateOf(data, user, game)])) }, orders: mine, availableOrders: available, wallet: { balanceCents: user.balanceCents, depositCents: user.depositCents, frozenCents: (user.frozenBalanceCents || 0) + data.withdrawals.filter(w => w.userId === user.id && w.status === '待审核').reduce((a, w) => a + w.amountCents, 0) }, ledger: data.ledger.filter(l => l.userId === user.id), withdrawals: data.withdrawals.filter(w => w.userId === user.id) };
     if (user.role === 'member') return common;
-    if (user.role === 'finance') return { ...common, topups: data.topups, ledger: data.ledger, withdrawals: data.withdrawals, settlements: data.settlements };
+    if (user.role === 'finance') return { ...common, topups: data.topups, ledger: data.ledger, withdrawals: data.withdrawals, settlements: data.settlements, refunds: data.refunds };
     if (user.role === 'examiner') return { ...common, levels: data.levels.map(({ id, name, rank }) => ({ id, name, rank })), members: data.users.filter(u => u.role === 'escort').map(u => ({ id: u.id, memberNo: u.memberNo, name: u.name, active: u.active, games: u.games, levelId: u.levelId, levelName: levelOf(data, u.levelId)?.name || '' })) };
-    if (user.role === 'afterSales') return { ...common, orders: data.orders, conversations: data.conversations };
+    if (user.role === 'afterSales') return { ...common, orders: data.orders, conversations: data.conversations.map(publicConversation), refunds: data.refunds };
     const users = data.customers.map((customer, index) => {
       const customerOrders = data.orders.filter(order => order.boss === customer.name || order.customerId === customer.id);
       const completed = customerOrders.filter(order => order.status === '已完成');
@@ -162,8 +174,8 @@ export class ClubStore {
       const member = data.users.find(candidate => candidate.externalUserId === id || candidate.memberNo === customerNo);
       return { ...customer, id, customerNo, username: customer.username || customer.customerNo || customer.name, phone: customer.phone || '', active: customer.active !== false, orderCount: customerOrders.length, completedOrderCount: completed.length, totalSpentCents: customerOrders.reduce((sum, order) => sum + Number(order.amountCents || 0), 0), joinedClub: Boolean(member), clubMemberId: member?.id || '', memberRole: member?.role || '', memberRoleLabel: member ? roles[member.role]?.label || '' : '' };
     });
-    const response = { ...common, orders: data.orders, games: data.games, products: data.products, conversations: data.conversations, members: data.users.filter(u => u.role === 'escort').map(publicUser), customers: data.customers };
-    if (user.role === 'admin') Object.assign(response, { accounts: data.users.map(u => memberRecord(data, u, publicUser)), members: data.users.filter(u => u.role === 'escort').map(u => memberRecord(data, u, publicUser)), roleOptions: Object.entries(roles).map(([id, r]) => ({ id, label: r.label, pages: r.pages, permissions: r.permissions })), topups: data.topups, ledger: data.ledger, withdrawals: data.withdrawals, settlements: data.settlements, audit: data.audit.slice(0, 30), users });
+    const response = { ...common, orders: data.orders, games: data.games, products: data.products, conversations: data.conversations.map(publicConversation), refunds: data.refunds, members: data.users.filter(u => u.role === 'escort').map(publicUser), customers: data.customers };
+    if (user.role === 'admin') Object.assign(response, { accounts: data.users.map(u => memberRecord(data, u, publicUser)), members: data.users.filter(u => u.role === 'escort').map(u => memberRecord(data, u, publicUser)), roleOptions: Object.entries(roles).map(([id, r]) => ({ id, label: r.label, pages: r.pages, permissions: r.permissions })), topups: data.topups, ledger: data.ledger, withdrawals: data.withdrawals, settlements: data.settlements, refunds: data.refunds, audit: data.audit.slice(0, 30), users });
     if (user.role === 'admin') response.staffGroups = Object.fromEntries(['service', 'examiner', 'afterSales'].map(role => [role, response.accounts.filter(u => u.role === role)]));
     return response;
   }
@@ -271,9 +283,9 @@ export class ClubStore {
       const chat = data.conversations.find(c => c.id === id);
       requireThat(chat, '会话不存在', 404);
       if (input.note) chat.notes.push({ text: textInput(input.note, '跟进记录', 1000), author: actor.name, at: now() });
-      if (input.state) { requireThat(['处理中', '已结束'].includes(input.state), '会话状态无效'); chat.state = input.state; }
+      if (input.state) { requireThat(['处理中', '已结束'].includes(input.state), '会话状态无效'); chat.state = input.state; chat.slaDueAt = input.state === '已结束' ? null : new Date(Date.now() + 2 * 3600000).toISOString(); }
       chat.unread = 0;
-      return chat;
+      return publicConversation(chat);
     });
   }
   withdrawal(user, input) {
@@ -294,12 +306,15 @@ export class ClubStore {
   reviewWithdrawal(user, id, input) {
     return this.transaction(user, 'finance:manage', '复核提现', (data, actor) => {
       const item = data.withdrawals.find(w => w.id === id);
-      requireThat(item?.status === '待审核', '该申请已经处理', 409);
-      requireThat(['approve', 'reject'].includes(input.action), '审核动作无效');
+      requireThat(item, '提现申请不存在', 404);
+      requireThat(['approve', 'reject', 'markPaid'].includes(input.action), '审核动作无效');
+      requireThat(input.action === 'markPaid' ? item.status === '待线下打款' : item.status === '待审核', '该申请已经处理', 409);
       const member = data.users.find(u => u.id === item.userId);
       if (input.action === 'approve') {
         requireThat(member.active && member.depositCents >= 100000, '成员已停用或押金不足，请先处理');
         item.status = '待线下打款';
+      } else if (input.action === 'markPaid') {
+        item.paidAt = now(); item.payoutRef = textInput(input.payoutRef, '打款流水号', 80); item.status = '已打款';
       } else {
         item.reason = textInput(input.reason, '驳回原因', 200); item.status = '已驳回'; member.balanceCents += item.amountCents;
         data.ledger.unshift({ id: randomUUID(), userId: member.id, account: member.name, deltaCents: item.amountCents, afterCents: member.balanceCents, source: id, label: '提现退回', by: actor.name, at: now() });
@@ -322,6 +337,53 @@ export class ClubStore {
       } else { item.state = '已驳回'; item.proof = textInput(input.reason, '驳回原因', 200); }
       return item;
     });
+  }
+  createRefund(user, input) {
+    return this.transaction(user, 'order:review', '创建退款申请', (data, actor) => {
+      const order = data.orders.find(o => o.id === input.orderId);
+      requireThat(order, '订单不存在', 404);
+      requireThat(['已完成', '待验收', '退款审核'].includes(order.status), '当前订单不可申请退款', 409);
+      const value = Number(input.amountCents);
+      const refunded = Number(order.refundedCents || 0);
+      requireThat(Number.isSafeInteger(value) && value > 0 && value <= order.amountCents - refunded, '退款金额不能超过订单可退余额');
+      requireThat(!data.refunds.some(r => r.orderId === order.id && r.status === '待审核'), '该订单已有待审核退款', 409);
+      const item = { id: `RF${Date.now()}${randomBytes(2).toString('hex').toUpperCase()}`, orderId: order.id, customer: order.boss, amountCents: value, reason: textInput(input.reason, '退款原因', 200), status: '待审核', originalStatus: order.status, requestedAt: now(), requestedBy: actor.name, channel: order.pay === '余额支付' ? '余额原路' : '线下人工' };
+      data.refunds.unshift(item); order.status = '退款审核'; order.history.push({ action: '创建退款申请', by: actor.name, at: now(), note: item.reason });
+      return item;
+    });
+  }
+  reviewRefund(user, id, input) {
+    return this.transaction(user, 'order:review', '复核退款申请', (data, actor) => {
+      const item = data.refunds.find(r => r.id === id);
+      requireThat(item, '退款申请不存在', 404);
+      requireThat(item.status === '待审核', '退款申请已经处理', 409);
+      requireThat(['approve', 'reject'].includes(input.action), '审核动作无效');
+      const order = data.orders.find(o => o.id === item.orderId);
+      requireThat(order, '关联订单不存在', 409);
+      if (input.action === 'reject') {
+        item.status = '已驳回'; item.reason = textInput(input.reason, '驳回原因', 200); order.status = item.originalStatus || (order.refundedCents ? '已完成' : '已完成');
+      } else {
+        let customer = data.customers.find(c => c.id === order.customerId || c.name === order.boss);
+        if (order.pay === '余额支付') {
+          requireThat(customer, '找不到原支付用户，无法原路退款', 409);
+          customer.balanceCents += item.amountCents;
+          data.ledger.unshift({ id: randomUUID(), userId: null, account: customer.name, deltaCents: item.amountCents, afterCents: customer.balanceCents, source: item.id, label: '订单退款', by: actor.name, at: now() });
+        }
+        order.refundedCents = Number(order.refundedCents || 0) + item.amountCents;
+        order.status = order.refundedCents >= order.amountCents ? '已退款' : '已完成';
+        item.status = '已通过'; item.approvedAt = now(); item.approvedBy = actor.name;
+        order.history.push({ action: '退款审核通过', by: actor.name, at: now(), note: `${amount(item.amountCents)} · ${item.channel}` });
+      }
+      return item;
+    });
+  }
+  auditList(user, input = {}) {
+    const data = this.read();
+    const actor = data.users.find(u => u.id === user.id && u.active);
+    requireThat(actor, '登录已失效', 401); permit(actor, 'account:manage');
+    const query = String(input.query || '').trim().toLowerCase();
+    requireThat(query.length <= 100, '审计检索条件过长');
+    return data.audit.filter(item => !query || [item.action, item.by, item.at].some(value => String(value || '').toLowerCase().includes(query))).slice(0, 200);
   }
   setOnline(user, input) {
     return this.transaction(user, 'order:accept', '更新接单状态', (data, actor) => {
