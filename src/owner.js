@@ -38,7 +38,7 @@ function rankCard(kind) {
 function groupContent(page, w) {
   if(['clubMembers','clubEscorts','memberManagement','accounts','escorts'].includes(page)) return membersMarkup(context, ['clubEscorts','escorts'].includes(page)?'clubEscorts':'clubMembers');
   const subnav = (links) => `<div class="owner-subnav">${links.map(([p,n])=>`<button data-page="${p}">${n} ${icon('arrow',14)}</button>`).join('')}</div>`;
-  if (page==='clubConfig') return `<section class="owner-panel"><div class="owner-section-head"><h2>俱乐部配置</h2><span class="owner-update">单俱乐部专属工作空间</span></div><div class="owner-config-grid"><div><span>俱乐部名称</span><strong>${e(w.clubName)}</strong></div><div><span>经营统计时区</span><strong>北京时间（UTC+08:00）</strong></div><div><span>总数据更新频率</span><strong>每 4 小时更新</strong></div><div><span>抽佣规则</span><strong>按游戏技能配置</strong></div></div>${subnav([['catalog','游戏与商品']])}</section>`;
+  if (page==='clubConfig') return `<section class="owner-panel"><div class="owner-section-head"><h2>俱乐部配置</h2><span class="owner-update">单俱乐部专属工作空间</span></div><div class="owner-config-grid"><div><span>俱乐部名称</span><strong>${e(w.clubName)}</strong></div><div><span>经营统计时区</span><strong>北京时间（UTC+08:00）</strong></div><div><span>总数据更新频率</span><strong>每 4 小时更新</strong></div><div><span>抽佣规则</span><strong>按游戏配置</strong></div></div>${subnav([['catalog','游戏与商品']])}</section>`;
   if (page==='serviceManagement') return staffPanel(w,'service','客服管理','订单、会话、派单与完单验收');
   if (page==='examinerManagement') return staffPanel(w,'examiner','考官管理','查看陪玩游戏资料与考核范围');
   if (page==='afterSales') {

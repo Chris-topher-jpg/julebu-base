@@ -52,7 +52,7 @@ export function bindMembers(page) {
   document.querySelector('#refreshMembers').onclick=async()=>{try{await ctx.refresh();ctx.toast('成员资料已刷新');}catch(err){ctx.toast(err.message);}};
   document.querySelector('#createMember')?.addEventListener('click',createMember);
   document.querySelector('#batchSkills')?.addEventListener('click',()=>{
-    const members=ctx.state.workspace.members.filter(u=>selected.has(u.id));if(!members.length)return ctx.toast('请先勾选需要绑定技能的陪玩');
+    const members=ctx.state.workspace.members.filter(u=>selected.has(u.id));if(!members.length)return ctx.toast('请先勾选需要绑定游戏的陪玩');
     const dialog=ctx.dialog('批量绑定游戏',`<p>已选择 ${members.length} 位陪玩，新增所选游戏，保留原有游戏。</p>${gameFields([])}`,'保存游戏',form=>ctx.api('/members/skills',{members:members.map(u=>({id:u.id,memberVersion:u.memberVersion})),games:form.getAll('games')}));dialog.classList.add('member-dialog');
   });
 }
