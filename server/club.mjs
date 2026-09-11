@@ -92,7 +92,7 @@ export class ClubStore {
     }
     if (!Array.isArray(data.conversations)) { data.conversations = []; migrated = true; }
     for (const chat of data.conversations) {
-      if (!chat.slaDueAt) { chat.slaDueAt = new Date(Date.parse(chat.time || now()) + 2 * 3600000).toISOString(); migrated = true; }
+      if (!chat.slaDueAt) { const base = Date.parse(chat.createdAt || chat.at || ''); chat.slaDueAt = new Date((Number.isFinite(base) ? base : Date.now()) + 2 * 3600000).toISOString(); migrated = true; }
     }
     if (migrated) this.db.prepare('UPDATE club SET data=? WHERE id=1').run(JSON.stringify(data));
     if (migrateMembership(data)) this.db.prepare('UPDATE club SET data=? WHERE id=1').run(JSON.stringify(data));
