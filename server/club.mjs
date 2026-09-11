@@ -44,7 +44,10 @@ function initialState() {
     { id: 'admin', username: 'admin', name: '杨澄', role: 'admin' },
     { id: 'service', username: 'service', name: '小林', role: 'service' },
     ...seed.escorts.map((e, i) => ({ id: logins[i], username: logins[i], name: e.name, role: 'escort', games: e.games.split(' · '), shareBps: parseInt(e.share) * 100 || 7000, online: ['在线', '陪玩中'].includes(e.state), active: e.state !== '待审核', depositCents: 100000, balanceCents: cents(e.balance) })),
-  ].map(u => ({ active: true, online: false, games: [], balanceCents: 0, depositCents: 0, shareBps: 0, ...u, passwordHash: passwordHash(['admin', 'service', 'escort'].includes(u.username) ? '123456' : randomBytes(24).toString('hex')) }));
+  ].map(u => {
+    const password = ['admin', 'service', 'escort'].includes(u.username) ? '123456' : randomBytes(24).toString('hex');
+    return { active: true, online: false, games: [], balanceCents: 0, frozenBalanceCents: 0, depositCents: 0, shareBps: 0, ...u, passwordHash: passwordHash(password) };
+  });
   const games = [...seed.games, { name: 'Apex', category: 'FPS', multiplier: '1.00x', min: 1, max: 3, state: '上架', tone: 'green' }].map(g => ({ ...g, multiplierBps: Math.round(parseFloat(g.multiplier) * 10000), ...(Number.isInteger(g.commissionBps) ? { commissionBps: g.commissionBps } : {}) }));
   const products = seed.products.map((p, i) => ({ ...p, id: `product-${i + 1}`, priceCents: cents(p.price) }));
   const time = Date.now();
@@ -142,7 +145,7 @@ export class ClubStore {
       return { ...o, expectedShareBps: rate, expectedIncomeCents: Math.round(o.amountCents * rate / 10000) };
     });
     const common = { user: publicUser(user), role: roles[user.role], levels: data.levels, revision: data.revision, clubName: '星河游戏俱乐部' };
-    if (user.role === 'escort') return { ...common, user: { ...publicUser(user), commissionByGame: Object.fromEntries((user.games || []).map(game => [game, rateOf(data, user, game)])) }, orders: mine, availableOrders: available, wallet: { balanceCents: user.balanceCents, depositCents: user.depositCents, frozenCents: data.withdrawals.filter(w => w.userId === user.id && w.status === '待审核').reduce((a, w) => a + w.amountCents, 0) }, ledger: data.ledger.filter(l => l.userId === user.id), withdrawals: data.withdrawals.filter(w => w.userId === user.id) };
+    if (user.role === 'escort') return { ...common, user: { ...publicUser(user), commissionByGame: Object.fromEntries((user.games || []).map(game => [game, rateOf(data, user, game)])) }, orders: mine, availableOrders: available, wallet: { balanceCents: user.balanceCents, depositCents: user.depositCents, frozenCents: (user.frozenBalanceCents || 0) + data.withdrawals.filter(w => w.userId === user.id && w.status === '待审核').reduce((a, w) => a + w.amountCents, 0) }, ledger: data.ledger.filter(l => l.userId === user.id), withdrawals: data.withdrawals.filter(w => w.userId === user.id) };
     if (user.role === 'member') return common;
     if (user.role === 'finance') return { ...common, topups: data.topups, ledger: data.ledger, withdrawals: data.withdrawals, settlements: data.settlements };
     if (user.role === 'examiner') return { ...common, levels: data.levels.map(({ id, name, rank }) => ({ id, name, rank })), members: data.users.filter(u => u.role === 'escort').map(u => ({ id: u.id, memberNo: u.memberNo, name: u.name, active: u.active, games: u.games, levelId: u.levelId, levelName: levelOf(data, u.levelId)?.name || '' })) };
@@ -360,6 +363,17 @@ export class ClubStore {
         requireThat(target.id !== actor.id || input.active, '不能停用自己的账号');
         target.active = input.active;
         if (!input.active) { target.online = false; target.examiner = false; }
+      } else if (action === 'freezeBalance') {
+        const amount = Number(input.amountCents);
+        requireThat(Number.isSafeInteger(amount) && amount > 0, '请输入有效的冻结金额');
+        requireThat(amount <= target.balanceCents, '冻结金额不能超过可提现余额');
+        target.balanceCents -= amount;
+        target.frozenBalanceCents = (target.frozenBalanceCents || 0) + amount;
+      } else if (action === 'unfreezeBalance') {
+        const amount = Number(input.amountCents || target.frozenBalanceCents || 0);
+        requireThat(Number.isSafeInteger(amount) && amount > 0 && amount <= (target.frozenBalanceCents || 0), '解冻金额无效');
+        target.frozenBalanceCents -= amount;
+        target.balanceCents += amount;
       } else requireThat(false, '成员操作不存在', 404);
       target.memberVersion++;
       if (['role','escort','remove','status'].includes(action)) this.db.prepare('DELETE FROM sessions WHERE user_id=?').run(id);
@@ -417,7 +431,7 @@ export class ClubStore {
         requireThat(!data.users.some(u => u.username === username), '该账号已存在', 409);
         const password = textInput(input.password, '初始密码', 128);
         requireThat(password.length >= 8, '新账号密码至少 8 位');
-        target = { id: randomUUID(), memberNo: String(Math.max(81000000, ...data.users.map(u => Number(u.memberNo) || 0)) + 1), memberVersion: 0, username, passwordHash: passwordHash(password), online: false, escortFrozen: false, balanceCents: 0, depositCents: 0 };
+        target = { id: randomUUID(), memberNo: String(Math.max(81000000, ...data.users.map(u => Number(u.memberNo) || 0)) + 1), memberVersion: 0, username, passwordHash: passwordHash(password), online: false, escortFrozen: false, balanceCents: 0, frozenBalanceCents: 0, depositCents: 0 };
         data.users.push(target);
       }
       const games = input.role === 'escort' ? input.games : [];

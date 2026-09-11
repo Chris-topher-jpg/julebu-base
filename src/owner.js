@@ -42,8 +42,7 @@ function groupContent(page, w) {
   if (page==='serviceManagement') return staffPanel(w,'service','客服管理','订单、会话、派单与完单验收');
   if (page==='examinerManagement') return staffPanel(w,'examiner','考官管理','查看陪玩技能资料与考核范围');
   if (page==='afterSales') {
-    const issues=w.orders.filter(o=>o.status==='退款审核');
-    return staffPanel(w,'afterSales','售后管理','退款跟进、订单验收与客户会话') + `<section class="owner-panel"><div class="owner-section-head"><h2>退款待跟进</h2><span class="owner-update">${issues.length} 笔</span></div>${subnav([['conversations','客户会话与跟进']])}<div class="owner-standard-table"><table><thead><tr><th>订单编号</th><th>老板</th><th>游戏</th><th>订单金额</th><th>状态</th><th>操作</th></tr></thead><tbody>${issues.map(o=>`<tr><td>${e(o.id)}</td><td>${e(o.boss)}</td><td>${e(o.game)}</td><td>${yuan(o.amountCents)}</td><td>${e(o.status)}</td><td><button class="owner-link" data-action="detail" data-id="${e(o.id)}">查看订单</button></td></tr>`).join('')||'<tr><td colspan="6">暂无售后待处理订单</td></tr>'}</tbody></table></div></section>`;
+    return staffPanel(w,'afterSales','售后管理','退款、订单验收与客户会话');
   }
   if (page==='financeList') return financeListPage(w);
   if (page==='commissionConfig') return commissionConfigPage(w);

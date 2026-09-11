@@ -110,3 +110,18 @@ test('抽佣配置按游戏技能生效，等级只负责接单门槛且已派�
   assert.equal(store.read().orders.find(o => o.id === order.id).participants[0].shareBps, 6100);
   assert.equal(store.workspace(escort).user.commissionByGame[game.name], 6200);
 });
+
+test('成员可冻结不超过可提现余额的金额，冻结余额单独展示且冻结账号会撤销会话', t => {
+  const store = new ClubStore(':memory:'); t.after(() => store.close());
+  const admin = store.read().users.find(u => u.id === 'admin');
+  const member = store.read().users.find(u => u.id === 'service');
+  store.transaction(admin, 'account:manage', '准备冻结测试', data => { data.users.find(u => u.id === member.id).balanceCents = 12345; });
+  const current = store.read().users.find(u => u.id === member.id);
+  const token = store.login(member.username, '123456').token;
+  const version = current.memberVersion;
+  const frozen = store.membershipAction(admin, member.id, 'freezeBalance', { amountCents: 4500, memberVersion: version });
+  assert.equal(frozen.balanceCents, 7845); assert.equal(frozen.frozenCents, 4500);
+  assert.throws(() => store.membershipAction(admin, member.id, 'freezeBalance', { amountCents: 9000, memberVersion: frozen.memberVersion }), /不能超过可提现余额/);
+  const status = store.membershipAction(admin, member.id, 'status', { active: false, memberVersion: frozen.memberVersion });
+  assert.equal(status.active, false); assert.equal(store.session(token), undefined);
+});

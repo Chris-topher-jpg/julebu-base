@@ -7,3 +7,5 @@
 .owner-shell.is-collapsed .owner-submenu-item{padding:0;justify-content:center}.owner-shell.is-collapsed .owner-submenu-item span{display:none}
 @media(max-width:1400px){.member-search{gap:18px}.member-search input,.member-search select{width:180px}.member-table{min-width:1050px}.member-table th:last-child{width:220px}}
 @media(max-width:700px){.member-search>label{width:100%;justify-content:space-between}.member-search input,.member-search select{width:calc(100% - 75px)}.member-toolbar>div{gap:6px}.member-button{padding:0 8px;font-size:10px}.member-level-strip{flex-wrap:wrap;gap:10px}.owner-submenu-item{padding:0;justify-content:center}.owner-submenu-item span{display:none}.member-pagination{font-size:10px;gap:7px}.member-skills{grid-template-columns:1fr}.members-panel{padding:17px 12px}}
+
+.member-more-actions{display:flex;gap:12px;margin-top:20px}
