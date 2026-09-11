@@ -7,7 +7,7 @@ import { FOUR_HOURS, clubDay, metrics, dateRange, trend, ranking, analyticsOptio
 import { defaultLevels, levelOf, meetsLevel, rateOf, hasOpenOrders, profileConflicts, migrateMembership, memberRecord, lockEarnings } from './membership.mjs';
 
 export const roles = {
-  admin: { label: '最高负责人', tone: 'purple', pages: ['overview', 'clubConfig', 'memberManagement', 'clubMembers', 'clubEscorts', 'serviceManagement', 'examinerManagement', 'afterSales', 'financeManagement', 'financeList', 'commissionConfig', 'orderManagement', 'orderList', 'transferOrders', 'dispatchOrders', 'orders', 'dispatch', 'conversations', 'escorts', 'catalog', 'topups', 'flows', 'settlements', 'accounts'], permissions: ['analytics:view', 'order:view', 'order:create', 'order:dispatch', 'order:review', 'conversation:manage', 'finance:manage', 'account:manage'] },
+  admin: { label: '最高负责人', tone: 'purple', pages: ['overview', 'clubConfig', 'memberManagement', 'clubMembers', 'clubEscorts', 'serviceManagement', 'examinerManagement', 'afterSales', 'financeManagement', 'financeList', 'commissionConfig', 'orderManagement', 'orderList', 'transferOrders', 'dispatchOrders', 'userManagement', 'orders', 'dispatch', 'conversations', 'escorts', 'catalog', 'topups', 'flows', 'settlements', 'accounts'], permissions: ['analytics:view', 'order:view', 'order:create', 'order:dispatch', 'order:review', 'conversation:manage', 'finance:manage', 'account:manage'] },
   service: { label: '俱乐部客服', tone: 'orange', pages: ['overview', 'orders', 'conversations', 'dispatch'], permissions: ['order:view', 'order:create', 'order:dispatch', 'order:review', 'conversation:manage'] },
   examiner: { label: '俱乐部考官', tone: 'blue', pages: ['overview', 'examinerCandidates'], permissions: ['member:skills:view'] },
   afterSales: { label: '俱乐部售后', tone: 'pink', pages: ['overview', 'orders', 'conversations'], permissions: ['order:view', 'order:review', 'conversation:manage'] },
@@ -43,9 +43,12 @@ function initialState() {
   const users = [
     { id: 'admin', username: 'admin', name: '杨澄', role: 'admin' },
     { id: 'service', username: 'service', name: '小林', role: 'service' },
+    { id: 'member01', username: 'member01', name: '星河体验官', role: 'member', memberNo: 'M10001' },
+    { id: 'member02', username: 'member02', name: '开黑玩家', role: 'member', memberNo: 'M10002' },
+    { id: 'member03', username: 'member03', name: '峡谷旅人', role: 'member', memberNo: 'M10003' },
     ...seed.escorts.map((e, i) => ({ id: logins[i], username: logins[i], name: e.name, role: 'escort', games: e.games.split(' · '), shareBps: parseInt(e.share) * 100 || 7000, online: ['在线', '陪玩中'].includes(e.state), active: e.state !== '待审核', depositCents: 100000, balanceCents: cents(e.balance) })),
   ].map(u => {
-    const password = ['admin', 'service', 'escort'].includes(u.username) ? '123456' : randomBytes(24).toString('hex');
+    const password = ['admin', 'service', 'escort', 'member01', 'member02', 'member03'].includes(u.username) ? '123456' : randomBytes(24).toString('hex');
     return { active: true, online: false, games: [], balanceCents: 0, frozenBalanceCents: 0, depositCents: 0, shareBps: 0, ...u, passwordHash: passwordHash(password) };
   });
   const games = [...seed.games, { name: 'Apex', category: 'FPS', multiplier: '1.00x', min: 1, max: 3, state: '上架', tone: 'green' }].map(g => ({ ...g, multiplierBps: Math.round(parseFloat(g.multiplier) * 10000), ...(Number.isInteger(g.commissionBps) ? { commissionBps: g.commissionBps } : {}) }));
@@ -65,7 +68,11 @@ function initialState() {
   ]) orders.push({ id, game, product, hours, amountCents: price, boss, requirement, pay: '线下已收款', status: '待接单', participants: [], version: 1, createdAt: now(), history: [{ action: '示例订单导入', by: '系统', at: now() }] });
   return {
     users, games, products, orders, revision: 1, audit: [], withdrawals: [], ledger: [],
-    customers: [{ name: '周致远', balanceCents: 46000 }, { name: '沈嘉禾', balanceCents: 32000 }, { name: '林先生', balanceCents: 382000 }],
+    customers: [
+      { id: 'customer-1', customerNo: 'U100001', username: 'zhouzhiyuan', phone: '138****0001', name: '周致远', balanceCents: 46000, active: true },
+      { id: 'customer-2', customerNo: 'U100002', username: 'shenjiahe', phone: '139****0002', name: '沈嘉禾', balanceCents: 32000, active: true },
+      { id: 'customer-3', customerNo: 'U100003', username: 'lin先生', phone: '136****0003', name: '林先生', balanceCents: 382000, active: true },
+    ],
     topups: seed.topups.map(t => ({ ...t, amountCents: cents(t.amount) })),
     settlements: seed.settlements,
     conversations: seed.conversations.map((c, i) => ({ ...c, id: `chat-${i + 1}`, notes: [], messages: [{ text: c.last, author: c.boss, at: now() }] })),
@@ -150,8 +157,13 @@ export class ClubStore {
     if (user.role === 'finance') return { ...common, topups: data.topups, ledger: data.ledger, withdrawals: data.withdrawals, settlements: data.settlements };
     if (user.role === 'examiner') return { ...common, levels: data.levels.map(({ id, name, rank }) => ({ id, name, rank })), members: data.users.filter(u => u.role === 'escort').map(u => ({ id: u.id, memberNo: u.memberNo, name: u.name, active: u.active, games: u.games, levelId: u.levelId, levelName: levelOf(data, u.levelId)?.name || '' })) };
     if (user.role === 'afterSales') return { ...common, orders: data.orders, conversations: data.conversations };
+    const users = data.customers.map((customer, index) => {
+      const customerOrders = data.orders.filter(order => order.boss === customer.name || order.customerId === customer.id);
+      const completed = customerOrders.filter(order => order.status === '已完成');
+      return { ...customer, id: customer.id || `customer-${index + 1}`, customerNo: customer.customerNo || `U${String(100001 + index).padStart(6, '0')}`, username: customer.username || customer.customerNo || customer.name, phone: customer.phone || '', active: customer.active !== false, orderCount: customerOrders.length, completedOrderCount: completed.length, totalSpentCents: customerOrders.reduce((sum, order) => sum + Number(order.amountCents || 0), 0) };
+    });
     const response = { ...common, orders: data.orders, games: data.games, products: data.products, conversations: data.conversations, members: data.users.filter(u => u.role === 'escort').map(publicUser), customers: data.customers };
-    if (user.role === 'admin') Object.assign(response, { accounts: data.users.map(u => memberRecord(data, u, publicUser)), members: data.users.filter(u => u.role === 'escort').map(u => memberRecord(data, u, publicUser)), roleOptions: Object.entries(roles).map(([id, r]) => ({ id, label: r.label, pages: r.pages, permissions: r.permissions })), topups: data.topups, ledger: data.ledger, withdrawals: data.withdrawals, settlements: data.settlements, audit: data.audit.slice(0, 30) });
+    if (user.role === 'admin') Object.assign(response, { accounts: data.users.map(u => memberRecord(data, u, publicUser)), members: data.users.filter(u => u.role === 'escort').map(u => memberRecord(data, u, publicUser)), roleOptions: Object.entries(roles).map(([id, r]) => ({ id, label: r.label, pages: r.pages, permissions: r.permissions })), topups: data.topups, ledger: data.ledger, withdrawals: data.withdrawals, settlements: data.settlements, audit: data.audit.slice(0, 30), users });
     if (user.role === 'admin') response.staffGroups = Object.fromEntries(['service', 'examiner', 'afterSales'].map(role => [role, response.accounts.filter(u => u.role === role)]));
     return response;
   }
@@ -173,8 +185,14 @@ export class ClubStore {
       requireThat(tags.length <= 8 && tags.every(t=>typeof t === 'string' && t.trim().length > 0 && t.length <= 30), 'Tag 最多 8 个，每个最多 30 个字符');
       const order = { id: `PO${Date.now()}${randomBytes(2).toString('hex').toUpperCase()}`, boss, game: product.game, tags: [...new Set(tags)], product: product.name, productId: product.id, hours, amountCents: total, pay: input.pay, requirement: textInput(input.requirement, '服务要求', 300), status: '待接单', participants: [], version: 1, createdAt: now(), history: [{ action: '创建订单', by: actor.name, at: now() }] };
       Object.assign(order, { levelId: level.id, levelName: level.name });
+      let customer = data.customers.find(c => c.name === boss);
+      if (!customer && input.pay === '线下已收款') {
+        const index = data.customers.length;
+        customer = { id: `customer-${index + 1}`, customerNo: `U${String(100001 + index).padStart(6, '0')}`, username: boss, phone: '', name: boss, balanceCents: 0, active: true };
+        data.customers.push(customer);
+      }
+      if (customer) order.customerId = customer.id;
       if (input.pay === '余额支付') {
-        const customer = data.customers.find(c => c.name === boss);
         requireThat(customer && customer.balanceCents >= total, '老板余额不足，请先审核充值或选择已收款');
         customer.balanceCents -= total;
         data.ledger.unshift({ id: randomUUID(), userId: null, account: boss, deltaCents: -total, afterCents: customer.balanceCents, source: order.id, label: '订单消费', at: now(), by: actor.name });
@@ -297,7 +315,7 @@ export class ClubStore {
       if (input.action === 'approve') {
         textInput(input.reason, '凭证核验说明', 200);
         let customer = data.customers.find(c => c.name === item.user);
-        if (!customer) data.customers.push(customer = { name: item.user, balanceCents: cents(item.before) });
+        if (!customer) { const index = data.customers.length; data.customers.push(customer = { id: `customer-${index + 1}`, customerNo: `U${String(100001 + index).padStart(6, '0')}`, username: item.user, phone: '', name: item.user, balanceCents: cents(item.before), active: true }); }
         item.before = amount(customer.balanceCents); customer.balanceCents += item.amountCents; item.after = amount(customer.balanceCents);
         item.state = '已通过'; item.proof = '已核验';
         data.ledger.unshift({ id: randomUUID(), userId: null, account: item.user, deltaCents: item.amountCents, afterCents: customer.balanceCents, source: id, label: '充值入账', by: actor.name, at: now() });

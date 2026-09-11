@@ -23,17 +23,17 @@ export const profileConflicts = (data, user) => data.orders.some(order => ['待�
 
 // Upgrade existing local data once, preserving order prices and locked participant shares.
 export function migrateMembership(data) {
-  if (data.membershipVersion === 2) return false;
+  if (data.membershipVersion >= 4) return false;
   if (data.membershipVersion === 1) {
     data.membershipVersion = 2;
-    return true;
+    // Continue through the customer identity migration below.
   }
-  data.levels = structuredClone(defaultLevels);
+  if (!data.levels) data.levels = structuredClone(defaultLevels);
   data.users.forEach((user, i) => {
     user.memberNo ||= String(81000001 + i);
-    user.levelId = user.role === 'escort' ? 'gold' : null;
-    user.escortFrozen = false;
-    user.memberVersion = 1;
+    user.levelId ??= user.role === 'escort' ? 'gold' : null;
+    user.escortFrozen ??= false;
+    user.memberVersion ||= 1;
     if (user.role === 'escort') user.shareBps = rateOf(data, user, user.games?.[0]);
   });
   data.orders.forEach(order => { order.levelId ||= 'gold'; order.levelName ||= '金牌'; });
@@ -42,8 +42,24 @@ export function migrateMembership(data) {
     { name: '永劫无间', category: '动作竞技', state: '上架' },
     { name: '金铲铲之战', category: '策略', state: '上架' },
   ];
+  data.games ||= [];
   for (const game of skills) if (!data.games.some(g => g.name === game.name)) data.games.push({ ...game, min: 1, max: 3, multiplier: '1.00x', multiplierBps: 10000, tone: 'green' });
-  data.membershipVersion = 2;
+  (data.customers ||= []).forEach((customer, i) => {
+    customer.id ||= `customer-${i + 1}`;
+    customer.customerNo ||= `U${String(100001 + i).padStart(6, '0')}`;
+    customer.username ||= customer.customerNo.toLowerCase();
+    customer.phone ??= '';
+    customer.active ??= true;
+  });
+  const knownCustomers = new Set(data.customers.map(customer => customer.name));
+  for (const order of data.orders) {
+    const name = typeof order.boss === 'string' ? order.boss.trim() : '';
+    if (!name || knownCustomers.has(name)) continue;
+    const index = data.customers.length;
+    data.customers.push({ id: `customer-${index + 1}`, customerNo: `U${String(100001 + index).padStart(6, '0')}`, username: name, phone: '', name, balanceCents: 0, active: true });
+    knownCustomers.add(name);
+  }
+  data.membershipVersion = 4;
   return true;
 }
 
