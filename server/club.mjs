@@ -86,6 +86,20 @@ export class ClubStore {
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS club (id INTEGER PRIMARY KEY CHECK (id=1), data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires INTEGER NOT NULL);');
     if (!this.db.prepare('SELECT id FROM club').get()) this.db.prepare('INSERT INTO club VALUES (1, ?)').run(JSON.stringify(initialState()));
     const data = this.read();
+    // Backfill member demo accounts for databases created before the member home was added.
+    const demos = [
+      { id: 'member01', username: 'member01', name: '星河体验官', memberNo: 'M10001' },
+      { id: 'member02', username: 'member02', name: '开黑玩家', memberNo: 'M10002' },
+      { id: 'member03', username: 'member03', name: '峡谷旅人', memberNo: 'M10003' },
+    ];
+    let changed = false;
+    for (const demo of demos) {
+      if (!data.users.some(u => u.username === demo.username)) {
+        data.users.push({ ...demo, role: 'member', active: true, online: false, games: [], balanceCents: 0, frozenBalanceCents: 0, depositCents: 0, shareBps: 0, memberVersion: 0, passwordHash: passwordHash('123456') });
+        changed = true;
+      }
+    }
+    if (changed) this.db.prepare('UPDATE club SET data=? WHERE id=1').run(JSON.stringify(data));
     if (migrateMembership(data)) this.db.prepare('UPDATE club SET data=? WHERE id=1').run(JSON.stringify(data));
     this.db.exec('CREATE TABLE IF NOT EXISTS analytics_cache (key TEXT PRIMARY KEY, data TEXT NOT NULL)');
     this.dummyHash = passwordHash(randomBytes(24).toString('hex'));
@@ -341,7 +355,7 @@ export class ClubStore {
     });
   }
   validateProfile(data, target, games, levelId) {
-    requireThat(Array.isArray(games) && games.length <= data.games.length && games.every(g => data.games.some(item => item.name === g)), '请选择有效的游戏技能');
+      requireThat(Array.isArray(games) && games.length <= data.games.length && games.every(g => data.games.some(item => item.name === g)), '请选择有效的游戏');
     requireThat(levelOf(data, levelId), '请选择有效的陪玩等级');
     const next = { ...target, games: [...new Set(games)], levelId };
     requireThat(!profileConflicts(data, next), '此变更会使成员不再符合已派订单要求，请先退回待确认或待服务订单', 409);
@@ -362,7 +376,10 @@ export class ClubStore {
         requireThat(target.role !== 'escort', '该成员已是陪玩', 409);
         requireThat(target.id !== actor.id, '不能移除自己的最高负责人权限');
         requireThat(target.active, '请先启用该成员账号');
+        const deposit = input.depositCents === undefined ? Number(target.depositCents || 0) : Number(input.depositCents);
+        requireThat(Number.isSafeInteger(deposit) && deposit >= 0, '请输入有效的押金金额');
         target.role = 'escort'; target.online = false; target.escortFrozen = false;
+        target.depositCents = deposit;
         this.validateProfile(data, target, input.games || [], input.levelId || 'gold');
       } else if (action === 'profile') {
         requireThat(target.role === 'escort', '该成员不是陪玩');
@@ -401,7 +418,7 @@ export class ClubStore {
   bindSkills(user, input) {
     return this.transaction(user, 'account:manage', '批量绑定游戏技能', data => {
       requireThat(Array.isArray(input.members) && input.members.length > 0 && input.members.length <= 100 && new Set(input.members.map(m => m.id)).size === input.members.length, '请选择 1–100 位陪玩');
-      requireThat(Array.isArray(input.games) && input.games.length > 0, '请至少选择一个技能');
+      requireThat(Array.isArray(input.games) && input.games.length > 0, '请至少选择一个游戏');
       for (const item of input.members) {
         const target = data.users.find(u => u.id === item.id && u.role === 'escort');
         requireThat(target && target.memberVersion === item.memberVersion, '成员资料已更新，请刷新后重新选择', 409);
@@ -433,7 +450,20 @@ export class ClubStore {
     });
   }
   accountAction(user, id, input) {
-    return this.transaction(user, 'account:manage', id ? '更新成员权限' : '创建成员账号', (data, actor) => {
+    return this.transaction(user, 'account:manage', id ? '更新成员权限' : input.action === 'joinById' ? '加入俱乐部成员' : '创建成员账号', (data, actor) => {
+      if (!id && input.action === 'joinById') {
+        const externalId = textInput(input.userId, '用户 ID', 80);
+        const existing = data.users.find(member => member.id === externalId || member.memberNo === externalId || member.externalUserId === externalId);
+        requireThat(!existing, '该用户已经是俱乐部成员', 409);
+        const source = data.customers.find(customer => customer.id === externalId || customer.customerNo === externalId);
+        requireThat(source, '未找到该用户，请确认用户 ID 正确', 404);
+        const memberNo = source.customerNo || externalId;
+        requireThat(!data.users.some(member => member.memberNo === memberNo), '该用户编号已被占用', 409);
+        const username = `member_${String(memberNo).replace(/[^a-zA-Z0-9_]/g, '').slice(-24) || randomBytes(6).toString('hex')}`;
+        const target = { id: randomUUID(), externalUserId: externalId, memberNo, memberVersion: 0, username, passwordHash: passwordHash(randomBytes(24).toString('hex')), name: source.name, role: 'member', active: true, online: false, games: [], escortFrozen: false, balanceCents: 0, frozenBalanceCents: 0, depositCents: 0, shareBps: 0 };
+        data.users.push(target);
+        return publicUser(target);
+      }
       requireThat(Object.hasOwn(roles, input.role), '职责无效');
       let target = id ? data.users.find(u => u.id === id) : null;
       if (id) requireThat(target, '成员不存在', 404);

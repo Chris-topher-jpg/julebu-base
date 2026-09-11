@@ -40,29 +40,51 @@ function groupContent(page, w) {
   const subnav = (links) => `<div class="owner-subnav">${links.map(([p,n])=>`<button data-page="${p}">${n} ${icon('arrow',14)}</button>`).join('')}</div>`;
   if (page==='clubConfig') return `<section class="owner-panel"><div class="owner-section-head"><h2>俱乐部配置</h2><span class="owner-update">单俱乐部专属工作空间</span></div><div class="owner-config-grid"><div><span>俱乐部名称</span><strong>${e(w.clubName)}</strong></div><div><span>经营统计时区</span><strong>北京时间（UTC+08:00）</strong></div><div><span>总数据更新频率</span><strong>每 4 小时更新</strong></div><div><span>抽佣规则</span><strong>按游戏技能配置</strong></div></div>${subnav([['catalog','游戏与商品']])}</section>`;
   if (page==='serviceManagement') return staffPanel(w,'service','客服管理','订单、会话、派单与完单验收');
-  if (page==='examinerManagement') return staffPanel(w,'examiner','考官管理','查看陪玩技能资料与考核范围');
+  if (page==='examinerManagement') return staffPanel(w,'examiner','考官管理','查看陪玩游戏资料与考核范围');
   if (page==='afterSales') {
     return staffPanel(w,'afterSales','售后管理','退款、订单验收与客户会话');
   }
   if (page==='userManagement') return userManagementPage(w);
   if (page==='financeList') return financeListPage(w);
   if (page==='commissionConfig') return commissionConfigPage(w);
-  if (['orderList','transferOrders','dispatchOrders'].includes(page)) return context.legacyContent();
+  if (['orderList','transferOrders','dispatchOrders'].includes(page)) return orderManagementPage(page,w);
   return context.legacyContent();
+}
+function orderManagementPage(page,w) {
+  const orders = w.orders || [];
+  const title = page==='orderList'?'订单列表':page==='transferOrders'?'转单列表':'派单列表';
+  const rows = page==='transferOrders' ? orders.filter(o=>o.history?.some(h=>String(h.action).includes('退回'))) : page==='dispatchOrders' ? orders.filter(o=>o.participants?.length) : orders;
+  return `<section class="owner-panel"><div class="owner-section-head"><div><h2>${title}</h2><span class="owner-update">共 ${rows.length} 笔 · 支持订单号、老板、陪玩和游戏检索</span></div><label class="owner-user-search">${icon('search',15)}<input id="orderManagementSearch" type="search" placeholder="搜索订单号、老板、陪玩或游戏" aria-label="搜索${title}"></label></div><div class="owner-standard-table"><table><thead><tr><th>订单编号</th><th>老板</th><th>游戏</th><th>陪玩</th><th>状态</th><th>金额（元）</th></tr></thead><tbody id="orderManagementResults">${rows.map(o=>`<tr data-order-management-row="${e([o.id,o.boss,o.game,(o.participants||[]).map(p=>p.name).join(' ')].join(' '))}"><td>${e(o.id)}</td><td>${e(o.boss)}</td><td>${e(o.game)}</td><td>${e((o.participants||[]).map(p=>p.name).join(' / ')||'待分配')}</td><td>${e(o.status)}</td><td>${yuan(o.amountCents)}</td></tr>`).join('')||'<tr><td colspan="6">暂无订单</td></tr>'}</tbody></table></div></section>`;
+}
+function bindOrderManagementSearch() {
+  const input=document.querySelector('#orderManagementSearch');if(!input)return;
+  input.oninput=()=>{const q=input.value.trim().toLowerCase();document.querySelectorAll('[data-order-management-row]').forEach(row=>{row.hidden=!row.dataset.orderManagementRow.toLowerCase().includes(q);});};
 }
 function financeListPage(w) {
   const rows=w.settlements||[];
   const total=rows.reduce((sum,r)=>sum+Number(String(r.amount||'').replace(/[^\d.]/g,''))*100,0);
-  return `<section class="owner-panel"><div class="owner-section-head"><h2>财务列表</h2><span class="owner-update">账户余额（人民币） ¥ ${((w.customers||[]).reduce((s,c)=>s+c.balanceCents,0)/100).toFixed(2)}</span></div><div class="finance-summary"><strong>¥ ${(total/100).toLocaleString('zh-CN',{minimumFractionDigits:2})}</strong><span>累计结算金额</span></div><div class="owner-standard-table finance-table"><table><thead><tr><th>账单月份</th><th>申请状态</th><th>申请拒绝原因</th><th>打款状态</th><th>打款金额（元）</th><th>经营流水（元）</th><th>订单流水（元）</th><th>礼物流水（元）</th><th>总收入（元）</th><th>订单收入（元）</th><th>手续费（元）</th><th>到账金额</th></tr></thead><tbody>${rows.map(r=>{const amount=Number(String(r.amount||'').replace(/[^\d.]/g,''))||0;return `<tr><td>${e(r.period)}</td><td>${e(r.state||'已通过')}</td><td>—</td><td>${e(r.state||'待打款')}</td><td>${amount.toFixed(2)}</td><td>${(amount*5.1).toFixed(2)}</td><td>${(amount*4.8).toFixed(2)}</td><td>0.00</td><td>${amount.toFixed(2)}</td><td>${(amount*.96).toFixed(2)}</td><td>${(amount*.02).toFixed(2)}</td><td>${(amount*.98).toFixed(2)}</td></tr>`;}).join('')||'<tr><td colspan="12">暂无财务账单</td></tr>'}</tbody></table></div></section>`;
+  return `<section class="owner-panel"><div class="owner-section-head"><div><h2>财务列表</h2><span class="owner-update">账户余额（人民币） ¥ ${((w.customers||[]).reduce((s,c)=>s+c.balanceCents,0)/100).toFixed(2)}</span></div><label class="owner-user-search">${icon('search',15)}<input id="financeSearch" type="search" placeholder="搜索账单月份、状态或用户昵称" aria-label="搜索财务账单"></label></div><div class="finance-summary"><strong>¥ ${(total/100).toLocaleString('zh-CN',{minimumFractionDigits:2})}</strong><span>累计结算金额</span></div><div class="owner-standard-table finance-table"><table><thead><tr><th>账单月份</th><th>申请状态</th><th>申请拒绝原因</th><th>打款状态</th><th>打款金额（元）</th><th>经营流水（元）</th><th>订单流水（元）</th><th>礼物流水（元）</th><th>总收入（元）</th><th>订单收入（元）</th><th>手续费（元）</th><th>到账金额</th></tr></thead><tbody id="financeResults">${rows.map(r=>{const amount=Number(String(r.amount||'').replace(/[^\d.]/g,''))||0;return `<tr data-finance-row="${e([r.period,r.state,r.user,r.name].filter(Boolean).join(' '))}"><td>${e(r.period)}</td><td>${e(r.state||'已通过')}</td><td>—</td><td>${e(r.state||'待打款')}</td><td>${amount.toFixed(2)}</td><td>${(amount*5.1).toFixed(2)}</td><td>${(amount*4.8).toFixed(2)}</td><td>0.00</td><td>${amount.toFixed(2)}</td><td>${(amount*.96).toFixed(2)}</td><td>${(amount*.02).toFixed(2)}</td><td>${(amount*.98).toFixed(2)}</td></tr>`;}).join('')||'<tr><td colspan="12">暂无财务账单</td></tr>'}</tbody></table></div></section>`;
+}
+function bindFinanceSearch() {
+  const input=document.querySelector('#financeSearch'); if(!input)return;
+  input.oninput=()=>{const q=input.value.trim().toLowerCase();document.querySelectorAll('[data-finance-row]').forEach(row=>{row.hidden=!row.dataset.financeRow.toLowerCase().includes(q);});};
 }
 function commissionConfigPage(w) {
-  return `<section class="owner-panel"><div class="owner-section-head"><h2>抽佣配置</h2><span class="owner-update">按陪玩技能（游戏）设置分成，已派订单保持原比例</span></div><form id="commissionForm"><div class="owner-standard-table"><table><thead><tr><th>游戏技能</th><th>分类</th><th>状态</th><th>陪玩抽成比例（%）</th></tr></thead><tbody>${w.games.map(g=>`<tr><td>${e(g.name)}</td><td>${e(g.category||'—')}</td><td>${e(g.state||'')}</td><td><input type="number" name="${e(g.name)}" value="${(g.commissionBps??7000)/100}" min="0.01" max="100" step="0.01" required></td></tr>`).join('')}</tbody></table></div><button class="owner-primary" type="submit">保存抽佣配置</button><p class="owner-error" id="commissionError"></p></form></section>`;
+  return `<section class="owner-panel"><div class="owner-section-head"><h2>抽佣配置</h2><span class="owner-update">按陪玩游戏设置分成，已派订单保持原比例</span></div><form id="commissionForm"><div class="owner-standard-table"><table><thead><tr><th>游戏</th><th>分类</th><th>状态</th><th>陪玩抽成比例（%）</th></tr></thead><tbody>${w.games.map(g=>`<tr><td>${e(g.name)}</td><td>${e(g.category||'—')}</td><td>${e(g.state||'')}</td><td><input type="number" name="${e(g.name)}" value="${(g.commissionBps??7000)/100}" min="0.01" max="100" step="0.01" required></td></tr>`).join('')}</tbody></table></div><button class="owner-primary" type="submit">保存抽佣配置</button><p class="owner-error" id="commissionError"></p></form></section>`;
 }
 function staffPanel(w, role, title, scope) {
   const rows=w.staffGroups[role];
   const status = u => `<span class="owner-status ${u.active?'':'off'}">${u.active?'正常':'停用'}</span>`;
   const online = u => `<span class="owner-status ${u.online?'online':''}">${u.online?'在线':'离线'}</span>`;
-  return `<section class="owner-panel"><div class="owner-section-head"><h2>${title}</h2><span class="owner-update">共 ${rows.length} 人 · 在成员管理设置身份后自动同步</span></div><div class="owner-standard-table"><table><thead><tr><th>用户ID</th><th>昵称</th><th>头像</th><th>成员状态</th><th>在线状态</th><th>身份</th></tr></thead><tbody>${rows.map(u=>`<tr><td>${e(u.memberNo)}</td><td>${e(u.name)}</td><td><span class="owner-staff-avatar" aria-label="${e(u.name)}的头像">${e(u.name.slice(0,1))}</span></td><td>${status(u)}</td><td>${online(u)}</td><td>${e(u.roleLabel)}</td></tr>`).join('')||`<tr><td colspan="6">暂无${title}成员，请在成员管理设置身份。</td></tr>`}</tbody></table></div></section>`;
+  return `<section class="owner-panel"><div class="owner-section-head"><div><h2>${title}</h2><span class="owner-update">共 ${rows.length} 人 · 在成员管理设置身份后自动同步</span></div><label class="owner-user-search">${icon('search',15)}<input id="staffSearch-${role}" type="search" placeholder="搜索用户 ID 或昵称" aria-label="搜索${title}成员"></label></div><div class="owner-standard-table"><table><thead><tr><th>用户ID</th><th>昵称</th><th>头像</th><th>成员状态</th><th>在线状态</th><th>身份</th></tr></thead><tbody id="staffResults-${role}"></tbody></table></div></section>`;
+}
+function bindStaffManagement(role) {
+  const input=document.querySelector(`#staffSearch-${role}`), body=document.querySelector(`#staffResults-${role}`), rows=context.state.workspace.staffGroups[role]||[];
+  if(!input||!body)return;
+  const status=u=>`<span class="owner-status ${u.active?'':'off'}">${u.active?'正常':'停用'}</span>`;
+  const online=u=>`<span class="owner-status ${u.online?'online':''}">${u.online?'在线':'离线'}</span>`;
+  const draw=()=>{const q=input.value.trim().toLowerCase();const visible=rows.filter(u=>[u.id,u.memberNo,u.name,u.username].some(v=>String(v||'').toLowerCase().includes(q)));body.innerHTML=visible.map(u=>`<tr><td>${e(u.memberNo)}</td><td>${e(u.name)}</td><td><span class="owner-staff-avatar" aria-label="${e(u.name)}的头像">${e(u.name.slice(0,1))}</span></td><td>${status(u)}</td><td>${online(u)}</td><td>${e(u.roleLabel)}</td></tr>`).join('')||'<tr><td colspan="6"><div class="owner-empty">没有找到符合条件的成员</div></td></tr>';};
+  input.oninput=draw;draw();
 }
 function userManagementPage(w) {
   const users = w.users || [];
@@ -98,6 +120,9 @@ export function renderOwner(ctx) {
   toggleNav('orderManagementNavGroup','orderManagementSubmenu');
   if(['clubMembers','clubEscorts','memberManagement','accounts','escorts'].includes(page)) bindMembers(['clubEscorts','escorts'].includes(page)?'clubEscorts':'clubMembers');
   if(page==='userManagement') bindUserManagement();
+  if(page==='financeList') bindFinanceSearch();
+  if(['orderList','transferOrders','dispatchOrders'].includes(page)) bindOrderManagementSearch();
+  if(['serviceManagement','examinerManagement','afterSales'].includes(page)) bindStaffManagement(page==='serviceManagement'?'service':page==='examinerManagement'?'examiner':'afterSales');
   if(page==='overview') bindDashboard();
   if(page==='commissionConfig') document.querySelector('#commissionForm').onsubmit=async ev=>{ev.preventDefault();const form=ev.currentTarget;try{await ctx.api('/commissions',{games:w.games.map(g=>({name:g.name,commissionBps:Math.round(Number(form.elements[g.name].value)*100)}))});await ctx.refresh();ctx.toast('抽佣配置已保存');}catch(err){document.querySelector('#commissionError').textContent=err.message;}};
 }
