@@ -53,7 +53,7 @@ export function createClubServer({ database = resolve(root, 'data/club.sqlite') 
           if (url.pathname === '/api/workspace') return json(store.workspace(user));
           const analytics = url.pathname.match(/^\/api\/analytics\/([a-z]+)$/);
           if (analytics) return json(store.analytics(user, analytics[1], Object.fromEntries(url.searchParams)));
-          const resources = { orders: 'order:create', accounts: 'account:manage', topups: 'finance:manage', ledger: 'finance:manage', withdrawals: 'finance:manage', conversations: 'conversation:manage' };
+          const resources = { orders: 'order:view', accounts: 'account:manage', topups: 'finance:manage', ledger: 'finance:manage', withdrawals: 'finance:manage', conversations: 'conversation:manage' };
           const resource = url.pathname.slice(5);
           requireThat(resources[resource], '接口不存在', 404);
           requireThat(can(user, resources[resource]), '你的职责没有此操作权限', 403);

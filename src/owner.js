@@ -1,10 +1,10 @@
 import { escapeHtml as e, icon } from './ui.js';
-import { membersMarkup, bindMembers } from './members.js';
+import { membersMarkup, bindMembers, openMemberRole } from './members.js';
 
-const names = { overview: '首页', clubConfig: '俱乐部配置', memberManagement: '成员管理', examinerManagement: '考官管理', afterSales: '售后管理' };
-const navIcons = { overview: 'grid', clubConfig: 'game', memberManagement: 'users', examinerManagement: 'headset', afterSales: 'receipt' };
+const names = { overview: '首页', clubConfig: '俱乐部配置', memberManagement: '成员管理', serviceManagement: '客服管理', examinerManagement: '考官管理', afterSales: '售后管理' };
+const navIcons = { overview: 'grid', clubConfig: 'game', memberManagement: 'users', serviceManagement: 'headset', examinerManagement: 'headset', afterSales: 'receipt' };
 const parent = { catalog: 'clubConfig', topups: 'clubConfig', flows: 'clubConfig', settlements: 'clubConfig', accounts: 'memberManagement', escorts: 'memberManagement', clubMembers: 'memberManagement', clubEscorts: 'memberManagement', conversations: 'afterSales' };
-const pageNames = { ...names, clubMembers:'俱乐部成员管理', clubEscorts:'俱乐部陪玩管理', catalog:'游戏与商品', topups:'充值审核', flows:'资金流水', settlements:'提现与结算', accounts:'账号与权限', escorts:'陪玩档案', conversations:'客户会话', orders:'订单记录', dispatch:'派单台' };
+const pageNames = { ...names, clubMembers:'俱乐部成员管理', clubEscorts:'俱乐部陪玩管理', serviceManagement:'客服管理', catalog:'游戏与商品', topups:'充值审核', flows:'资金流水', settlements:'提现与结算', accounts:'账号与权限', escorts:'陪玩档案', conversations:'客户会话', orders:'订单记录', dispatch:'派单台' };
 const dtf = new Intl.DateTimeFormat('sv-SE', {timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
 const timestamp = value => dtf.format(new Date(value));
 const day = () => timestamp(Date.now()).slice(0,10);
@@ -39,13 +39,17 @@ function groupContent(page, w) {
   if(['clubMembers','clubEscorts','memberManagement','accounts','escorts'].includes(page)) return membersMarkup(context, ['clubEscorts','escorts'].includes(page)?'clubEscorts':'clubMembers');
   const subnav = (links) => `<div class="owner-subnav">${links.map(([p,n])=>`<button data-page="${p}">${n} ${icon('arrow',14)}</button>`).join('')}</div>`;
   if (page==='clubConfig') return `<section class="owner-panel"><div class="owner-section-head"><h2>俱乐部配置</h2><span class="owner-update">单俱乐部专属工作空间</span></div><div class="owner-config-grid"><div><span>俱乐部名称</span><strong>${e(w.clubName)}</strong></div><div><span>经营统计时区</span><strong>北京时间（UTC+08:00）</strong></div><div><span>总数据更新频率</span><strong>每 4 小时更新</strong></div><div><span>订单分成</span><strong>按订单确认时比例留存</strong></div></div>${subnav([['catalog','游戏与商品'],['topups','充值审核'],['flows','资金流水'],['settlements','提现与结算']])}</section>`;
-  if (page==='memberManagement') return `<section class="owner-panel"><div class="owner-section-head"><h2>成员管理</h2><button class="owner-primary" data-action="newAccount">新增成员账号</button></div>${subnav([['accounts','账号与权限'],['escorts','陪玩档案']])}<div class="owner-standard-table"><table><thead><tr><th>成员</th><th>账号</th><th>职责</th><th>状态</th><th>游戏</th><th>操作</th></tr></thead><tbody>${w.accounts.map(u=>`<tr><td>${e(u.name)}</td><td>${e(u.username)}</td><td>${e(u.roleLabel)}</td><td><span class="owner-status ${u.active?'':'off'}">${u.active?'启用':'停用'}</span></td><td>${e(u.games.join(' / ')||'—')}</td><td><button class="owner-link" data-action="editAccount" data-id="${e(u.id)}">编辑权限</button></td></tr>`).join('')}</tbody></table></div></section>`;
-  if (page==='examinerManagement') return `<section class="owner-panel"><div class="owner-section-head"><h2>考官管理</h2><span class="owner-update">从俱乐部陪玩成员中设置考官</span></div><div class="owner-standard-table"><table><thead><tr><th>成员</th><th>可考核游戏</th><th>账号状态</th><th>考官资格</th><th>操作</th></tr></thead><tbody>${w.members.map(u=>`<tr><td>${e(u.name)}</td><td>${e(u.games.join(' / '))}</td><td>${u.active?'启用':'停用'}</td><td>${u.examiner?'已设为考官':'普通成员'}</td><td><button class="owner-link" data-owner-examiner="${e(u.id)}">${u.examiner?'取消考官资格':'设为考官'}</button></td></tr>`).join('')}</tbody></table></div></section>`;
+  if (page==='serviceManagement') return staffPanel(w,'service','客服管理','订单、会话、派单与完单验收');
+  if (page==='examinerManagement') return staffPanel(w,'examiner','考官管理','查看陪玩技能资料与考核范围');
   if (page==='afterSales') {
     const issues=w.orders.filter(o=>o.status==='退款审核');
-    return `<section class="owner-panel"><div class="owner-section-head"><h2>售后管理</h2><span class="owner-update">${issues.length} 笔退款待跟进</span></div>${subnav([['conversations','客户会话与跟进']])}<div class="owner-standard-table"><table><thead><tr><th>订单编号</th><th>老板</th><th>游戏</th><th>订单金额</th><th>状态</th><th>操作</th></tr></thead><tbody>${issues.map(o=>`<tr><td>${e(o.id)}</td><td>${e(o.boss)}</td><td>${e(o.game)}</td><td>${yuan(o.amountCents)}</td><td>${e(o.status)}</td><td><button class="owner-link" data-action="detail" data-id="${e(o.id)}">查看订单</button></td></tr>`).join('')||'<tr><td colspan="6">暂无售后待处理订单</td></tr>'}</tbody></table></div></section>`;
+    return staffPanel(w,'afterSales','售后管理','退款跟进、订单验收与客户会话') + `<section class="owner-panel"><div class="owner-section-head"><h2>退款待跟进</h2><span class="owner-update">${issues.length} 笔</span></div>${subnav([['conversations','客户会话与跟进']])}<div class="owner-standard-table"><table><thead><tr><th>订单编号</th><th>老板</th><th>游戏</th><th>订单金额</th><th>状态</th><th>操作</th></tr></thead><tbody>${issues.map(o=>`<tr><td>${e(o.id)}</td><td>${e(o.boss)}</td><td>${e(o.game)}</td><td>${yuan(o.amountCents)}</td><td>${e(o.status)}</td><td><button class="owner-link" data-action="detail" data-id="${e(o.id)}">查看订单</button></td></tr>`).join('')||'<tr><td colspan="6">暂无售后待处理订单</td></tr>'}</tbody></table></div></section>`;
   }
   return context.legacyContent();
+}
+function staffPanel(w, role, title, scope) {
+  const rows=w.staffGroups[role];
+  return `<section class="owner-panel"><div class="owner-section-head"><h2>${title}</h2><button class="owner-primary" data-page="clubMembers">设置成员身份</button></div><p class="owner-update">共 ${rows.length} 人 · 在成员管理设置身份后自动同步</p><div class="owner-standard-table"><table><thead><tr><th>用户ID</th><th>成员</th><th>账号</th><th>身份</th><th>状态</th><th>业务范围</th><th>操作</th></tr></thead><tbody>${rows.map(u=>`<tr><td>${e(u.memberNo)}</td><td>${e(u.name)}</td><td>${e(u.username)}</td><td>${e(u.roleLabel)}</td><td><span class="owner-status ${u.active?'':'off'}">${u.active?'正常':'停用'}</span></td><td>${scope}</td><td><button class="owner-link" data-staff-role="${e(u.id)}">设置角色</button></td></tr>`).join('')||`<tr><td colspan="7">暂无${title}成员，请在成员管理设置身份。</td></tr>`}</tbody></table></div></section>`;
 }
 export function renderOwner(ctx) {
   context = ctx; clearTimeout(refreshTimer);
@@ -55,10 +59,8 @@ export function renderOwner(ctx) {
   document.querySelector('#app').innerHTML=`<div class="owner-shell ${view.collapsed?'is-collapsed':''}"><aside class="owner-sidebar"><div class="owner-brand"><span class="owner-brand-symbol">${icon('game',24)}</span><strong>${e(w.clubName)}</strong></div><nav aria-label="最高负责人主导航">${ownerNavigation(active,page)}</nav></aside><main class="owner-main"><header class="owner-topbar"><div><button class="owner-icon-button" id="collapseOwnerNav" aria-label="${view.collapsed?'展开':'收起'}侧边栏" aria-expanded="${!view.collapsed}"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 5h18M3 12h7M3 19h18m5-10-3 3 3 3"/></svg></button><span class="owner-breadcrumb">${title}</span></div><div class="owner-top-actions"><button class="owner-link" id="metricRules">统计口径</button><span class="owner-user-avatar">${icon('users',20)}</span><span class="owner-username">${e(w.user.name)}</span><span class="owner-role">最高负责人</span><button class="owner-icon-button" data-action="logout" aria-label="退出登录">退出</button></div></header><div class="owner-page-tabs"><span class="owner-page-tab"><i></i>${title}</span></div><div class="owner-content" id="ownerContent">${page==='overview'?home():groupContent(page,w)}</div></main></div>`;
   document.querySelector('#collapseOwnerNav').onclick=()=>{ view.collapsed=!view.collapsed; document.querySelector('.owner-shell').classList.toggle('is-collapsed',view.collapsed); document.querySelector('#collapseOwnerNav').setAttribute('aria-expanded',String(!view.collapsed)); };
   document.querySelector('#metricRules').onclick=()=>ctx.dialog('经营数据统计口径', `<p>金额以人民币元展示，内部以整数分汇总。</p><p>完成金额、完成笔数：按完成时间统计当前已完成订单。下单人数：按下单时间对客户去重；历史账号缺少客户 ID 时使用老板称呼。</p><p>日期按北京时间 00:00 至次日 00:00 计算，结束日期包含当天。总数据每四小时更新，日经营数据每五分钟刷新。</p><p>排名只包含已完成订单。陪玩榜每位成员统计参与订单的全额，同一多人订单可出现在多位成员下，成员金额不能相加作为俱乐部 GMV，也不等于个人到手收益。</p><p>旧示例订单未记录完成时间时使用示例下单时间。真实订单缺少完成时间时不纳入日期统计。</p>`);
-  document.querySelectorAll('[data-owner-examiner]').forEach(btn=>btn.onclick=()=>{
-    const u=w.members.find(m=>m.id===btn.dataset.ownerExaminer);
-    ctx.dialog(u.examiner?'取消考官资格':'设置考官', `<p>${e(u.name)} · ${e(u.games.join(' / '))}</p><p>考官资格记录在成员档案中。</p>`, '确认保存', ()=>ctx.api(`/examiners/${u.id}`,{examiner:!u.examiner}));
-  });
+  document.querySelectorAll('[data-staff-role]').forEach(btn=>btn.onclick=()=>openMemberRole(ctx,btn.dataset.staffRole));
+  document.querySelectorAll('[data-page]').forEach(btn=>btn.onclick=()=>ctx.navigate(btn.dataset.page));
   document.querySelector('#memberNavGroup').onclick=()=>{membersExpanded=!membersExpanded;document.querySelector('#memberSubmenu').hidden=!membersExpanded;document.querySelector('#memberNavGroup').setAttribute('aria-expanded',String(membersExpanded));};
   if(['clubMembers','clubEscorts','memberManagement','accounts','escorts'].includes(page)) bindMembers(['clubEscorts','escorts'].includes(page)?'clubEscorts':'clubMembers');
   if(page==='overview') bindDashboard();

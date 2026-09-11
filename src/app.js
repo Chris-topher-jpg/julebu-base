@@ -1,8 +1,8 @@
 import { escapeHtml as e, icon, loginMarkup } from './ui.js';
 import { renderOwner, leaveOwner } from './owner.js';
 
-const labels = { overview: '工作台', orders: '订单管理', dispatch: '派单台', conversations: '会话中心', escorts: '陪玩成员', catalog: '游戏与商品', topups: '充值审核', flows: '资金流水', settlements: '提现与结算', accounts: '成员与权限', availableOrders: '接单大厅', myOrders: '我的订单', myEarnings: '我的收益' };
-const symbols = { overview: 'grid', orders: 'receipt', dispatch: 'trend', conversations: 'users', escorts: 'headset', catalog: 'game', topups: 'wallet', flows: 'trend', settlements: 'wallet', accounts: 'users', availableOrders: 'game', myOrders: 'receipt', myEarnings: 'wallet' };
+const labels = { overview: '工作台', serviceManagement: '客服管理', examinerCandidates: '陪玩技能资料', orders: '订单管理', dispatch: '派单台', conversations: '会话中心', escorts: '陪玩成员', catalog: '游戏与商品', topups: '充值审核', flows: '资金流水', settlements: '提现与结算', accounts: '成员与权限', availableOrders: '接单大厅', myOrders: '我的订单', myEarnings: '我的收益' };
+const symbols = { overview: 'grid', serviceManagement:'headset', examinerCandidates:'users', orders: 'receipt', dispatch: 'trend', conversations: 'users', escorts: 'headset', catalog: 'game', topups: 'wallet', flows: 'trend', settlements: 'wallet', accounts: 'users', availableOrders: 'game', myOrders: 'receipt', myEarnings: 'wallet' };
 const state = { workspace: null, page: 'overview', filter: '全部', query: '', busy: false };
 const money = cents => `¥ ${(Number(cents || 0) / 100).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const date = value => value ? new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) : '—';
@@ -87,11 +87,14 @@ function bindSharedActions() {
   });
 }
 function pageContent() {
-  const pages = { overview, orders: () => orderPage(false), myOrders: () => orderPage(true), dispatch: dispatchPage, availableOrders: availablePage, conversations: conversationPage, myEarnings: earningsPage, accounts: accountsPage, escorts: membersPage, catalog: catalogPage, flows: flowPage, topups: topupsPage, settlements: settlementsPage };
+  const pages = { examinerCandidates: examinerCandidatesPage, overview, orders: () => orderPage(false), myOrders: () => orderPage(true), dispatch: dispatchPage, availableOrders: availablePage, conversations: conversationPage, myEarnings: earningsPage, accounts: accountsPage, escorts: membersPage, catalog: catalogPage, flows: flowPage, topups: topupsPage, settlements: settlementsPage };
   return pages[state.page]();
 }
+function examinerCandidatesPage() { return intro('陪玩技能资料','查看陪玩的统一等级、游戏技能及账号状态。') + panel('陪玩技能资料','由负责人设置考官身份后使用。',table(['成员','等级','游戏技能','状态'],(state.workspace.members||[]).map(u=>row([e(u.name),e(u.levelName||'—'),e(u.games.join(' / ')),badge(u.active?'启用':'停用')])))); }
 function overview() {
   const w = state.workspace; const mine = w.user.role === 'escort';
+  if(w.user.role==='examiner') return intro('考官工作台','查看俱乐部陪玩的等级与游戏技能资料。') + panel('考核资料','由负责人在成员管理中统一维护',`<div class="owner-subnav"><button data-page="examinerCandidates">陪玩技能资料 →</button></div>`);
+  if(w.user.role==='afterSales') return intro('售后工作台','跟进退款、订单验收和客户会话。') + `<section class="stats">${metric('退款待跟进',w.orders.filter(o=>o.status==='退款审核').length,'及时处理售后申请','orange','receipt')}${metric('待验收订单',w.orders.filter(o=>o.status==='待验收').length,'核对服务完成情况','green','trend')}${metric('待跟进会话',w.conversations.filter(c=>c.state!=='已结束').length,'回复客户并记录结果','blue','users')}</section>` + panel('售后业务','选择要处理的事项',`<div class="owner-subnav"><button data-page="orders">订单管理 →</button><button data-page="conversations">会话中心 →</button></div>`);
   if(w.user.role==='finance') return intro('财务工作台','处理充值审核、资金流水与提现结算。') + `<section class="stats">${metric('待审核充值',w.topups.filter(t=>t.state==='待审核').length,'核实实际收款后入账','blue','wallet')}${metric('待审核提现',w.withdrawals.filter(t=>t.status==='待审核').length,'审核后安排线下打款','orange','receipt')}</section>` + panel('财务业务','按实际凭证核验',`<div class="owner-subnav"><button data-page="topups">充值审核</button><button data-page="flows">资金流水</button><button data-page="settlements">提现与结算</button></div>`);
   if(w.user.role==='member') return intro('我的成员信息','你已加入星河游戏俱乐部。') + panel('当前身份',w.user.roleLabel,`<p>成员：${e(w.user.name)}</p><p>用户ID：${e(w.user.memberNo)}</p><p>业务权限由俱乐部会长设置，开通陪玩后可使用接单功能。</p>`);
   const pending = w.orders.filter(o => ['待接单', '待确认', '待服务'].includes(o.status));
@@ -116,8 +119,8 @@ function orderButtons(o, mine) {
     if (o.status === '陪玩中' && !p.finished) actions += button('finish', '提交完单', o.id, true);
     if (p.finished && o.status === '陪玩中') actions += '<span class="muted-text">等待其他成员完单</span>';
   } else {
-    if (o.status === '待接单') actions += button('dispatch', '派单', o.id, true);
-    if (o.status === '待验收') actions += button('review', '验收订单', o.id, true);
+    if (o.status === '待接单' && has('order:dispatch')) actions += button('dispatch', '派单', o.id, true);
+    if (o.status === '待验收' && has('order:review')) actions += button('review', '验收订单', o.id, true);
   }
   return actions;
 }

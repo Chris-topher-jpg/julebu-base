@@ -7,8 +7,10 @@ import { FOUR_HOURS, clubDay, metrics, dateRange, trend, ranking, analyticsOptio
 import { defaultLevels, levelOf, meetsLevel, rateOf, hasOpenOrders, profileConflicts, migrateMembership, memberRecord, lockEarnings } from './membership.mjs';
 
 export const roles = {
-  admin: { label: '最高负责人', tone: 'purple', pages: ['overview', 'clubConfig', 'memberManagement', 'clubMembers', 'clubEscorts', 'examinerManagement', 'afterSales', 'orders', 'dispatch', 'conversations', 'escorts', 'catalog', 'topups', 'flows', 'settlements', 'accounts'], permissions: ['analytics:view', 'order:create', 'order:dispatch', 'order:review', 'conversation:manage', 'finance:manage', 'account:manage'] },
-  service: { label: '客服', tone: 'orange', pages: ['overview', 'orders', 'conversations', 'dispatch'], permissions: ['order:create', 'order:dispatch', 'order:review', 'conversation:manage'] },
+  admin: { label: '最高负责人', tone: 'purple', pages: ['overview', 'clubConfig', 'memberManagement', 'clubMembers', 'clubEscorts', 'serviceManagement', 'examinerManagement', 'afterSales', 'orders', 'dispatch', 'conversations', 'escorts', 'catalog', 'topups', 'flows', 'settlements', 'accounts'], permissions: ['analytics:view', 'order:view', 'order:create', 'order:dispatch', 'order:review', 'conversation:manage', 'finance:manage', 'account:manage'] },
+  service: { label: '俱乐部客服', tone: 'orange', pages: ['overview', 'orders', 'conversations', 'dispatch'], permissions: ['order:view', 'order:create', 'order:dispatch', 'order:review', 'conversation:manage'] },
+  examiner: { label: '俱乐部考官', tone: 'blue', pages: ['overview', 'examinerCandidates'], permissions: ['member:skills:view'] },
+  afterSales: { label: '俱乐部售后', tone: 'pink', pages: ['overview', 'orders', 'conversations'], permissions: ['order:view', 'order:review', 'conversation:manage'] },
   finance: { label: '俱乐部财务', tone: 'purple', pages: ['overview', 'topups', 'flows', 'settlements'], permissions: ['finance:manage'] },
   member: { label: '普通成员', tone: 'navy', pages: ['overview'], permissions: [] },
   escort: { label: '打手', tone: 'green', pages: ['overview', 'availableOrders', 'myOrders', 'myEarnings'], permissions: ['order:accept', 'order:serve', 'withdrawal:create'] },
@@ -143,8 +145,11 @@ export class ClubStore {
     if (user.role === 'escort') return { ...common, orders: mine, availableOrders: available, wallet: { balanceCents: user.balanceCents, depositCents: user.depositCents, frozenCents: data.withdrawals.filter(w => w.userId === user.id && w.status === '待审核').reduce((a, w) => a + w.amountCents, 0) }, ledger: data.ledger.filter(l => l.userId === user.id), withdrawals: data.withdrawals.filter(w => w.userId === user.id) };
     if (user.role === 'member') return common;
     if (user.role === 'finance') return { ...common, topups: data.topups, ledger: data.ledger, withdrawals: data.withdrawals, settlements: data.settlements };
+    if (user.role === 'examiner') return { ...common, levels: data.levels.map(({ id, name, rank }) => ({ id, name, rank })), members: data.users.filter(u => u.role === 'escort').map(u => ({ id: u.id, memberNo: u.memberNo, name: u.name, active: u.active, games: u.games, levelId: u.levelId, levelName: levelOf(data, u.levelId)?.name || '' })) };
+    if (user.role === 'afterSales') return { ...common, orders: data.orders, conversations: data.conversations };
     const response = { ...common, orders: data.orders, games: data.games, products: data.products, conversations: data.conversations, members: data.users.filter(u => u.role === 'escort').map(publicUser), customers: data.customers };
     if (user.role === 'admin') Object.assign(response, { accounts: data.users.map(u => memberRecord(data, u, publicUser)), members: data.users.filter(u => u.role === 'escort').map(u => memberRecord(data, u, publicUser)), roleOptions: Object.entries(roles).map(([id, r]) => ({ id, label: r.label, pages: r.pages, permissions: r.permissions })), topups: data.topups, ledger: data.ledger, withdrawals: data.withdrawals, settlements: data.settlements, audit: data.audit.slice(0, 30) });
+    if (user.role === 'admin') response.staffGroups = Object.fromEntries(['service', 'examiner', 'afterSales'].map(role => [role, response.accounts.filter(u => u.role === role)]));
     return response;
   }
   assignable(data, order, user) {

@@ -1,0 +1,95 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { once } from 'node:events';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { ClubStore } from '../server/club.mjs';
+import { createClubServer } from '../server.mjs';
+
+test('身份切换同步三份名单、撤销旧会话，并在重启后保留', t => {
+  const folder = mkdtempSync(join(tmpdir(), 'club-staff-test-'));
+  const database = join(folder, 'club.sqlite');
+  let store = new ClubStore(database);
+  t.after(() => { store.close(); rmSync(folder, { recursive: true, force: true }); });
+  const admin = store.read().users.find(u => u.id === 'admin');
+  const created = role => store.accountAction(admin, null, { username: `role_${role}`, password: 'testing123', name: `测试${role}`, role, active: true, games: [] });
+  const user = created('member');
+  for (const role of ['service', 'examiner', 'afterSales', 'member', 'afterSales']) {
+    const current = store.read().users.find(u => u.id === user.id);
+    const token = store.login(user.username, 'testing123').token;
+    store.membershipAction(admin, user.id, 'role', { role, memberVersion: current.memberVersion });
+    assert.equal(store.session(token), undefined);
+    const workspace = store.workspace(admin);
+    assert.equal(workspace.accounts.filter(u => u.id === user.id).length, 1);
+    assert.equal(workspace.staffGroups.service.some(u => u.id === user.id), role === 'service');
+    assert.equal(workspace.staffGroups.examiner.some(u => u.id === user.id), role === 'examiner');
+    assert.equal(workspace.staffGroups.afterSales.some(u => u.id === user.id), role === 'afterSales');
+    assert.equal(store.read().users.find(u => u.id === user.id).role, role);
+    const login = store.login(user.username, 'testing123');
+    assert.equal(store.workspace(store.session(login.token)).user.role, role);
+  }
+  const current = store.read().users.find(u => u.id === user.id);
+  store.membershipAction(admin, user.id, 'status', { active: false, memberVersion: current.memberVersion });
+  store.close(); store = new ClubStore(database);
+  assert.equal(store.workspace(admin).staffGroups.afterSales.find(u => u.id === user.id).active, false);
+  const options = store.workspace(admin).roleOptions;
+  assert.deepEqual(options.filter(r => ['service','examiner','afterSales'].includes(r.id)).map(r => r.label), ['俱乐部客服','俱乐部考官','俱乐部售后']);
+  assert.equal(options.some(r => r.id === 'manager' || r.label.includes('售后客服') || r.label.includes('客服售后')), false);
+});
+
+test('考官和售后工作区只返回各自需要的数据', async t => {
+  const { server, store } = createClubServer({ database: ':memory:' });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const admin = store.read().users.find(u => u.id === 'admin');
+  for (const role of ['examiner', 'afterSales']) store.accountAction(admin, null, { username: `http_${role}`, password: 'testing123', name: role, role, active: true, games: [] });
+  async function login(username) {
+    const response = await fetch(base + '/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base }, body: JSON.stringify({ username, password: 'testing123' }) });
+    assert.equal(response.status, 200); return response.headers.get('set-cookie').split(';')[0];
+  }
+  const examinerCookie = await login('http_examiner');
+  const examiner = await fetch(base + '/api/workspace', { headers: { Cookie: examinerCookie } });
+  const examinerBody = await examiner.json();
+  for (const key of ['orders','conversations','wallet','accounts','customers','ledger','topups','withdrawals']) assert.equal(examinerBody[key], undefined);
+  assert.ok(examinerBody.members.length);
+  for (const member of examinerBody.members) for (const key of ['depositCents','balanceCents','shareBps','passwordHash']) assert.equal(member[key], undefined);
+  assert.ok(examinerBody.levels.every(l => l.shareBps === undefined));
+  const afterCookie = await login('http_afterSales');
+  const after = await fetch(base + '/api/workspace', { headers: { Cookie: afterCookie } });
+  const afterBody = await after.json();
+  assert.ok(Array.isArray(afterBody.orders)); assert.ok(Array.isArray(afterBody.conversations));
+  for (const key of ['wallet','accounts','members','customers','ledger','topups','withdrawals']) assert.equal(afterBody[key], undefined);
+  const call = (cookie, path, body) => fetch(base + '/api/' + path, { method: body === undefined ? 'GET' : 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json', Origin: base }, body: body === undefined ? undefined : JSON.stringify(body) });
+  assert.equal((await call(afterCookie, 'orders')).status, 200);
+  assert.equal((await call(examinerCookie, 'orders')).status, 403);
+  assert.equal((await call(examinerCookie, 'conversations')).status, 403);
+  for (const path of ['accounts', 'topups', 'ledger', 'withdrawals']) assert.equal((await call(afterCookie, path)).status, 403);
+  const pending = afterBody.orders.find(o => o.status === '待接单');
+  assert.equal((await call(afterCookie, `orders/${pending.id}/dispatch`, { version: pending.version, memberIds: ['escort'] })).status, 403);
+  assert.equal((await call(afterCookie, 'members/service/role', { role: 'admin', memberVersion: 1 })).status, 403);
+  const chat = afterBody.conversations[0];
+  assert.equal((await call(afterCookie, `conversations/${chat.id}`, { note: '已核实售后诉求，等待后续处理', state: '处理中' })).status, 200);
+  const escort = store.read().users.find(u => u.id === 'escort');
+  const live = store.read().orders.find(o => o.id === 'PO20240618031');
+  const review = store.orderAction(escort, live.id, 'finish', { version: live.version, evidence: '服务已完成，请售后核验' });
+  assert.equal((await call(afterCookie, `orders/${review.id}/approve`, { version: review.version })).status, 200);
+  const create = await fetch(base + '/api/orders', { method: 'POST', headers: { Cookie: afterCookie, 'Content-Type': 'application/json', Origin: base }, body: JSON.stringify({ boss: 'x', productId: 'product-1', hours: 1, pay: '线下已收款' }) });
+  assert.equal(create.status, 403);
+});
+
+test('负责人陪玩押金使用实际账户金额，与陪玩本人钱包一致，新账号为零', t => {
+  const store = new ClubStore(':memory:'); t.after(() => store.close());
+  const admin = store.read().users.find(u => u.id === 'admin');
+  const added = store.accountAction(admin, null, { username:'deposit_zero', password:'testing123', name:'押金测试', role:'escort', active:true, games:['王者荣耀'] });
+  store.transaction(admin, 'account:manage', '测试押金读取', data => { data.users.find(u => u.id === 'escort').depositCents = 123456; });
+  const w = store.workspace(admin);
+  assert.equal(w.members.find(u => u.id === 'escort').depositCents, 123456);
+  for (const id of ['escort', added.id]) {
+    const member = w.members.find(u => u.id === id);
+    assert.equal(member.depositCents, store.workspace({ id }).wallet.depositCents);
+    assert.equal(w.accounts.find(u => u.id === id).depositCents, member.depositCents);
+  }
+  assert.equal(w.members.find(u => u.id === added.id).depositCents, 0);
+});

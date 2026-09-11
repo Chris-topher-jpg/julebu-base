@@ -49,6 +49,7 @@ export function memberRecord(data, user, publicUser) {
     shareBps: user.role === 'escort' ? rateOf(data, user) : 0,
     takingStatus: user.role !== 'escort' ? '未开通' : busy ? '接单中' : user.online ? '空闲' : '离线',
     balanceCents: user.balanceCents,
+    depositCents: user.depositCents ?? 0,
     pendingCents: pending.reduce((sum, order) => { const p = order.participants.find(p => p.userId === user.id); return sum + (p?.earningCents ?? Math.round(order.amountCents * (p?.shareBps || 0) / 10000)); }, 0),
     frozenCents: data.withdrawals.filter(w => w.userId === user.id && ['待审核', '待线下打款'].includes(w.status)).reduce((sum, w) => sum + w.amountCents, 0),
   };
