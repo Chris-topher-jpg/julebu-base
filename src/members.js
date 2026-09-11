@@ -57,7 +57,7 @@ export function bindMembers(page) {
   });
 }
 const gameFields = games => `<fieldset class="member-skills"><legend>游戏</legend>${ctx.state.workspace.games.map(g=>`<label><input type="checkbox" name="games" value="${e(g.name)}" ${games.includes(g.name)?'checked':''}>${e(g.name)}${g.state!=='上架'?'<small>维护中</small>':''}</label>`).join('')}</fieldset>`;
-const levelField = id => `<label class="form-field">陪玩等级<select name="levelId">${ctx.state.workspace.levels.map(l=>`<option value="${l.id}" ${l.id===id?'selected':''}>${l.name} · 分成 ${l.shareBps/100}%</option>`).join('')}</select></label>`;
+const levelField = id => `<label class="form-field">陪玩等级<select name="levelId">${ctx.state.workspace.levels.map(l=>`<option value="${l.id}" ${l.id===id?'selected':''}>${l.name}</option>`).join('')}</select></label>`;
 const depositField = value => `<label class="form-field">押金（元）<input type="number" name="deposit" value="${(Number(value || 0)/100).toFixed(2)}" min="0" step="0.01" required></label>`;
 function save(u,action,data){return ctx.api(`/members/${u.id}/${action}`,{...data,memberVersion:u.memberVersion});}
 export function openMemberRole(context,id) {
