@@ -1,9 +1,11 @@
 import { escapeHtml as e, icon, loginMarkup } from './ui.js';
 import { renderOwner, leaveOwner } from './owner.js';
+import { mountCompanions } from './companions.js';
+import { parseRoute, resolveRoute } from './routes.js';
 
 const labels = { overview: '工作台', serviceManagement: '客服管理', examinerCandidates: '考核与质检', orders: '订单管理', dispatch: '派单台', conversations: '会话中心', escorts: '陪玩成员', catalog: '游戏与商品', topups: '充值审核', flows: '资金流水', settlements: '提现与结算', accounts: '成员与权限', availableOrders: '接单大厅', myOrders: '我的订单', myEarnings: '我的收益', memberOrders: '我的点单', memberAfterSales: '售后记录' };
 const symbols = { overview: 'grid', serviceManagement:'headset', examinerCandidates:'users', orders: 'receipt', dispatch: 'trend', conversations: 'users', escorts: 'headset', catalog: 'game', topups: 'wallet', flows: 'trend', settlements: 'wallet', accounts: 'users', availableOrders: 'game', myOrders: 'receipt', myEarnings: 'wallet', memberOrders: 'receipt', memberAfterSales: 'headset' };
-const state = { workspace: null, mode: 'personal', page: 'overview', filter: '全部', query: '', busy: false };
+const state = { workspace: null, mode: 'public', page: 'overview', filter: '全部', query: '', busy: false };
 const money = cents => `¥ ${(Number(cents || 0) / 100).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const date = value => value ? new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) : '—';
 const has = permission => state.workspace?.role.permissions.includes(permission);
@@ -31,16 +33,18 @@ async function api(path, body) {
   }
   return result;
 }
-async function refresh(render = true) { state.workspace = await api(state.mode === 'management' ? '/workspace' : '/me'); if (render) state.mode === 'management' ? renderApp() : renderPublicHome(state.workspace); }
+async function refresh(render = true) { state.workspace = await api(state.mode === 'management' ? '/workspace' : '/me'); if (render) renderApp(); }
 const route = page => `#/${state.mode}/${page}`;
 async function switchWorkspace(mode, page = 'overview') {
+  ({ mode, page } = resolveRoute(mode, page));
   const workspace = await api(mode === 'management' ? '/workspace' : '/me');
   closeDialog(); leaveOwner(); state.mode = mode; state.workspace = workspace;
-  if (mode === 'management' || mode === 'personal') navigate(page); else renderPublicHome(workspace);
+  navigate(page);
 }
 function navigate(page) {
   if(state.workspace?.user.role==='admin') page=({memberManagement:'clubMembers',accounts:'clubMembers',escorts:'clubEscorts'})[page]||page;
   if (!state.workspace?.role.pages.includes(page)) { page = 'overview'; toast('你没有访问该板块的权限'); }
+  if (resolveRoute(state.mode, page).mode === 'public') return renderPublicHome(state.workspace);
   state.page = page; state.filter = '全部'; state.query = '';
   closeDialog(); history.replaceState(null, '', route(page)); renderApp();
   window.scrollTo({ top: 0, behavior: 'instant' });
@@ -156,6 +160,12 @@ function enhancePublicHome() {
     footer?.before(section);
   }
   home.querySelectorAll('[data-action="openEscort"]').forEach(el => el.onclick = () => openEscortDialog(Number(el.dataset.escortIndex || 0)));
+  const directoryHost = home.querySelector('#members');
+  if (directoryHost) {
+    const legacy = directoryHost.querySelector('.companion-grid');
+    if (legacy) legacy.remove();
+    mountCompanions(directoryHost, { requestService: () => { home.querySelector('[data-action="openLogin"]')?.click(); } });
+  }
 }
 function openEscortDialog(index = 0) {
   const profiles = [
@@ -170,7 +180,8 @@ function openEscortDialog(index = 0) {
   return dialog(`${p[0]} · 陪玩档案`, `<div class="escort-profile-dialog"><div class="escort-profile-head"><div class="escort-profile-avatar">${p[0].slice(0, 1)}</div><div><h3>${p[0]}</h3><p>${p[1]}</p><span class="escort-online"><i></i>当前${index % 3 === 1 ? '游戏中' : '空闲中'}</span></div></div><p class="escort-profile-bio">${p[2]}</p><div class="escort-profile-tags">${p[6].split(' / ').map(tag => `<span>${tag}</span>`).join('')}</div><div class="escort-profile-stats"><div><b>${p[3]}</b><span>好评率</span></div><div><b>${p[4]}</b><span>累计服务</span></div><div><b>${p[5]}</b><span>平均响应</span></div></div><div class="escort-profile-note"><strong>服务说明</strong><span>支持预约时间、区服和语音方式备注；下单后可在订单中心查看接单与服务进度。</span></div></div>`, '登录后预约', () => { closeDialog(); document.querySelector('[data-action="openLogin"]')?.click(); });
 }
 function renderPublicHome(workspace) {
-  leaveOwner(); state.workspace = workspace; state.mode = 'public'; state.page = 'overview';
+  if (!workspace) return renderLogin();
+  closeDialog(); leaveOwner(); state.workspace = workspace; state.mode = 'public'; state.page = 'overview';
   history.replaceState(null, '', '#/');
   document.querySelector('#app').innerHTML = loginMarkup();
   enhancePublicHome();
@@ -187,7 +198,7 @@ function renderPublicHome(workspace) {
     const balance = money(workspace.wallet?.balanceCents || 0);
     hero.innerHTML = `<div class="login-card-head"><div class="login-logo">${icon('users', 21)}</div><div><strong>${e(user.name || user.username)}</strong><small>${e(membership?.label || '用户')}</small></div></div><h2>个人信息</h2><div class="public-profile-grid"><div><span>用户 ID</span><strong>${e(user.id)}</strong></div><div><span>账户余额</span><strong>${balance}</strong></div><div><span>累计点单</span><strong>${orderCount} 笔</strong></div><div><span>当前身份</span><strong>${e(membership?.label || '普通用户')}</strong></div></div><div class="public-personal-actions"><button class="login-submit" type="button" data-action="personalOrder">我要点单 ${icon('arrow', 16)}</button><button class="public-secondary-action" type="button" data-action="personalAfterSales">我要售后 ${icon('headset', 15)}</button></div>${canEnterManagement ? `<button class="public-management-action" type="button" data-action="enterManagement">进入后台管理 ${icon('building', 15)}</button>` : ''}<button class="public-secondary-action public-logout-action" type="button" data-action="logout">退出登录</button>`;
   }
-  document.querySelectorAll('[data-action="enterManagement"]').forEach(el => el.onclick = () => switchWorkspace('management'));
+  document.querySelectorAll('[data-action="enterManagement"]').forEach(el => el.onclick = () => perform(el));
   document.querySelectorAll('[data-action="personalOrder"]').forEach(el => el.onclick = () => switchWorkspace('personal', 'placeOrder'));
   document.querySelectorAll('[data-action="personalAfterSales"]').forEach(el => el.onclick = () => switchWorkspace('personal', 'memberAfterSales'));
   document.querySelectorAll('[data-action="logout"]').forEach(el => el.onclick = async () => { await api('/logout', {}); renderLogin(); });
@@ -196,11 +207,12 @@ function renderPublicHome(workspace) {
 function renderApp() {
   const w = state.workspace; if (!w) return renderLogin();
   if (!w.role.pages.includes(state.page)) { state.page = 'overview'; history.replaceState(null, '', route('overview')); }
+  if (resolveRoute(state.mode, state.page).mode === 'public') return renderPublicHome(w);
   const u = w.user;
   renderOwner({ state, api, navigate, refresh, dialog, orderDetail, toast, legacyContent: pageContent });
   const personal = state.mode === 'personal';
   document.querySelector('.owner-shell').classList.toggle('personal-shell', personal);
-  if (!personal || w.membership?.active) document.querySelector('.owner-top-actions').insertAdjacentHTML('afterbegin', `<button class="owner-link workspace-switch" data-action="${personal ? 'enterManagement' : 'enterPersonal'}">${icon(personal ? 'building' : 'users',16)} ${personal ? '进入俱乐部后台' : '返回个人中心'}</button>`);
+  document.querySelector('.owner-top-actions').insertAdjacentHTML('afterbegin', `<button class="owner-link workspace-switch" data-action="enterHome">${icon('grid',16)} 返回首页</button>${personal && w.membership?.active && w.membership.role !== 'member' ? `<button class="owner-link" data-action="enterManagement">${icon('building',16)} 进入后台管理</button>` : ''}`);
   bindSharedActions();
 }
 function bindSharedActions() {
@@ -391,8 +403,8 @@ async function perform(el) {
   const w = state.workspace; const o = getOrder(id);
   try {
     if (action === 'logout') { await api('/logout', {}); closeDialog(); renderLogin(); return; }
-    if (action === 'enterManagement') return switchWorkspace('management');
-    if (action === 'enterPersonal') return switchWorkspace('personal');
+    if (action === 'enterManagement') return await switchWorkspace('management');
+    if (action === 'enterHome' || action === 'enterPersonal') return await switchWorkspace('public');
     if (action === 'refresh') { state.busy = true; await refresh(); toast('已获取最新业务状态'); return; }
     if (action === 'accounts') return navigate('accounts');
     if (action === 'online') { state.busy = true; await api('/online', { online: !w.user.online }); await refresh(); toast(state.workspace.user.online ? '已上线，可以接单' : '已休息，暂不接新单'); return; }
@@ -477,30 +489,23 @@ async function perform(el) {
   finally { state.busy = false; }
 }
 window.addEventListener('hashchange', async () => {
-  const hash = location.hash.replace(/^#\/?/, '').split('/');
-  if (hash[0] && !['management', 'public', 'personal'].includes(hash[0])) return;
-  const mode = hash[0] === 'management' ? 'management' : hash[0] === 'personal' ? 'personal' : 'public';
-  const page = hash[1] || 'overview';
-  if (mode === 'management') {
-    if (!state.workspace || state.mode !== 'management') return switchWorkspace('management', page);
-    return navigate(page);
+  if (['#games', '#members', '#rules', '#help'].includes(location.hash)) return;
+  const { mode, page } = parseRoute(location.hash);
+  try {
+    if (!state.workspace || state.mode !== mode) await switchWorkspace(mode, page);
+    else navigate(page);
+  } catch (error) {
+    if (error.status !== 401) toast(error.message);
   }
-  if (mode === 'personal' && state.workspace && state.mode === 'personal') return navigate(page);
-  if (state.workspace && state.mode === 'public') return renderPublicHome(state.workspace);
-  try { const personal = await api('/me'); renderPublicHome(personal); } catch (error) { if (error.status === 401) renderLogin(); }
 });
 window.addEventListener('pageshow', event => { if (event.persisted) boot(); });
 async function boot() {
-  const hash = location.hash.slice(2).split('/');
-  const requestedMode = hash[0] === 'management' ? 'management' : hash[0] === 'personal' ? 'personal' : 'public';
-  const desired = hash[1] || 'overview';
+  const { mode: requestedMode, page: desired } = parseRoute(location.hash);
   state.mode = requestedMode;
   document.querySelector('#app').innerHTML = '<div class="loading-screen"><span class="brand-mark">C</span><p>正在载入俱乐部工作台…</p></div>';
   try {
     await refresh(false);
-    if (requestedMode === 'management') navigate(state.workspace.role.pages.includes(desired) ? desired : 'overview');
-    else if (requestedMode === 'personal') { state.mode = 'personal'; navigate(state.workspace.role.pages.includes(desired) ? desired : 'overview'); }
-    else renderPublicHome(state.workspace);
+    navigate(state.workspace.role.pages.includes(desired) ? desired : 'overview');
   }
   catch (error) {
     if (error.status === 401) renderLogin();

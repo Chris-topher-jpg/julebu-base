@@ -153,7 +153,7 @@ const restrictedGroups = {
   finance: [['overview','工作台'],['topups','充值审核'],['flows','资金流水'],['settlements','提现与结算']],
   escort: [['overview','工作台'],['availableOrders','接单大厅'],['myOrders','我的订单'],['myEarnings','我的收益']],
   member: [['overview','个人中心'],['memberOrders','我的点单'],['memberAfterSales','售后记录'],['memberWallet','我的钱包']],
-  user: [['overview','个人中心'],['placeOrder','开始点单'],['memberOrders','我的点单'],['memberAfterSales','售后记录']],
+  user: [['overview','返回首页'],['placeOrder','开始点单'],['memberOrders','我的点单'],['memberAfterSales','售后记录']],
 };
 function restrictedNavigation(w, page) {
   const items = restrictedGroups[w.user.role] || [['overview','工作台']];
