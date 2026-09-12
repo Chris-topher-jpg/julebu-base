@@ -44,10 +44,10 @@ export function personalData(data, user, roles) {
   const customer = data.customers.find(c => c.id === user.customerId);
   const belongs = item => Boolean(customer && item.customerId === customer.id);
   const orders = data.orders.filter(belongs).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(o => ({
-    id: o.id, boss: o.boss, game: o.game, product: o.product, hours: o.hours,
+    id: o.id, version:o.version, boss: o.boss, game: o.game, product: o.product, hours: o.hours,
     amountCents: o.amountCents, refundedCents: o.refundedCents || 0, pay: o.pay, status: o.status,
     requirement: o.requirement, createdAt: o.createdAt, levelName: o.levelName, paymentStatus: o.paymentStatus || '已支付', orderMode: o.orderMode || 'quick', preferredEscortId: o.preferredEscortId || null, region: o.region || '', voice: o.voice || '', appointmentAt: o.appointmentAt || null,
-    participants: o.participants.map(p => ({ name: p.name, accepted: p.accepted, finished: p.finished })),
+    participants: o.participants.map(p => ({ name: p.name, evidence:p.evidence||'', accepted: p.accepted, finished: p.finished })),
     history: o.history.map(h => ({ action: h.action, at: h.at })),
   }));
   const orderIds = new Set(orders.map(o => o.id));
@@ -62,12 +62,19 @@ export function personalData(data, user, roles) {
       status: r.status, requestedAt: r.requestedAt, approvedAt: r.approvedAt, channel: r.channel,
     })),
     conversations: data.conversations.filter(c => c.orderId ? orderIds.has(c.orderId) : belongs(c)).map(c => ({
-      id: c.id, channel: c.channel, state: c.state, last: c.last, updatedAt: c.updatedAt,
-      messages: (c.messages || []).map(m => ({ text: m.text, author: m.author, at: m.at })),
+      id: c.id, orderId:c.orderId||null, channel: c.channel, state: c.state, last: c.last, updatedAt: c.updatedAt, createdAt: c.createdAt, escortId: c.escortId || null, escortName: c.escortName || '', unread: c.customerUnread || 0,
+      messages: (c.messages || []).map(m => ({ text: m.text, author: m.author, authorId: m.authorId || null, at: m.at })),
     })),
     ledger: data.ledger.filter(l => !l.userId && belongs(l)).map(l => ({
       id: l.id, account: l.account, deltaCents: l.deltaCents, afterCents: l.afterCents,
       label: l.label, source: l.source, at: l.at,
-    })), games: data.games, products: data.products, members: data.users.filter(candidate => candidate.role === 'escort' && candidate.active).map(candidate => ({ id: candidate.id, name: candidate.name, games: candidate.games || [], online: candidate.online, levelId: candidate.levelId })),
+    })),
+    // Personal workspace needs the same catalog data as the management
+    // workspace so the client can render the order form after switching
+    // from the public home to "开始点单". Keep the payload read-only and
+    // scoped to the public catalog/member roster.
+    games: data.games,
+    products: data.products,
+    members: data.users.filter(candidate => candidate.role === 'escort' && candidate.active && !candidate.escortFrozen).map(candidate => ({ id: candidate.id, name: candidate.name, games: candidate.games || [], online: candidate.online, levelId: candidate.levelId })),
   };
 }

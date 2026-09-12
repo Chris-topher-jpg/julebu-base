@@ -18,8 +18,8 @@ export function lockEarnings(amountCents, participants) {
   values.sort((a, b) => b.numerator % 10000 - a.numerator % 10000 || a.i - b.i);
   for (let i = 0; i < remainder; i++) participants[values[i].i].earningCents++;
 }
-export const hasOpenOrders = (data, id) => data.orders.some(order => !['已完成', '退款审核', '已取消', '已退款'].includes(order.status) && order.participants.some(p => p.userId === id));
-export const profileConflicts = (data, user) => data.orders.some(order => ['待确认', '待服务'].includes(order.status) && order.participants.some(p => p.userId === user.id) && (!user.games.includes(order.game) || !meetsLevel(data, user, order)));
+export const hasOpenOrders = (data, id) => data.orders.some(order => !['已完成', '已取消', '已退款'].includes(order.status) && order.participants.some(p => p.userId === id));
+export const profileConflicts = (data, user) => data.orders.some(order => ['待确认', '待服务'].includes(order.status === '退款审核' ? data.refunds.find(refund=>refund.orderId===order.id && refund.status==='待审核')?.originalStatus : order.status) && order.participants.some(p => p.userId === user.id) && (!user.games.includes(order.game) || !meetsLevel(data, user, order)));
 
 // Upgrade existing local data once, preserving order prices and locked participant shares.
 export function migrateMembership(data) {

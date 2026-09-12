@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { extname, resolve } from 'node:path';
 import { ClubStore, can, requireThat } from './server/club.mjs';
+import { catalogAction } from './server/catalog.mjs';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 export function createClubServer({ database = resolve(root, 'data/club.sqlite') } = {}) {
@@ -73,14 +74,19 @@ export function createClubServer({ database = resolve(root, 'data/club.sqlite') 
           const workspace = store.workspace(user);
           return json(['assessments', 'assessment-records', 'examinations'].includes(resource) ? (workspace.assessments || []) : workspace[resource]);
         }
+        const catalog = url.pathname.match(/^\/api\/catalog\/(games|products)$/);
+        if (catalog) return json(catalogAction(store, user, catalog[1], body));
         if (url.pathname === '/api/orders') return json(store.createOrder(user, body), 201);
         if (url.pathname === '/api/refunds') return json(store.createRefund(user, body), 201);
+        if (url.pathname === '/api/conversations') return json(store.conversationCreate(user, body), 201);
         const refund = url.pathname.match(/^\/api\/refunds\/([^/]+)$/);
         if (refund) return json(store.reviewRefund(user, refund[1], body));
         const orderAction = url.pathname.match(/^\/api\/orders\/([^/]+)\/([^/]+)$/);
         if (orderAction) return json(store.orderAction(user, orderAction[1], orderAction[2], body));
         const chat = url.pathname.match(/^\/api\/conversations\/([^/]+)$/);
         if (chat) return json(store.conversationAction(user, chat[1], body));
+        const chatMessage = url.pathname.match(/^\/api\/conversations\/([^/]+)\/messages$/);
+        if (chatMessage) return json(store.conversationMessage(user, chatMessage[1], body));
         if (url.pathname === '/api/withdrawals') return json(store.withdrawal(user, body), 201);
         const withdrawal = url.pathname.match(/^\/api\/withdrawals\/([^/]+)$/);
         if (withdrawal) return json(store.reviewWithdrawal(user, withdrawal[1], body));
@@ -103,7 +109,7 @@ export function createClubServer({ database = resolve(root, 'data/club.sqlite') 
       }
       requireThat(req.method === 'GET' || req.method === 'HEAD', '请求方法不支持', 405);
       if (url.pathname === '/favicon.ico') { res.writeHead(204); return res.end(); }
-      const path = url.pathname === '/' ? '/index.html' : url.pathname;
+      const path = ['/', '/user', '/user/'].includes(url.pathname) ? '/index.html' : url.pathname;
       requireThat(path === '/index.html' || /^\/src\/[a-zA-Z0-9_-]+\.(js|css|svg|jpg)$/.test(path), '文件不存在', 404);
       const contents = await readFile(resolve(root, path.slice(1)));
       const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.jpg': 'image/jpeg' };

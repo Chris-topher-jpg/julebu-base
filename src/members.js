@@ -30,7 +30,8 @@ export function membersMarkup(context,page) {
 }
 function filtered(page) {
   const w=ctx.state.workspace,f=filters[page];
-  const rows=(page==='clubEscorts'?w.members:w.accounts).filter(u=>(!f.id||[u.memberNo,u.id,u.username].some(v=>String(v).toLowerCase().includes(f.id.toLowerCase())))&&(!f.name||u.name.includes(f.name))&&(!f.role||u.role===f.role)&&(!f.game||u.games.includes(f.game))&&(!f.status||u.takingStatus===f.status));
+  const nameQuery = String(f.name || '').trim().toLowerCase();
+  const rows=(page==='clubEscorts'?w.members:w.accounts).filter(u=>(!f.id||[u.memberNo,u.id,u.username].some(v=>String(v).toLowerCase().includes(String(f.id).trim().toLowerCase())))&&(!nameQuery||String(u.name || '').toLowerCase().includes(nameQuery))&&(!f.role||u.role===f.role)&&(!f.game||Array.isArray(u.games)&&u.games.includes(f.game))&&(!f.status||u.takingStatus===f.status));
   if(page==='clubEscorts') rows.sort((a,b)=>(w.levels.find(l=>l.id===b.levelId)?.rank||0)-(w.levels.find(l=>l.id===a.levelId)?.rank||0)||a.memberNo.localeCompare(b.memberNo));
   return rows;
 }
@@ -40,13 +41,22 @@ function draw(page) {
   const heads=escorts?['<input type="checkbox" id="selectPage" aria-label="选择本页陪玩">','用户ID','昵称','头像','陪玩状态','接单状态','押金（元）','等级','操作']:['用户ID','昵称','头像','成员状态','接单状态','可提现余额（元）','待结算余额（元）','冻结提现余额（元）','操作'];
   const cell = u => `<td><span title="编号 ${e(u.memberNo || '')}">${e(u.id)}</span></td>`;
   document.querySelector('#memberResults').innerHTML=`<table class="member-table ${escorts?'escort-table':''}"><thead><tr>${heads.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${visible.map(u=>`<tr data-member-row="${e(u.id)}">${escorts?`<td><input type="checkbox" data-select-member="${e(u.id)}" aria-label="选择${e(u.name)}" ${selected.has(u.id)?'checked':''}></td>`:''}${cell(u)}<td>${e(u.name)}${!escorts?`<small>${e(roleName(u))}</small>`:''}</td><td>${avatar(u)}</td><td>${pill(!u.active?'停用':escorts&&u.escortFrozen?'冻结':'正常',!u.active||escorts&&u.escortFrozen?'red':'blue')}</td><td>${pill(u.takingStatus,u.takingStatus==='接单中'?'red':u.takingStatus==='未开通'||u.takingStatus==='离线'?'gray':'blue')}</td>${escorts?`<td>${money(u.depositCents)}</td><td><b class="member-level level-${u.levelId}">${e(u.levelName)}</b></td>`:`<td>${money(u.balanceCents)}</td><td>${money(u.pendingCents)}</td><td>${money(u.frozenCents)}</td>`}<td class="member-operations"><div>${escorts?`${action('profile','编辑等级/游戏',u)} ${action('skills','查看游戏',u,'green')}<br>${action('remove','取消陪玩身份',u,'red')} ${action('freeze',u.escortFrozen?'解冻':'冻结',u,u.escortFrozen?'green':'orange')}`:`${u.role!=='escort'&&u.id!==ctx.state.workspace.user.id?action('escort','设为陪玩',u):''} ${u.role!=='escort'?action('role','设置角色',u):action('skills','查看游戏',u)} ${action('more','更多',u)}`}</div></td></tr>`).join('')||`<tr><td colspan="${heads.length}" class="members-empty">没有符合条件的成员</td></tr>`}</tbody></table><div class="member-pagination"><span>共 ${rows.length} 位${escorts?`陪玩 · 已选 ${selected.size} 位`: '成员（包含陪玩）'}</span><button data-member-page="${pages[page]-1}" ${pages[page]===1?'disabled':''}>上一页</button><b>${pages[page]} / ${max}</b><button data-member-page="${pages[page]+1}" ${pages[page]===max?'disabled':''}>下一页</button></div>`;
-  document.querySelectorAll('[data-member-action]').forEach(btn=>btn.onclick=()=>openAction(btn.dataset.memberAction,ctx.state.workspace.accounts.find(u=>u.id===btn.dataset.memberId)));
+  // Escort actions operate on the escort collection; member actions operate on
+  // the full account collection. Using accounts for both made escort actions
+  // receive an undefined user and fail when opening their dialog.
+  const source = escorts ? ctx.state.workspace.members : ctx.state.workspace.accounts;
+  document.querySelectorAll('[data-member-action]').forEach(btn=>btn.onclick=()=>{
+    const user = source.find(u=>u.id===btn.dataset.memberId);
+    if (user) openAction(btn.dataset.memberAction, user);
+    else ctx.toast('成员资料已更新，请刷新列表后重试');
+  });
   document.querySelectorAll('[data-member-page]').forEach(btn=>btn.onclick=()=>{pages[page]=Number(btn.dataset.memberPage);draw(page);});
   document.querySelectorAll('[data-select-member]').forEach(box=>box.onchange=()=>{box.checked?selected.add(box.dataset.selectMember):selected.delete(box.dataset.selectMember);draw(page);});
   const all=document.querySelector('#selectPage');if(all){all.checked=visible.length>0&&visible.every(u=>selected.has(u.id));all.onchange=()=>{visible.forEach(u=>all.checked?selected.add(u.id):selected.delete(u.id));draw(page);};}
 }
 export function bindMembers(page) {
-  selected.forEach(id=>{if(!ctx.state.workspace.members.some(u=>u.id===id))selected.delete(id);});
+  const source = page === 'clubEscorts' ? ctx.state.workspace.members : ctx.state.workspace.accounts;
+  selected.forEach(id=>{if(!source.some(u=>u.id===id))selected.delete(id);});
   draw(page);
   document.querySelector('#memberSearch').onsubmit=ev=>{ev.preventDefault();filters[page]=Object.fromEntries(new FormData(ev.currentTarget));pages[page]=1;draw(page);};
   document.querySelector('#resetMembers').onclick=()=>{Object.keys(filters[page]).forEach(k=>filters[page][k]='');pages[page]=1;selected.clear();ctx.navigate(page);};

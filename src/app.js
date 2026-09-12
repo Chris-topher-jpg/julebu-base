@@ -1,7 +1,11 @@
 import { escapeHtml as e, icon, loginMarkup } from './ui.js';
 import { renderOwner, leaveOwner } from './owner.js';
-import { mountCompanions } from './companions.js';
+import { mountCompanions, findCompanionProfile } from './companions.js';
+import { openCompanionMessenger } from './companion-chat.js';
 import { parseRoute, resolveRoute } from './routes.js';
+import { catalogMarkup, catalogAction } from './catalog.js';
+import { openConversation } from './messages.js';
+import { personalCenterMarkup, personalShellMarkup, personalProfileMarkup, personalActiveOrderStatuses } from './personal.js';
 
 const labels = { overview: '工作台', serviceManagement: '客服管理', examinerCandidates: '考核与质检', orders: '订单管理', dispatch: '派单台', conversations: '会话中心', escorts: '陪玩成员', catalog: '游戏与商品', topups: '充值审核', flows: '资金流水', settlements: '提现与结算', accounts: '成员与权限', availableOrders: '接单大厅', myOrders: '我的订单', myEarnings: '我的收益', memberOrders: '我的点单', memberAfterSales: '售后记录' };
 const symbols = { overview: 'grid', serviceManagement:'headset', examinerCandidates:'users', orders: 'receipt', dispatch: 'trend', conversations: 'users', escorts: 'headset', catalog: 'game', topups: 'wallet', flows: 'trend', settlements: 'wallet', accounts: 'users', availableOrders: 'game', myOrders: 'receipt', myEarnings: 'wallet', memberOrders: 'receipt', memberAfterSales: 'headset' };
@@ -12,7 +16,9 @@ const has = permission => state.workspace?.role.permissions.includes(permission)
 const badge = status => `<span class="status ${['已完成','已通过','已打款','在线','启用'].includes(status) ? 'active' : ['待接单','待确认','待服务','陪玩中','待验收','待审核','待线下打款','退款审核'].includes(status) ? 'warning' : 'muted'}"><i></i>${e(status)}</span>`;
 const button = (action, text, id = '', primary = false, extra = '') => `<button class="${primary ? 'primary-action' : 'ghost-btn'}" data-action="${action}" data-id="${e(id)}" ${extra}>${text}</button>`;
 const empty = message => `<div class="empty-state">${icon('receipt', 28)}<strong>${e(message)}</strong><span>新的业务动态会显示在这里</span></div>`;
-const intro = (title, description, action = '') => `<section class="page-intro"><div><p class="eyebrow">星河游戏俱乐部 / ${e(state.workspace.user.roleLabel)}</p><h1>${title}</h1><p class="subline">${description}</p></div>${action}</section>`;
+const intro = (title, description, action = '') => state.mode === 'personal'
+  ? (action ? `<div class="account-page-tools">${action}</div>` : '')
+  : `<section class="page-intro"><div><p class="eyebrow">星河游戏俱乐部 / ${e(state.workspace.user.roleLabel)}</p><h1>${title}</h1><p class="subline">${description}</p></div>${action}</section>`;
 const metric = (title, value, note, tone, symbol) => `<article class="stat-card"><div class="stat-head">${e(title)}<span class="stat-icon ${tone}">${icon(symbol)}</span></div><div class="stat-value">${value}</div><div class="stat-foot">${e(note)}</div></article>`;
 const panel = (title, sub, body, action = '') => `<article class="panel data-panel"><div class="panel-head"><div><h2>${title}</h2><p>${sub}</p></div>${action}</div>${body}</article>`;
 const table = (headers, rows) => `<div class="table-scroll"><table class="business-table"><thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.join('') || `<tr><td colspan="${headers.length}">${empty('暂无记录')}</td></tr>`}</tbody></table></div>`;
@@ -24,7 +30,7 @@ function toast(message) {
 }
 async function api(path, body) {
   let response;
-  try { response = await fetch(`/api${path}`, { credentials: 'same-origin', headers: body === undefined ? {} : { 'Content-Type': 'application/json' }, method: body === undefined ? 'GET' : 'POST', body: body === undefined ? undefined : JSON.stringify(body) }); }
+  try { response = await fetch(`/api${path}`, { credentials: 'same-origin', headers: body === undefined ? {} : { 'Content-Type': 'application/json' }, method: body === undefined ? 'GET' : 'POST', body: body === undefined ? undefined : JSON.stringify({ ...body, ...(state.mode !== 'management' ? { context: 'personal' } : {}) }) }); }
   catch { throw new Error('无法连接俱乐部服务，请检查服务是否已启动后重试'); }
   const result = await response.json();
   if (!response.ok) {
@@ -41,74 +47,63 @@ async function switchWorkspace(mode, page = 'overview') {
   closeDialog(); leaveOwner(); state.mode = mode; state.workspace = workspace;
   navigate(page);
 }
-function navigate(page) {
+function navigate(page, filter = '全部') {
   if(state.workspace?.user.role==='admin') page=({memberManagement:'clubMembers',accounts:'clubMembers',escorts:'clubEscorts'})[page]||page;
+  if (state.mode === 'public') {
+    const publicPage = ['companions', 'guarantees'].includes(page) ? page : 'overview';
+    state.page = publicPage;
+    history.replaceState(null, '', publicPage === 'overview' ? '#/' : `#/public/${publicPage}`);
+    return renderPublicRoute(state.workspace, publicPage);
+  }
   if (!state.workspace?.role.pages.includes(page)) { page = 'overview'; toast('你没有访问该板块的权限'); }
-  if (resolveRoute(state.mode, page).mode === 'public') return renderPublicHome(state.workspace);
-  state.page = page; state.filter = '全部'; state.query = '';
+  state.page = page; state.filter = filter; state.query = '';
   closeDialog(); history.replaceState(null, '', route(page)); renderApp();
   window.scrollTo({ top: 0, behavior: 'instant' });
 }
 function renderLogin() {
-  leaveOwner();
-  state.workspace = null; state.mode = 'public';
-  if (!['#games', '#members', '#rules'].includes(location.hash)) history.replaceState(null, '', '#/');
+  leaveOwner(); state.workspace = null; state.mode = 'public';
+  const parsedRoute = parseRoute(location.hash, location.pathname);
+  const shouldOpenLogin = /^#\/?login$/.test(location.hash) || parsedRoute.mode !== 'public';
+  const publicPage = parsedRoute.mode === 'public' ? parsedRoute.page : 'overview';
+  state.page = publicPage;
   document.querySelector('#app').innerHTML = loginMarkup();
   enhancePublicHome();
-  const dialog = document.querySelector('#authDialog');
-  const form = document.querySelector('#loginForm');
-  form.innerHTML = `<button class="auth-close" type="button" data-action="closeLogin" aria-label="关闭登录弹窗">×</button><div class="auth-dialog-head"><div class="login-logo">${icon('game', 21)}</div><strong>星河游戏俱乐部</strong></div><h2 id="authTitle">手机号登录</h2><p class="login-subtitle">登录后查看订单进度、收藏账号和报价提醒</p><label>手机号<input id="loginUsername" autocomplete="tel" inputmode="tel" placeholder="请输入手机号" required minlength="3" maxlength="30"></label><label id="passwordField">密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入密码" required maxlength="128"></label><label id="codeField" hidden>手机验证码<div class="code-input-row"><input id="loginCode" inputmode="numeric" placeholder="请输入 6 位验证码" maxlength="6"><button type="button" id="sendCode">获取验证码</button></div></label><button class="login-submit" type="submit" id="authSubmit">登录 / 注册 ${icon('arrow',16)}</button><p class="login-error" id="loginError" role="alert"></p><button class="auth-switch" type="button" id="authModeToggle">验证码登录</button><p class="auth-tip">未注册手机号登录后将自动创建账号</p>`;
-  let verificationMode = false;
-  const setAuthMode = value => {
-    verificationMode = value;
-    document.querySelector('#codeField').hidden = !value;
-    document.querySelector('#passwordField').hidden = value;
-    document.querySelector('#loginPassword').required = !value;
-    document.querySelector('#loginCode').required = value;
-    document.querySelector('#authTitle').textContent = value ? '验证码登录' : '手机号登录';
-    document.querySelector('#authModeToggle').textContent = value ? '密码登录' : '验证码登录';
-    document.querySelector('#loginError').textContent = '';
+  if (publicPage !== 'overview') renderPublicStandalone(publicPage);
+  const modal = document.querySelector('#authDialog'), form = document.querySelector('#loginForm');
+  form.innerHTML = `<button class="auth-close" type="button" data-action="closeLogin" aria-label="关闭登录弹窗">×</button><div class="auth-dialog-head"><div class="login-logo">${icon('game',21)}</div><strong>星河游戏俱乐部</strong></div><h2 id="authTitle">欢迎回来</h2><p class="login-subtitle" id="authDescription">登录后下单，查看订单和售后</p><label>手机号 / 账号<input id="loginUsername" autocomplete="username" placeholder="请输入手机号或账号" required minlength="3" maxlength="30"></label><label id="authNameField" hidden>昵称<input id="registerName" autocomplete="nickname" placeholder="怎么称呼你" maxlength="30"></label><label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入密码" required maxlength="128"></label><button class="login-submit" type="submit" id="authSubmit">登录</button><p class="login-error" id="loginError" role="alert"></p><button class="auth-switch" type="button" id="authModeToggle">还没有账号？立即注册</button>`;
+  let registering = false;
+  const setMode = value => {
+    registering=value; form.querySelector('#authNameField').hidden=!value;
+    form.querySelector('#registerName').required=value;
+    form.querySelector('#authTitle').textContent=value?'创建账号':'欢迎回来';
+    form.querySelector('#authDescription').textContent=value?'注册后即可选择服务、跟踪订单和联系客服':'登录后下单，查看订单和售后';
+    form.querySelector('#authSubmit').textContent=value?'注册并登录':'登录';
+    form.querySelector('#authModeToggle').textContent=value?'已有账号？返回登录':'还没有账号？立即注册';
+    form.querySelector('#loginPassword').minLength=value?8:1;
+    form.querySelector('#loginPassword').autocomplete=value?'new-password':'current-password';
+    form.querySelector('#loginPassword').placeholder=value?'设置至少 8 位密码':'请输入密码';
+    form.querySelector('#loginError').textContent='';
   };
-  const openLogin = event => { event?.preventDefault(); setAuthMode(false); dialog?.showModal(); document.querySelector('#loginUsername')?.focus(); };
-  document.querySelectorAll('[data-action="openLogin"]').forEach(el => el.onclick = openLogin);
-  document.querySelector('[data-action="closeLogin"]')?.addEventListener('click', () => dialog?.close());
-  dialog?.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
-  const toggle = document.querySelector('#authModeToggle');
-  toggle?.addEventListener('click', () => setAuthMode(!verificationMode));
-  document.querySelector('#sendCode')?.addEventListener('click', () => {
-    const phone = document.querySelector('#loginUsername').value.trim();
-    if (!phone) { document.querySelector('#loginError').textContent = '请先输入手机号'; return; }
-    document.querySelector('#loginCode').value = '123456';
-    document.querySelector('#loginError').textContent = '演示验证码已填入：123456';
-  });
-  const loginFoot = document.querySelector('.login-card-foot span');
-  if (loginFoot) loginFoot.textContent = '首次使用？登录后自动创建账号';
-  setAuthMode(false);
-  document.querySelector('#loginError').setAttribute('role', 'alert');
-  document.querySelector('#loginForm').onsubmit = async event => {
-    event.preventDefault(); const form = event.currentTarget; const submit = document.querySelector('#authSubmit');
-    if (submit.disabled) return;
-    submit.disabled = true; submit.textContent = '正在验证身份…'; document.querySelector('#loginError').textContent = '';
+  const open=event=>{event?.preventDefault();if(!modal.isConnected)return;setMode(Boolean(event?.currentTarget?.classList.contains('register-link')));if(!modal.open)modal.showModal();form.querySelector('#loginUsername').focus();};
+  document.querySelectorAll('[data-action="openLogin"]').forEach(el=>el.onclick=open);
+  document.querySelector('[data-action="headerMessages"]')?.addEventListener('click', open);
+  document.querySelector('[data-action="headerAccount"]')?.addEventListener('click', open);
+  form.querySelector('[data-action="closeLogin"]').onclick=()=>modal.close();
+  modal.addEventListener('click',event=>{if(event.target===modal)modal.close();});
+  form.querySelector('#authModeToggle').onclick=()=>setMode(!registering);
+  form.onsubmit=async event=>{
+    event.preventDefault(); const submit=form.querySelector('#authSubmit');if(submit.disabled)return;
+    submit.disabled=true;submit.textContent=registering?'正在创建账号…':'正在登录…';form.querySelector('#loginError').textContent='';
     try {
-      const code = document.querySelector('#loginCode')?.value.trim();
-      if (verificationMode && code !== '123456') throw new Error('演示验证码为 123456');
-      const username = document.querySelector('#loginUsername').value.trim();
-      const password = verificationMode ? '123456' : document.querySelector('#loginPassword').value;
-      try {
-        await api('/login', { username, password });
-      } catch (error) {
-        // Public login doubles as registration for new accounts. Keep existing
-        // staff/demo credentials on the normal login path and only register
-        // when the supplied password meets the server's account requirements.
-        if (error.status !== 401 || verificationMode || password.length < 8) throw error;
-        await api('/register', { username, password, name: username });
-      }
-      dialog?.close();
-      const personal = await api('/me');
-      renderPublicHome(personal);
-    } catch (error) { if (document.querySelector('#loginError')) document.querySelector('#loginError').textContent = error.message; }
-    finally { submit.disabled = false; submit.innerHTML = `登录 / 注册 ${icon('arrow', 16)}`; }
+      await api(registering?'/register':'/login',{username:form.querySelector('#loginUsername').value.trim(),password:form.querySelector('#loginPassword').value,name:form.querySelector('#registerName').value.trim()});
+      const workspace = await api(parsedRoute.mode === 'management' ? '/workspace' : '/me');
+      modal.close();
+      if (parsedRoute.mode === 'public') renderPublicHome(workspace, publicPage);
+      else { state.mode = parsedRoute.mode; state.workspace = workspace; navigate(parsedRoute.page); }
+    } catch(error){form.querySelector('#loginError').textContent=error.message;}
+    finally{submit.disabled=false;submit.textContent=registering?'注册并登录':'登录';}
   };
+  if(shouldOpenLogin)requestAnimationFrame(()=>open());
 }
 function enhancePublicHome() {
   const home = document.querySelector('.public-home');
@@ -120,64 +115,180 @@ function enhancePublicHome() {
     else link.removeAttribute('aria-current');
   });
   links.forEach(link => link.addEventListener('click', () => markNavigation(link.hash)));
-  const section = ['#games', '#members', '#rules'].includes(location.hash) ? location.hash : '#games';
-  markNavigation(section);
+  const parsed = parseRoute(location.hash);
+  const section = parsed.page === 'companions' ? '#members' : parsed.page === 'guarantees' ? '#rules' : '#games';
+  markNavigation(parsed.page === 'companions' ? '#/public/companions' : parsed.page === 'guarantees' ? '#/public/guarantees' : '#/public/overview');
   const online = home.querySelector('.public-online');
   if (online) online.textContent = '星河陪玩';
   const members = home.querySelector('#members');
-  if (members) mountCompanions(members, { requestService: () => {
+  if (members) mountCompanions(members, { onlineOnly: parsed.page === 'overview', compact: parsed.page === 'overview', requestService: () => {
     if (state.workspace?.user) {
       switchWorkspace('personal', 'placeOrder');
       return;
     }
     home.querySelector('.nav-login-link[data-action="openLogin"]')?.click();
-  } });
+  }, openChat: profile => openCompanionChat(profile) });
   const footer = home.querySelector('.public-footer'); footer?.removeAttribute('id');
   if (!home.querySelector('#rules')) {
     const section = document.createElement('section'); section.className = 'guarantee-section'; section.id = 'rules';
-    section.innerHTML = `<div class="section-heading"><div><span>服务保障</span><h1>每一单，都有清晰的进度和依据</h1><p class="section-caption">从支付到售后，平台记录关键节点，遇到问题可以随时追踪处理。</p></div><button class="filter-button" type="button" data-action="openLogin">开始下单 ${icon('arrow', 14)}</button></div><div class="guarantee-grid"><article class="guarantee-item"><span class="guarantee-icon blue">${icon('lock', 21)}</span><div><h3>支付托管</h3><p>支付成功后平台暂存订单金额，服务验收通过再进入结算。</p></div></article><article class="guarantee-item"><span class="guarantee-icon green">${icon('check', 21)}</span><div><h3>接单确认</h3><p>订单同步给客服与匹配打手，接单前可查看服务要求和时间。</p></div></article><article class="guarantee-item"><span class="guarantee-icon orange">${icon('clock', 21)}</span><div><h3>过程留痕</h3><p>预约、签到、开始服务、完单和验收均有记录，状态变化清楚可查。</p></div></article><article class="guarantee-item"><span class="guarantee-icon pink">${icon('headset', 21)}</span><div><h3>售后介入</h3><p>迟到、掉线、时长不足或质量争议，可提交证据申请补做或退款。</p></div></article></div><div class="process-strip"><div><b>01</b><span>提交需求</span></div><i></i><div><b>02</b><span>在线支付</span></div><i></i><div><b>03</b><span>接单服务</span></div><i></i><div><b>04</b><span>验收评价</span></div><i></i><div><b>05</b><span>售后保护</span></div></div>`;
+    section.innerHTML = `<div class="section-heading"><div><span>服务保障</span><h1>每一单，都有清晰的进度和依据</h1><p class="section-caption">从支付到售后，平台记录关键节点，遇到问题可以随时追踪处理。</p></div><button class="filter-button" type="button" data-action="openLogin">开始下单 ${icon('arrow', 14)}</button></div><div class="guarantee-grid"><article class="guarantee-item"><span class="guarantee-icon blue">${icon('lock', 21)}</span><div><h3>交易留痕</h3><p>订单金额和余额变动可追踪，服务验收通过后再结算陪玩收益。</p></div></article><article class="guarantee-item"><span class="guarantee-icon green">${icon('check', 21)}</span><div><h3>接单确认</h3><p>订单同步给客服与匹配打手，接单前可查看服务要求和时间。</p></div></article><article class="guarantee-item"><span class="guarantee-icon orange">${icon('clock', 21)}</span><div><h3>过程留痕</h3><p>下单、接单、开始服务、完单和验收均有记录，状态变化清楚可查。</p></div></article><article class="guarantee-item"><span class="guarantee-icon pink">${icon('headset', 21)}</span><div><h3>售后介入</h3><p>迟到、掉线、时长不足或质量争议，可提交证据申请补做或退款。</p></div></article></div><div class="process-strip"><div><b>01</b><span>提交需求</span></div><i></i><div><b>02</b><span>余额支付</span></div><i></i><div><b>03</b><span>接单服务</span></div><i></i><div><b>04</b><span>服务验收</span></div><i></i><div><b>05</b><span>售后跟进</span></div></div>`;
     footer?.before(section);
   }
-  if (section !== '#games') requestAnimationFrame(() => home.querySelector(section)?.scrollIntoView({ block: 'start' }));
+  // Keep the footer's “联系客服” anchor meaningful. Previously it pointed to
+  // #help while no matching section existed, leaving users at a blank hash.
+  if (!home.querySelector('#help')) {
+    const help = document.createElement('section');
+    help.className = 'help-section';
+    help.id = 'help';
+    help.innerHTML = `<div class="section-heading"><div><span>需要帮助</span><h1>客服会跟进每一笔订单</h1><p class="section-caption">登录后可在会话中心查看处理进度；下单、支付或售后问题都可以留下说明。</p></div><button class="filter-button" type="button" data-action="openLogin">联系在线客服 ${icon('headset', 14)}</button></div><div class="help-cards"><article><strong>订单咨询</strong><p>下单前确认游戏、时长和陪玩要求，避免信息遗漏。</p></article><article><strong>支付与退款</strong><p>支付凭证、退款原因和处理结果都会保留记录。</p></article><article><strong>服务异常</strong><p>迟到、掉线或服务不足，可提交售后申请并填写说明。</p></article></div>`;
+    footer?.before(help);
+  }
+  if (parsed.mode === 'public' && parsed.page === 'overview' && section !== '#games') requestAnimationFrame(() => home.querySelector(section)?.scrollIntoView({ block: 'start' }));
 }
-function renderPublicHome(workspace) {
-  if (!workspace) return renderLogin();
-  closeDialog(); leaveOwner(); state.workspace = workspace; state.mode = 'public'; state.page = 'overview';
-  history.replaceState(null, '', '#/');
+
+function renderPublicStandalone(page) {
+  const home = document.querySelector('.public-home');
+  if (!home) return;
+  const hero = home.querySelector('.public-hero');
+  const members = home.querySelector('#members');
+  const rules = home.querySelector('#rules');
+  const help = home.querySelector('#help');
+  const footer = home.querySelector('.public-footer');
+  [hero, members, rules, help, footer].forEach(el => { if (el) el.hidden = true; });
+  const active = page === 'companions' ? members : rules;
+  if (!active) return;
+  active.hidden = false;
+  active.classList.add('public-standalone-section');
+  // Standalone pages start directly with their content section; the former intro banner was visually redundant.
+  if (page === 'guarantees' && !active.querySelector('.guarantee-detail-grid')) {
+    active.insertAdjacentHTML('beforeend', `<div class="guarantee-detail-grid"><article class="guarantee-detail-card"><h3>下单确认</h3><p>确认游戏、区服、服务时长、预约时间和陪玩要求后再支付，订单内容会保留在订单详情中。</p></article><article class="guarantee-detail-card"><h3>计时与验收</h3><p>服务开始和结束节点由平台记录，完成后由你确认服务结果；如有异议请及时提交说明。</p></article><article class="guarantee-detail-card"><h3>支付凭证</h3><p>支付成功后可在个人中心查看订单金额和支付记录，客服可据此核对款项。</p></article><article class="guarantee-detail-card"><h3>售后申请</h3><p>遇到迟到、掉线、时长不足等情况，可在订单售后入口提交原因和凭证，客服会跟进处理。</p></article></div><div class="guarantee-steps"><h3>处理流程</h3><ol><li>提交订单与服务要求</li><li>陪玩接单并确认时间</li><li>开始服务与计时记录</li><li>完成验收并评价</li><li>异常时提交售后或退款申请</li></ol></div><div class="guarantee-faq"><h3>常见问题</h3><details><summary>什么时候可以申请退款？</summary><p>服务尚未开始或出现可核实的服务问题时，可提交退款申请，客服将根据订单记录和双方说明处理。</p></details><details><summary>售后需要准备什么？</summary><p>请提供订单号、问题描述及相关截图或支付凭证，便于客服快速核对。</p></details></div>`);
+  }
+}
+
+function renderPublicRoute(workspace, page = 'overview') {
+  // Reuse the complete auth-state renderers on both navigation and reload.
+  if (!workspace?.user) return renderLogin();
+  return renderPublicHome(workspace, page);
+}
+
+async function openCompanionChat(profile) {
+  if (!state.workspace?.user) { document.querySelector('.nav-login-link[data-action="openLogin"]')?.click(); return; }
+  if (openCompanionChat.pending) return;
+  openCompanionChat.pending = true;
+  try {
+    let fresh = await api('/me');
+    let chat = fresh.conversations?.find(item => item.escortName === profile.name && item.state !== '已结束');
+    if (!chat) {
+      chat = await api('/conversations', { escortName: profile.name, message: `你好，我想咨询 ${profile.game} 的${profile.service}服务。` });
+      fresh = await api('/me');
+    }
+    state.workspace = fresh;
+    openCompanionMessenger({
+      workspace: fresh, initialChatId: chat.id, profile, api,
+      onWorkspace: updated => { if (state.workspace?.user.id === updated.user.id) state.workspace = updated; },
+      onNavigate: async target => {
+        try {
+          if (target === 'guarantees') renderPublicHome(state.workspace, 'guarantees');
+          else await switchWorkspace('personal', { book: 'placeOrder', orders: 'memberOrders', afterSales: 'memberAfterSales' }[target]);
+        } catch (error) { toast(error.message); }
+      },
+    });
+  } catch (error) { toast(error.message || '暂时无法发起会话'); }
+  finally { openCompanionChat.pending = false; }
+}
+async function openHeaderChat() {
+  if (!state.workspace?.user || openHeaderChat.pending) return;
+  openHeaderChat.pending = true;
+  try {
+    let fresh = await api('/me');
+    let chats = (fresh.conversations || []).filter(chat => chat.state !== '已结束');
+    chats.sort((a, b) => {
+      const unread = Number(b.unread || 0) - Number(a.unread || 0);
+      if (unread) return unread;
+      return (Date.parse(b.updatedAt || b.messages?.at(-1)?.at || '') || 0) - (Date.parse(a.updatedAt || a.messages?.at(-1)?.at || '') || 0);
+    });
+    let chat = chats[0];
+    if (!chat) {
+      chat = await api('/conversations', { escortName: '俱乐部客服', message: '你好，我想咨询陪玩服务，请客服协助。' });
+      fresh = await api('/me');
+      chat = fresh.conversations?.find(item => item.id === chat.id) || chat;
+    }
+    state.workspace = fresh;
+    openCompanionMessenger({
+      workspace: fresh,
+      initialChatId: chat.id,
+      profile: chat.escortName ? findCompanionProfile(chat.escortName) : undefined,
+      api,
+      onWorkspace: updated => { if (state.workspace?.user.id === updated.user.id) state.workspace = updated; },
+      onNavigate: async target => {
+        try {
+          if (target === 'guarantees') renderPublicHome(state.workspace, 'guarantees');
+          else await switchWorkspace('personal', { book: 'placeOrder', orders: 'memberOrders', afterSales: 'memberAfterSales' }[target]);
+        } catch (error) { toast(error.message); }
+      },
+    });
+  } catch (error) { toast(error.message || '暂时无法打开聊天'); }
+  finally { openHeaderChat.pending = false; }
+}
+function renderPublicHome(workspace, page = 'overview') {
+  if (!workspace?.user) return renderLogin();
+  closeDialog(); leaveOwner(); state.workspace = workspace; state.mode = 'public'; state.page = page;
+  history.replaceState(null, '', page === 'overview' ? '#/' : `#/public/${page}`);
   document.querySelector('#app').innerHTML = loginMarkup();
   enhancePublicHome();
+  if (page !== 'overview') renderPublicStandalone(page);
   const user = workspace?.user;
   const membership = workspace?.membership;
   const canEnterManagement = Boolean(membership?.active && membership.role !== 'member');
   const actions = document.querySelector('.public-nav-actions');
   if (user && actions) {
-    actions.innerHTML = `${canEnterManagement ? `<button class="nav-management-link" type="button" data-action="enterManagement">${icon('building', 14)} 进入后台管理</button>` : ''}<span class="public-user-name">${e(user.name || user.username)}</span><button class="nav-logout-link" type="button" data-action="logout">退出</button>`;
+    const displayName = user.name || user.username || '用户';
+    const unread = (workspace.conversations || []).reduce((sum, item) => sum + (Number(item.unread) || 0), 0);
+    actions.innerHTML = `<button class="public-header-message" type="button" data-action="headerMessages" aria-label="消息与售后${unread ? `，${unread}条未读` : ''}">${icon('message', 20)}${unread ? `<span class="public-header-dot">${unread > 99 ? '99+' : unread}</span>` : ''}</button><div class="public-account-wrap"><button class="public-account-trigger" type="button" data-action="headerAccount" aria-haspopup="menu" aria-expanded="false"><span class="public-account-avatar">${e(displayName.slice(0, 1))}</span><span class="public-account-copy"><small>用户</small><strong>${e(displayName)}</strong></span>${icon('chevron', 14)}</button><div class="public-account-menu" role="menu" hidden><div class="public-account-menu-head"><span class="public-account-avatar">${e(displayName.slice(0, 1))}</span><div><strong>${e(displayName)}</strong><small>${e(user.username || user.phone || '')}</small></div></div><div class="public-account-menu-separator"></div><button type="button" role="menuitem" data-action="headerPersonal">${icon('users', 18)}<span>个人中心</span>${icon('arrow', 14)}</button><button type="button" role="menuitem" data-action="headerProfile">${icon('users', 18)}<span>设置</span>${icon('arrow', 14)}</button>${canEnterManagement ? `<button type="button" role="menuitem" data-action="enterManagement">${icon('building', 18)}<span>进入后台管理</span>${icon('arrow', 14)}</button>` : ''}<div class="public-account-menu-separator"></div><button type="button" role="menuitem" class="is-danger" data-action="headerLogout">${icon('arrow', 18)}<span>退出登录</span></button></div></div>`;
+    actions.querySelector('[data-action="headerMessages"]').onclick = () => openHeaderChat();
+    const accountButton = actions.querySelector('[data-action="headerAccount"]');
+    const menu = actions.querySelector('.public-account-menu');
+    const closeMenu = () => { menu.hidden = true; accountButton.setAttribute('aria-expanded', 'false'); };
+    accountButton.onclick = event => { event.stopPropagation(); menu.hidden = !menu.hidden; accountButton.setAttribute('aria-expanded', String(!menu.hidden)); };
+    actions.querySelector('[data-action="headerPersonal"]').onclick = () => switchWorkspace('personal', 'memberProfile');
+    actions.querySelector('[data-action="headerProfile"]').onclick = () => perform({ dataset: { action: 'personalProfile' } });
+    actions.querySelector('[data-action="enterManagement"]')?.addEventListener('click', () => perform({ dataset: { action: 'enterManagement' } }));
+    actions.querySelector('[data-action="headerLogout"]').onclick = async () => { await api('/logout', {}); closeMenu(); renderLogin(); };
+    document.addEventListener('click', closeMenu, { once: true });
   }
   const hero = document.querySelector('.hero-login');
   if (user && hero) {
     const orderCount = Array.isArray(workspace.orders) ? workspace.orders.length : 0;
     const balance = money(workspace.wallet?.balanceCents || 0);
-    hero.innerHTML = `<div class="login-card-head"><div class="login-logo">${icon('users', 21)}</div><div><strong>${e(user.name || user.username)}</strong><small>${e(membership?.label || '用户')}</small></div></div><h2>个人信息</h2><div class="public-profile-grid"><div><span>用户 ID</span><strong>${e(user.id)}</strong></div><div><span>账户余额</span><strong>${balance}</strong></div><div><span>累计点单</span><strong>${orderCount} 笔</strong></div><div><span>当前身份</span><strong>${e(membership?.label || '普通用户')}</strong></div></div><div class="public-personal-actions"><button class="login-submit" type="button" data-action="personalOrder">我要点单 ${icon('arrow', 16)}</button><button class="public-secondary-action" type="button" data-action="personalAfterSales">我要售后 ${icon('headset', 15)}</button></div>${canEnterManagement ? `<button class="public-management-action" type="button" data-action="enterManagement">进入后台管理 ${icon('building', 15)}</button>` : ''}<button class="public-secondary-action public-logout-action" type="button" data-action="logout">退出登录</button>`;
+    hero.innerHTML = `<div class="login-card-head"><div class="login-logo">${icon('users', 21)}</div><div><strong>${e(user.name || user.username)}</strong></div></div><h2>个人信息</h2><div class="public-profile-grid"><div><span>用户 ID</span><strong>${e(user.id)}</strong></div><div><span>账户余额</span><strong>${balance}</strong></div><div><span>累计点单</span><strong>${orderCount} 笔</strong></div></div><div class="public-personal-actions"><button class="login-submit" type="button" data-action="personalOrder">我要点单 ${icon('arrow', 16)}</button><button class="public-secondary-action" type="button" data-action="personalAfterSales">我要售后 ${icon('headset', 15)}</button><button class="public-center-action" type="button" data-action="personalCenter">${icon('users', 18)}<span>个人中心</span>${icon('arrow', 16)}</button></div>${canEnterManagement ? `<button class="public-management-action" type="button" data-action="enterManagement">进入后台管理 ${icon('building', 15)}</button>` : ''}<div class="personal-shortcuts"><button data-action="personalOrders">我的点单</button><button data-action="personalWallet">我的钱包</button><button data-action="personalAfterSales">消息与售后</button></div>`;
   }
   document.querySelectorAll('[data-action="enterManagement"]').forEach(el => el.onclick = () => perform(el));
   document.querySelectorAll('[data-action="personalOrder"]').forEach(el => el.onclick = () => switchWorkspace('personal', 'placeOrder'));
+  document.querySelectorAll('[data-action="personalCenter"]').forEach(el => el.onclick = () => switchWorkspace('personal', 'memberProfile'));
+  document.querySelectorAll('[data-action="personalOrders"]').forEach(el => el.onclick = () => switchWorkspace('personal', 'memberOrders'));
+  document.querySelectorAll('[data-action="personalWallet"]').forEach(el => el.onclick = () => switchWorkspace('personal', 'memberWallet'));
   document.querySelectorAll('[data-action="personalAfterSales"]').forEach(el => el.onclick = () => switchWorkspace('personal', 'memberAfterSales'));
   document.querySelectorAll('[data-action="logout"]').forEach(el => el.onclick = async () => { await api('/logout', {}); renderLogin(); });
-  document.querySelectorAll('[data-action="openLogin"]').forEach(el => el.onclick = () => toast('你已登录，可直接进入后台管理或选择陪玩'));
+  document.querySelectorAll('[data-action="openLogin"]').forEach(el => el.onclick = () => el.closest('#help') ? perform({dataset:{action:'supportChat'}}) : switchWorkspace('personal','placeOrder'));
 }
 function renderApp() {
   const w = state.workspace; if (!w) return renderLogin();
   if (!w.role.pages.includes(state.page)) { state.page = 'overview'; history.replaceState(null, '', route('overview')); }
   if (resolveRoute(state.mode, state.page).mode === 'public') return renderPublicHome(w);
-  const u = w.user;
+  if (state.mode === 'personal') {
+    leaveOwner();
+    document.querySelector('#app').innerHTML = personalShellMarkup(w, state.page, pageContent());
+    bindSharedActions();
+    const accountNav = document.querySelector('.account-sidebar nav');
+    const activeNav = accountNav?.querySelector('[aria-current="page"]');
+    if (activeNav && accountNav.scrollWidth > accountNav.clientWidth) accountNav.scrollLeft = activeNav.getBoundingClientRect().left - accountNav.getBoundingClientRect().left - (accountNav.clientWidth - activeNav.offsetWidth) / 2;
+    return;
+  }
   renderOwner({ state, api, navigate, refresh, dialog, orderDetail, toast, legacyContent: pageContent });
-  const personal = state.mode === 'personal';
-  document.querySelector('.owner-shell').classList.toggle('personal-shell', personal);
-  document.querySelector('.owner-top-actions').insertAdjacentHTML('afterbegin', `<button class="owner-link workspace-switch" data-action="enterHome">${icon('grid',16)} 返回首页</button>${personal && w.membership?.active && w.membership.role !== 'member' ? `<button class="owner-link" data-action="enterManagement">${icon('building',16)} 进入后台管理</button>` : ''}`);
   bindSharedActions();
 }
 function bindSharedActions() {
-  document.querySelectorAll('[data-page]').forEach(el => el.onclick = () => navigate(el.dataset.page));
+ document.querySelectorAll('[data-page]').forEach(el => el.onclick = () => navigate(el.dataset.page));
   document.querySelectorAll('[data-action]').forEach(el => el.onclick = () => perform(el));
   document.querySelectorAll('[data-filter]').forEach(el => el.onclick = () => { state.filter = el.dataset.filter; renderApp(); });
   document.querySelector('#listSearch')?.addEventListener('input', event => {
@@ -190,8 +301,8 @@ function bindSharedActions() {
   if (state.query) document.querySelector('#listSearch')?.dispatchEvent(new Event('input'));
 }
 function pageContent() {
-  if (state.mode === 'personal') return ({ overview: personalOverview, placeOrder: placeOrderPage, memberOrders: memberOrdersPage, memberAfterSales: memberAfterSalesPage, memberWallet: memberWalletPage })[state.page]();
-  const pages = { examinerCandidates: examinerCandidatesPage, overview, placeOrder: placeOrderPage, orders: () => orderPage(false), orderList: () => orderPage(false), transferOrders: () => orderPage(false), dispatchOrders: dispatchPage, myOrders: () => orderPage(true), dispatch: dispatchPage, availableOrders: availablePage, conversations: conversationPage, myEarnings: earningsPage, accounts: accountsPage, escorts: membersPage, catalog: catalogPage, flows: flowPage, topups: topupsPage, settlements: settlementsPage, memberOrders: memberOrdersPage, memberAfterSales: memberAfterSalesPage };
+  if (state.mode === 'personal') return ({ overview: personalOverview, memberProfile: () => personalCenterMarkup(state.workspace), placeOrder: placeOrderPage, memberOrders: memberOrdersPage, memberAfterSales: memberAfterSalesPage, memberWallet: memberWalletPage })[state.page]();
+  const pages = { memberProfile: () => personalCenterMarkup(state.workspace), examinerCandidates: examinerCandidatesPage, overview, placeOrder: placeOrderPage, orders: () => orderPage(false), orderList: () => orderPage(false), transferOrders: () => orderPage(false), dispatchOrders: dispatchPage, myOrders: () => orderPage(true), dispatch: dispatchPage, availableOrders: availablePage, conversations: conversationPage, myEarnings: earningsPage, accounts: accountsPage, escorts: membersPage, catalog: catalogPage, flows: flowPage, topups: topupsPage, settlements: settlementsPage, memberOrders: memberOrdersPage, memberAfterSales: memberAfterSalesPage, memberWallet: memberWalletPage };
   return pages[state.page]();
 }
 const assessmentStatus = value => {
@@ -227,9 +338,9 @@ function examinerCandidatesPage() {
 function overview() {
   const w = state.workspace; const mine = w.user.role === 'escort';
   if(w.user.role==='examiner') { const records = assessmentRecords(); return intro('考官工作台','处理入店考核与在店质检，所有结论均保留操作记录。') + `<section class="stats">${metric('待处理考核',records.filter(a=>['待考核','进行中','待复核'].includes(a.status)).length,'优先处理新入店申请','orange','calendar')}${metric('待质检',records.filter(a=>a.type==='quality' && ['待考核','进行中','待复核'].includes(a.status)).length,'跟进水平下降或周期复检','purple','trend')}${metric('历史记录',records.length,'可追溯评分与改进建议','blue','receipt')}</section>` + panel('今日工作', '按成员档案进入考核与质检', `<div class="owner-subnav"><button data-page="examinerCandidates">进入考核与质检 →</button></div>`); }
-  if(w.user.role==='afterSales') { const linked = w.conversations.filter(c=>c.orderId || c.order || w.orders.some(o=>o.id===c.orderId || o.boss===c.boss)); return intro('售后工作台','围绕订单处理异议、退款和服务质量问题；非订单诉求直接在会话中跟进。') + `<section class="stats">${metric('退款待跟进',w.orders.filter(o=>o.status==='退款审核').length,'及时处理售后申请','orange','receipt')}${metric('待验收订单',w.orders.filter(o=>o.status==='待验收').length,'核对服务完成情况','green','trend')}${metric('待跟进会话',w.conversations.filter(c=>c.state!=='已结束').length,'回复客户并记录结果','blue','users')}${metric('订单关联会话',linked.length,'可直接查看接单打手和订单记录','purple','headset')}</section>` + panel('售后业务','订单争议与非订单意见统一从会话进入',`<div class="owner-subnav"><button data-page="conversations">打开会话中心 →</button><button data-page="orders">查看订单记录 →</button></div>`); }
+  if(w.user.role==='afterSales') { const linked = w.conversations.filter(c=>c.orderId || c.order); return intro('售后工作台','围绕订单处理异议、退款和服务质量问题；非订单诉求直接在会话中跟进。') + `<section class="stats">${metric('退款待跟进',w.orders.filter(o=>o.status==='退款审核').length,'及时处理售后申请','orange','receipt')}${metric('待验收订单',w.orders.filter(o=>o.status==='待验收').length,'核对服务完成情况','green','trend')}${metric('待跟进会话',w.conversations.filter(c=>c.state!=='已结束').length,'回复客户并记录结果','blue','users')}${metric('订单关联会话',linked.length,'可直接查看接单打手和订单记录','purple','headset')}</section>` + panel('售后业务','订单争议与非订单意见统一从会话进入',`<div class="owner-subnav"><button data-page="conversations">打开会话中心 →</button><button data-page="orders">查看订单记录 →</button></div>`); }
   if(w.user.role==='finance') return intro('财务工作台','处理所有与金钱相关的充值、退款赔偿、资金流水与提现结算。') + `<section class="stats">${metric('待审核充值',w.topups.filter(t=>t.state==='待审核').length,'核实实际收款后入账','blue','wallet')}${metric('待处理退款',w.refunds.filter(r=>r.status==='待审核').length,'确认赔付金额与返还渠道','pink','receipt')}${metric('待审核提现',w.withdrawals.filter(t=>t.status==='待审核').length,'审核后安排线下打款','orange','receipt')}${metric('资金流水',w.ledger.length,'所有账户变动均可追溯','green','trend')}</section>` + panel('财务业务','按实际凭证核验并留存审核说明',`<div class="owner-subnav"><button data-page="topups">充值 / 退款审核</button><button data-page="flows">资金流水</button><button data-page="settlements">提现与结算</button></div>`);
-  if(w.user.role==='user') {
+  if(['user','member'].includes(w.user.role)) {
     const orders = w.orders || []; const spent = orders.reduce((sum, o) => sum + Number(o.amountCents || 0), 0);
     return intro('用户个人中心', '余额、点单与售后进度集中展示，服务状态和资金变动一目了然。', button('newOrder', '开始点单', '', true)) + `<section class="stats">${metric('账户余额', money(w.wallet?.balanceCents), '可用于支付俱乐部订单', 'purple', 'wallet')}${metric('累计点单', orders.length, '全部历史订单', 'blue', 'receipt')}${metric('进行中', orders.filter(o => ['待接单','待确认','待服务','陪玩中','待验收'].includes(o.status)).length, '正在处理的服务', 'orange', 'trend')}${metric('累计消费', money(spent), '订单实付金额合计', 'green', 'receipt')}</section>` + panel('快捷入口', '从下单到售后全程可追踪', `<div class="owner-subnav"><button data-page="placeOrder">开始点单 →</button><button data-page="memberOrders">查看点单记录 →</button><button data-page="memberAfterSales">查看售后记录 →</button></div>`) + panel('最近点单', '按创建时间展示最新订单', orderList(orders.slice(0, 4), false));
   }
@@ -248,9 +359,9 @@ function orderList(list, mine) {
 function myIncome(order) { const p = order.participants.find(p => p.userId === state.workspace.user.id); return p?.earningCents ?? Math.round(order.amountCents * (p?.shareBps || 0) / 10000); }
 function orderButtons(o, mine) {
   let actions = button('detail', '详情', o.id);
-  if (state.workspace.user.role === 'user') {
+  if (['user','member'].includes(state.workspace.user.role)) {
     if (o.status === '待验收') actions += button('customerConfirm', '确认完成', o.id, true);
-    if (['已完成', '待验收'].includes(o.status)) actions += button('refundRequest', '申请售后', o.id);
+    if (['待接单', '待确认', '待服务', '已完成', '待验收'].includes(o.status)) actions += button('refundRequest', '申请退款', o.id);
     return actions;
   }
   if (mine) {
@@ -265,21 +376,21 @@ function orderButtons(o, mine) {
     if (o.status === '待接单' && has('order:dispatch')) actions += button('dispatch', '派单', o.id, true);
     if (o.status === '待验收' && has('order:review')) actions += button('review', '验收订单', o.id, true);
     if (o.status === '退款审核' && (has('order:review') || has('refund:manage'))) actions += button('refundReview', '处理退款', o.id, true);
-    if (['已完成', '待验收'].includes(o.status) && (has('order:review') || has('refund:manage'))) actions += button('refundRequest', '发起退款', o.id);
+    if (['待接单', '待确认', '待服务', '已完成', '待验收'].includes(o.status) && (has('order:review') || has('refund:manage'))) actions += button('refundRequest', '发起退款', o.id);
   }
   return actions;
 }
 function placeOrderPage() {
-  return intro('开始点单', '选择游戏、服务方式和预约要求，支付成功后订单会自动进入待接单并通知客服。', button('newOrder', '填写服务要求', '', true)) + panel('陪玩服务流程', '下单后可在我的点单中跟踪每一步', '<div class="workflow"><div><b>01</b><strong>选择服务</strong><span>按游戏、商品或指定打手点单</span></div><div><b>02</b><strong>在线支付</strong><span>平台暂存订单金额，等待接单</span></div><div><b>03</b><strong>匹配接单</strong><span>客服改派或打手直接接单</span></div><div><b>04</b><strong>服务验收</strong><span>完成后确认并进入售后保护期</span></div></div>');
+  return intro('开始点单', '选择游戏、服务方式和预约要求，支付成功后订单会进入待接单，由客服匹配服务成员。', button('newOrder', '填写服务要求', '', true)) + panel('陪玩服务流程', '下单后可在我的点单中跟踪每一步', '<div class="workflow"><div><b>01</b><strong>选择服务</strong><span>按游戏、商品或指定打手点单</span></div><div><b>02</b><strong>余额支付</strong><span>确认金额后扣款，保留交易记录</span></div><div><b>03</b><strong>匹配接单</strong><span>客服改派或打手直接接单</span></div><div><b>04</b><strong>服务验收</strong><span>核验服务后确认，有问题可申请售后</span></div></div>');
 }
 function orderPage(mine) {
-  const statuses = ['全部', '待接单', '待确认', '待服务', '陪玩中', '待验收', '已完成', '退款审核'].filter(s => !mine || s !== '待接单');
+  const statuses = ['全部', '待接单', '待确认', '待服务', '陪玩中', '待验收', '已完成', '退款审核', '已退款', '已取消'].filter(s => !mine || s !== '待接单');
   const orders = state.workspace.orders.filter(o => state.filter === '全部' || o.status === state.filter);
-  return intro(mine ? '我的订单' : '订单管理', mine ? '只显示分配给你的订单；完单后由客服验收，收益按接单时的分成计算。' : '创建、派单、服务、验收，完整记录每一步。') + `<div class="filter-strip"><div class="filter-tabs">${statuses.map(s => `<button data-filter="${s}" class="${s === state.filter ? 'active' : ''}">${s} <b>${state.workspace.orders.filter(o => s === '全部' || o.status === s).length}</b></button>`).join('')}</div></div>${panel(mine ? '我的服务记录' : '俱乐部订单', `共 ${orders.length} 笔`, `<label class="list-search">${icon('search', 16)}<input id="listSearch" type="search" placeholder="搜索订单号、老板、游戏" aria-label="搜索订单" value="${e(state.query)}"></label>${orderList(orders, mine)}<div id="noSearchResults" class="empty-state" hidden>没有找到匹配的订单</div>`)}`;
+  return intro(mine ? '我的订单' : '订单管理', mine ? '只显示分配给你的订单；完单后由客服验收，收益按接单时的分成计算。' : '创建、派单、服务、验收，完整记录每一步。', !mine && has('order:create') ? button('newOrder','新建订单','',true) : '') + `<div class="filter-strip"><div class="filter-tabs">${statuses.map(s => `<button data-filter="${s}" class="${s === state.filter ? 'active' : ''}">${s} <b>${state.workspace.orders.filter(o => s === '全部' || o.status === s).length}</b></button>`).join('')}</div></div>${panel(mine ? '我的服务记录' : '俱乐部订单', `共 ${orders.length} 笔`, `<label class="list-search">${icon('search', 16)}<input id="listSearch" type="search" placeholder="搜索订单号、老板、游戏" aria-label="搜索订单" value="${e(state.query)}"></label>${orderList(orders, mine)}<div id="noSearchResults" class="empty-state" hidden>没有找到匹配的订单</div>`)}`;
 }
 function personalOverview() {
   const w = state.workspace, orders = w.orders;
-  const spent = orders.filter(o => !['已取消','未支付','待支付'].includes(o.status)).reduce((sum, o) => sum + Math.max(0, o.amountCents - o.refundedCents), 0);
+  const spent = orders.filter(o => !['已取消','未支付','待支付'].includes(o.status)).reduce((sum, o) => sum + Math.max(0, o.amountCents - (o.refundedCents || 0)), 0);
   return intro('个人中心', '') + `<section class="personal-profile"><span class="personal-avatar">${e(w.user.name.slice(0,1))}</span><div><h2>${e(w.user.name)}</h2><p>用户 ID <strong>${e(w.user.id)}</strong>${w.user.memberNo ? ` <small>编号 ${e(w.user.memberNo)}</small>` : ''}</p></div><div class="personal-membership"><span>用户</span><span>${w.membership ? `俱乐部成员 · ${e(w.membership.label)}` : '尚未加入俱乐部'}</span></div></section><section class="stats">${metric('账户余额', money(w.wallet.balanceCents), '消费余额', 'blue', 'wallet')}${metric('累计点单', orders.length, '笔', 'green', 'receipt')}${metric('服务进行中', orders.filter(o => ['待接单','待确认','待服务','陪玩中','待验收'].includes(o.status)).length, '笔', 'orange', 'headset')}${metric('累计消费', money(spent), '已扣除退款', 'pink', 'trend')}</section>` + panel('最近点单', '', orderList(orders.slice(0, 4), false), '<button class="text-btn" data-page="memberOrders">全部点单记录 →</button>');
 }
 function memberWalletPage() {
@@ -287,15 +398,16 @@ function memberWalletPage() {
 }
 function memberOrdersPage() {
   const w = state.workspace; const orders = w.orders || [];
-  const statuses = ['全部', '待接单', '待确认', '待服务', '陪玩中', '待验收', '已完成', '退款审核', '已退款', '已取消'];
-  const filtered = orders.filter(o => state.filter === '全部' || o.status === state.filter);
-  return intro('我的点单记录', '') + `<div class="filter-strip"><div class="filter-tabs">${statuses.map(s => `<button data-filter="${s}" class="${s === state.filter ? 'active' : ''}">${s} <b>${orders.filter(o => s === '全部' || o.status === s).length}</b></button>`).join('')}</div></div>` + panel('订单明细', `共 ${filtered.length} 笔`, `<label class="list-search">${icon('search', 16)}<input id="listSearch" type="search" placeholder="搜索订单号、游戏或陪玩" aria-label="搜索点单记录" value="${e(state.query)}"></label>${orderList(filtered, false)}<div id="noSearchResults" class="empty-state" hidden>没有找到匹配的订单</div>`);
+  const statuses = ['全部', '进行中', '待接单', '待确认', '待服务', '陪玩中', '待验收', '已完成', '退款审核', '已退款', '已取消'];
+  const matches = (order, status) => status === '全部' || (status === '进行中' ? personalActiveOrderStatuses.includes(order.status) : order.status === status);
+  const filtered = orders.filter(o => matches(o, state.filter));
+  return intro('我的点单记录', '') + `<div class="filter-strip"><div class="filter-tabs">${statuses.map(s => `<button data-filter="${s}" class="${s === state.filter ? 'active' : ''}">${s} <b>${orders.filter(o => matches(o, s)).length}</b></button>`).join('')}</div></div>` + panel('订单明细', `共 ${filtered.length} 笔`, `<label class="list-search">${icon('search', 16)}<input id="listSearch" type="search" placeholder="搜索订单号、游戏或陪玩" aria-label="搜索点单记录" value="${e(state.query)}"></label>${orderList(filtered, false)}<div id="noSearchResults" class="empty-state" hidden>没有找到匹配的订单</div>`);
 }
 function memberAfterSalesPage() {
   const w = state.workspace; const refunds = w.refunds || []; const conversations = w.conversations || [];
   const refundRows = refunds.map(r => { const o = (w.orders || []).find(order => order.id === r.orderId); return row([e(r.id), e(r.orderId), e(o?.game || '—'), money(r.amountCents), badge(r.status), date(r.requestedAt), e(r.reason || '—')]); });
-  const chatRows = conversations.map(c => row([e(c.id), e(c.channel || '站内信'), e(c.last || c.messages?.at(-1)?.text || '—'), badge(c.state || '处理中'), date(c.updatedAt || c.messages?.at(-1)?.at)]));
-  return intro('售后记录', '') + panel('退款与赔偿', '', table(['申请单号','订单号','游戏','申请金额','处理状态','申请时间','原因'], refundRows)) + panel('客服沟通记录', '', table(['会话','渠道','最近消息','状态','更新时间'], chatRows));
+  const chatRows = conversations.map(c => row([e(c.escortName || '客服'), e(c.channel || '站内信'), e(c.last || c.messages?.at(-1)?.text || '—'), badge(c.state || '处理中'), c.unread ? `<span class="unread">${c.unread} 条未读</span>` : '已读', button('conversation','继续沟通',c.id)]));
+  return intro('消息与售后', '查看客服回复、跟进退款进度；订单问题可从我的点单发起。', button('supportChat','联系客服','',true)) + panel('退款与赔偿', '', table(['申请单号','订单号','游戏','申请金额','处理状态','申请时间','原因'], refundRows)) + panel('客服沟通记录', '', table(['服务对象','渠道','最近消息','状态','消息','操作'], chatRows));
 }
 function dispatchPage() {
   const queue = state.workspace.orders.filter(o => o.status === '待接单').sort((a,b) => a.createdAt.localeCompare(b.createdAt));
@@ -309,13 +421,13 @@ function availablePage() {
 function conversationPage() {
   const orders = state.workspace.orders || [];
   const orderFor = c => c.order || orders.find(o => o.id === c.orderId);
-  return intro('会话中心', '查看客户咨询与售后记录；订单争议显示关联订单和接单打手，非订单意见直接记录跟进结果。') + panel('客户会话', '历史会话与人工跟进记录', `<label class="list-search">${icon('search', 16)}<input id="listSearch" type="search" placeholder="搜索用户 ID、昵称、订单号或会话内容" aria-label="搜索会话" value="${e(state.query)}"></label><div class="conversation-full-list">${state.workspace.conversations.map(c => { const order = orderFor(c); const escorts = order?.participants?.map(p => p.name).join(' / '); return `<div class="conversation-full-row" data-searchable><div class="mini-avatar orange">${e((c.boss || '客').slice(0, 1))}</div><div class="conversation-body"><div><strong>${e(c.boss || c.customerName || '未命名客户')}</strong><span class="channel-tag">${e(c.channel || '站内信')}</span>${order ? `<span class="order-link-tag">订单 ${e(order.id)} · ${e(order.game)}</span>` : '<span class="channel-tag neutral">非订单</span>'}${c.unread ? `<em class="unread">${c.unread} 条待跟进</em>` : ''}${c.slaOverdue ? '<em class="unread">SLA 超时</em>' : ''}</div><p>${e(c.last || c.messages?.at(-1)?.text || '暂无消息')}${escorts ? ` · 接单：${e(escorts)}` : ''}</p></div><div class="conversation-meta">${badge(c.state || '处理中')}${button('conversation', '查看会话', c.id)}</div></div>`; }).join('')}</div><div id="noSearchResults" class="empty-state" hidden>没有找到匹配的会话</div>`);
+  return intro('会话中心', '查看客户咨询与售后记录；订单争议显示关联订单和接单打手，非订单意见直接记录跟进结果。') + panel('客户会话', '客户消息与内部跟进记录，按会话分别保留', `<label class="list-search">${icon('search', 16)}<input id="listSearch" type="search" placeholder="搜索用户 ID、昵称、订单号或会话内容" aria-label="搜索会话" value="${e(state.query)}"></label><div class="conversation-full-list">${state.workspace.conversations.map(c => { const order = orderFor(c); const escorts = order?.participants?.map(p => p.name).join(' / '); return `<div class="conversation-full-row" data-searchable><div class="mini-avatar orange">${e((c.boss || '客').slice(0, 1))}</div><div class="conversation-body"><div><strong>${e(c.boss || c.customerName || '未命名客户')}</strong><span class="channel-tag">${e(c.channel || '站内信')}</span>${order ? `<span class="order-link-tag">订单 ${e(order.id)} · ${e(order.game)}</span>` : '<span class="channel-tag neutral">非订单</span>'}${c.unread ? `<em class="unread">${c.unread} 条待跟进</em>` : ''}${c.slaOverdue ? '<em class="unread">SLA 超时</em>' : ''}</div><p>${e(c.last || c.messages?.at(-1)?.text || '暂无消息')}${escorts ? ` · 接单：${e(escorts)}` : ''}</p></div><div class="conversation-meta">${badge(c.state || '处理中')}${button('conversation', '查看会话', c.id)}</div></div>`; }).join('')}</div><div id="noSearchResults" class="empty-state" hidden>没有找到匹配的会话</div>`);
 }
 function earningsPage() {
   const w = state.workspace;
   const now = Date.now(); const dayStart = new Date(new Date().setHours(0,0,0,0)).getTime(); const weekStart = dayStart - ((new Date().getDay() + 6) % 7) * 86400000; const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime();
-  const income = since => (w.ledger || []).filter(l => l.label === '订单分成' && Date.parse(l.at) >= since && Date.parse(l.at) <= now).reduce((sum, l) => sum + Number(l.deltaCents || 0), 0);
-  return intro('我的收益', '订单验收后入账。提现申请会冻结对应金额，审核驳回后返还。', button('withdraw', '申请提现', '', true)) + `<section class="stats">${metric('可提现金额', money(w.wallet.balanceCents), '已入账，可申请提现', 'purple', 'wallet')}${metric('今日流水', money(income(dayStart)), '今日已验收订单分成', 'blue', 'trend')}${metric('本周流水', money(income(weekStart)), '周一至今天累计入账', 'green', 'receipt')}${metric('本月流水', money(income(monthStart)), '本月累计订单分成', 'orange', 'wallet')}</section><section class="stats">${metric('提现审核中', money(w.wallet.frozenCents), '已从可提现金额中冻结', 'orange', 'receipt')}${metric('服务待验收', money(w.orders.filter(o => o.status === '待验收').reduce((a,o) => a + myIncome(o), 0)), '验收前不计入可提现余额', 'blue', 'trend')}${metric('当前押金', money(w.wallet.depositCents), '提现要求押金至少 ¥1,000', 'green', 'wallet')}</section>` + panel('我的资金明细', '仅包含当前成员的账户变动', ledgerTable(w.ledger)) + panel('我的提现申请', '审核通过后等待俱乐部线下打款', withdrawalTable(w.withdrawals, false));
+  const income = since => (w.ledger || []).filter(l => ['订单分成','退款冲回分成','退款分成冲回'].includes(l.label) && Date.parse(l.at) >= since && Date.parse(l.at) <= now).reduce((sum, l) => sum + Number(l.deltaCents || 0), 0);
+  return intro('我的收益', '订单验收后入账。提现申请会冻结对应金额，审核驳回后返还。', button('withdraw', '申请提现', '', true)) + `<section class="stats">${metric('可提现金额', money(w.wallet.balanceCents), '已入账，可申请提现', 'purple', 'wallet')}${metric('今日流水', money(income(dayStart)), '今日已验收订单分成', 'blue', 'trend')}${metric('本周流水', money(income(weekStart)), '周一至今天累计入账', 'green', 'receipt')}${metric('本月流水', money(income(monthStart)), '本月累计订单分成', 'orange', 'wallet')}</section><section class="stats">${metric('提现冻结金额', money(w.wallet.frozenCents), '包含待审核与待线下打款', 'orange', 'receipt')}${metric('服务待验收', money(w.orders.filter(o => o.status === '待验收').reduce((a,o) => a + myIncome(o), 0)), '验收前不计入可提现余额', 'blue', 'trend')}${metric('当前押金', money(w.wallet.depositCents), '提现要求押金至少 ¥1,000', 'green', 'wallet')}</section>` + panel('我的资金明细', '仅包含当前成员的账户变动', ledgerTable(w.ledger)) + panel('我的提现申请', '审核通过后等待俱乐部线下打款', withdrawalTable(w.withdrawals, false));
 }
 function ledgerTable(list) { return table(['时间', '账户', '业务', '变动金额', '变动后余额', '关联单号'], list.map(l => row([date(l.at), e(l.account), e(l.label), `<strong class="${l.deltaCents < 0 ? 'negative' : 'positive'}">${l.deltaCents > 0 ? '+' : '−'} ${money(Math.abs(l.deltaCents))}</strong>`, money(l.afterCents), e(l.source)]))); }
 function withdrawalTable(list, review) { return table(['申请单号', '成员', '金额', '状态', '申请时间', '操作'], list.map(w => row([e(w.id), e(w.name), money(w.amountCents), badge(w.status), date(w.at), review && w.status === '待审核' ? button('withdrawReview', '审核', w.id) : review && w.status === '待线下打款' ? button('withdrawPaid', '登记打款', w.id, true) : e(w.reason || w.payoutRef || '—')]))); }
@@ -323,10 +435,7 @@ function accountsPage() {
   return intro('成员与权限', '成员只属于星河游戏俱乐部。调整职责或停用账号后，已有登录会话立即失效。', button('newAccount', '新增成员账号', '', true)) + `<section class="role-matrix"><article><span class="role-badge purple">最高负责人</span><p>俱乐部业务、财务审核、成员与权限配置</p></article><article><span class="role-badge orange">客服</span><p>订单、会话、派单、完单验收</p></article><article><span class="role-badge green">打手</span><p>接单、本人订单、本人收益与提现申请</p></article></section>` + panel('俱乐部账号', '账号职责由管理员分配，成员登录时无需选择', table(['成员', '账号', '职责', '状态', '游戏', '操作'], state.workspace.accounts.map(u => row([e(u.name), e(u.username), `<span class="role-badge ${u.tone}">${e(u.roleLabel)}</span>`, badge(u.active ? '启用' : '停用'), e(u.games.join(' / ') || '—'), button('editAccount', '编辑权限', u.id)]))));
 }
 function membersPage() { return intro('陪玩成员', '查看成员在线状态、支持的游戏与默认分成。订单按派单时的分成比例留存。', has('account:manage') ? button('accounts', '管理成员与权限') : '') + panel('陪玩档案', `共 ${state.workspace.members.length} 位成员`, table(['成员', '账号状态', '接单状态', '游戏', '基础分成', '操作'], state.workspace.members.map(m => row([e(m.name), badge(m.active ? '启用' : '停用'), badge(m.online ? '在线' : '离线'), e(m.games.join(' / ')), `${m.shareBps / 100}%`, has('account:manage') ? button('editAccount', '编辑', m.id) : '只读'])))); }
-function catalogPage() {
-  const w = state.workspace;
-  return intro('游戏与商品', '游戏维护时不可新建订单或接单；派单会校验人数边界和游戏分成倍率。') + panel('游戏配置', '当前俱乐部的游戏服务范围', table(['游戏', '分成倍率', '陪玩人数', '状态'], w.games.map(g => row([e(g.name), e(g.multiplier), `${g.min}–${g.max} 人`, badge(g.state)])))) + panel('服务商品', '价格 = 商品单价 × 服务时长', table(['商品', '游戏', '单价', '状态'], w.products.map(p => row([e(p.name), e(p.game), `${money(p.priceCents)} / 小时`, badge(p.state)]))));
-}
+function catalogPage() { return catalogMarkup(state.workspace); }
 function flowPage() { return intro('资金流水', '记录订单消费、充值入账、完单分成与提现冻结，资金变动与业务单号关联。') + panel('账户变动记录', '本次系统启用后的实际操作流水', `<label class="list-search">${icon('search', 16)}<input id="listSearch" type="search" placeholder="搜索用户 ID、昵称或业务单号" aria-label="搜索资金流水" value="${e(state.query)}"></label>${ledgerTable(state.workspace.ledger)}`); }
 function topupsPage() { const w = state.workspace; const pendingRefunds = (w.refunds || []).filter(r => r.status === '待审核'); return intro('充值与退款审核', '所有涉及老板资金的充值、退款与赔偿统一由财务复核，凭证、原因和原支付方式必须留痕。') + `<section class="stats">${metric('待审核充值', (w.topups || []).filter(t => t.state === '待审核').length, '核验到账后再入账', 'blue', 'wallet')}${metric('待处理退款', pendingRefunds.length, '确认赔付金额与渠道', 'orange', 'receipt')}${metric('资金流水', (w.ledger || []).length, '充值、订单与提现全量记录', 'green', 'trend')}</section>` + panel('充值申请', '请根据实际收款凭证核验后审核', `<label class="list-search">${icon('search', 16)}<input id="listSearch" type="search" placeholder="搜索充值单号、用户 ID 或昵称" aria-label="搜索充值申请" value="${e(state.query)}"></label>${table(['充值单号', '老板', '金额', '充值前余额', '充值后余额', '状态', '操作'], (w.topups || []).map(t => row([e(t.id), e(t.user), e(t.amount), e(t.before), t.state === '已通过' ? e(t.after) : '待审核后计算', badge(t.state), t.state === '待审核' ? button('topupReview', '审核', t.id) : e(t.proof)])))}`) + panel('退款 / 赔偿申请', '审核通过后按原支付方式返还老板，驳回必须填写依据', table(['申请单号', '订单', '老板', '金额', '渠道', '状态', '操作'], (w.refunds || []).map(r => row([e(r.id), e(r.orderId), e(r.customer), money(r.amountCents), e(r.channel || '—'), badge(r.status), r.status === '待审核' ? button('refundReview', '审核', r.orderId, true) : e(r.reason || '已处理')]))) ); }
 function settlementsPage() { return intro('提现与结算', '独立复核成员提现申请。通过审核后待线下打款，不代表已经付款。') + panel('成员提现申请', '可提现余额已在申请时冻结', `<label class="list-search">${icon('search', 16)}<input id="listSearch" type="search" placeholder="搜索用户 ID、昵称或提现单号" aria-label="搜索提现申请" value="${e(state.query)}"></label>${withdrawalTable(state.workspace.withdrawals, true)}`) + panel('历史结算批次', '参考项目中的历史示例记录', table(['批次', '周期', '成员数', '金额', '状态'], state.workspace.settlements.map(s => row([e(s.id), e(s.period), s.escorts, e(s.amount), badge(s.state)])))); }
@@ -355,8 +464,14 @@ const textarea = (label, name, placeholder = '') => `<label class="form-field">$
 function getOrder(id) { return [...(state.workspace.orders || []), ...(state.workspace.availableOrders || [])].find(o => o.id === id); }
 async function updateOrder(order, action, input = {}) { return api(`/orders/${order.id}/${action}`, { ...input, version: order.version }); }
 function orderDetail(o) {
-  const mine = state.workspace.user.role === 'escort';
-  return `<div class="detail-grid"><div><span>订单编号</span><strong>${e(o.id)}</strong></div><div><span>当前状态</span>${badge(o.status)}</div><div><span>老板</span><strong>${e(o.boss)}</strong></div><div><span>游戏商品</span><strong>${e(o.game)} · ${e(o.product)}</strong></div><div><span>订单等级</span><strong>${e(o.levelName||'金牌')}及以上</strong></div><div><span>服务时长</span><strong>${o.hours} 小时</strong></div><div><span>订单总额</span><strong>${money(o.amountCents)}</strong></div>${mine ? `<div><span>我的预计分成</span><strong>${money(myIncome(o))}</strong></div>` : `<div><span>支付方式</span><strong>${e(o.pay)}</strong></div>`}</div><p class="detail-note">服务要求：${e(o.requirement)}</p><h3>服务成员</h3>${o.participants.map(p => `<div class="detail-note"><strong>${e(p.name)}</strong> · ${p.accepted ? '已接单' : '待确认'} · ${p.finished ? '已提交完单' : '待完成'}${!mine || p.userId === state.workspace.user.id ? ` · 分成 ${p.shareBps / 100}%` : ''}${p.evidence ? `<p>完单说明：${e(p.evidence)}</p>` : ''}</div>`).join('') || '<p class="muted-text">等待派单</p>'}<h3>订单记录</h3><div class="timeline">${o.history.map(h => `<div><i></i><strong>${e(h.action)}</strong><small>${e(h.by)} · ${date(h.at)}</small>${h.note ? `<p>${e(h.note)}</p>` : ''}</div>`).join('')}</div>`;
+  const mine = state.mode === 'management' && state.workspace.user.role === 'escort';
+  const personal = state.mode !== 'management';
+  const steps=['待接单','待确认','待服务','陪玩中','待验收','已完成'];
+  const stage=steps.indexOf(o.status);
+  const stepLabels=['提交订单','匹配接单','开始服务','服务验收','完成结算'];
+  const position = stage<0?-1:stage<=1?stage:stage===2?1:stage===3?2:stage===4?3:4;
+  const hints={ '待接单':'等待客服匹配陪玩，或由符合条件的陪玩接单。', '待确认':'已派单，等待服务成员确认接单。', '待服务':'陪玩已确认，请按约定时间开始服务。', '陪玩中':'服务进行中，完成后由陪玩提交服务说明。', '待验收':'服务说明已提交。确认服务达标后再验收，有问题可申请退款或补充服务。', '已完成':'订单已验收，收益已按派单时锁定的比例结算。', '退款审核':'退款申请正在审核，确认处理结果后再继续结算。', '已退款':'退款已完成，可在余额明细或退款记录中核对。', '已取消':'订单已取消。' };
+  return `<ol class="order-progress" aria-label="订单进度">${stepLabels.map((label,i)=>`<li class="${i<position?'done':i===position?'current':''}" ${i===position?'aria-current="step"':''}><b>${i<position?'✓':i+1}</b><span>${label}</span></li>`).join('')}</ol><p class="order-next-step">${e(hints[o.status] || '请查看下方订单记录，核对最新处理进度。')}</p><div class="detail-grid"><div><span>订单编号</span><strong>${e(o.id)}</strong></div><div><span>当前状态</span>${badge(o.status)}</div><div><span>下单用户</span><strong>${e(o.boss)}</strong></div><div><span>游戏商品</span><strong>${e(o.game)} · ${e(o.product)}</strong></div><div><span>订单等级</span><strong>${e(o.levelName||'金牌')}及以上</strong></div><div><span>服务时长</span><strong>${o.hours} 小时</strong></div><div><span>订单总额</span><strong>${money(o.amountCents)}</strong></div><div><span>已退金额</span><strong>${money(o.refundedCents)}</strong></div>${mine?`<div><span>我的预计分成</span><strong>${money(myIncome(o))}</strong></div>`:`<div><span>支付方式</span><strong>${e(o.pay==='在线支付'?'余额支付':o.pay)}</strong></div>`}${o.appointmentAt?`<div><span>预约时间</span><strong>${date(o.appointmentAt)}</strong></div>`:''}${o.region?`<div><span>游戏区服</span><strong>${e(o.region)}</strong></div>`:''}</div><p class="detail-note">服务要求：${e(o.requirement)}</p><h3>服务成员</h3>${o.participants.map(p=>`<div class="detail-note"><strong>${e(p.name)}</strong> · ${p.accepted?'已接单':'待确认'} · ${p.finished?'已提交完单':'待完成'}${!personal && (!mine || p.userId===state.workspace.user.id) && p.shareBps!=null?` · 分成 ${p.shareBps/100}%`:''}${p.evidence?`<p>完单说明：${e(p.evidence)}</p>`:''}</div>`).join('')||'<p class="muted-text">等待派单</p>'}<h3>订单记录</h3><div class="timeline">${(o.history||[]).map(h=>`<div><i></i><strong>${e(h.action)}</strong><small>${h.by?e(h.by)+' · ':''}${date(h.at)}</small>${h.note?`<p>${e(h.note)}</p>`:''}</div>`).join('')}</div>`;
 }
 async function perform(el) {
   if (el.disabled || state.busy) return;
@@ -364,6 +479,8 @@ async function perform(el) {
   const w = state.workspace; const o = getOrder(id);
   try {
     if (action === 'logout') { await api('/logout', {}); closeDialog(); renderLogin(); return; }
+    if (action === 'personalProfile') return dialog('账户资料', personalProfileMarkup(w));
+    if (action === 'personalOrderStatus' && ['进行中', '待验收'].includes(id)) return navigate('memberOrders', id);
     if (action === 'enterManagement') return await switchWorkspace('management');
     if (action === 'enterHome' || action === 'enterPersonal') return await switchWorkspace('public');
     if (action === 'refresh') { state.busy = true; await refresh(); toast('已获取最新业务状态'); return; }
@@ -371,7 +488,7 @@ async function perform(el) {
     if (action === 'online') { state.busy = true; await api('/online', { online: !w.user.online }); await refresh(); toast(state.workspace.user.online ? '已上线，可以接单' : '已休息，暂不接新单'); return; }
     if (action === 'detail') return dialog('订单详情', orderDetail(o));
     if (action === 'customerConfirm') return dialog('确认服务完成', orderDetail(o) + '<p class="detail-note">确认后订单完成，陪玩分成将按规则结算；如有问题可在售后记录中申请处理。</p>', '确认完成', () => updateOrder(o, 'approve'));
-    if (action === 'claim') return dialog('确认接单', `<p>接下 ${e(o.boss)} 的「${e(o.game)} · ${e(o.product)}」订单？</p><p>${o.hours} 小时 · 订单总额 <strong>${money(o.amountCents)}</strong></p><p>我的分成 ${o.expectedShareBps / 100}% · 预计到手 <strong>${money(o.expectedIncomeCents)}</strong></p><p>${e(o.requirement)}</p><p class="detail-note">分成按陪玩等级计算，接单后锁定。开始服务前请确认可服务时间。</p>`, '确认接单', () => updateOrder(o, 'accept'));
+    if (action === 'claim') return dialog('确认接单', `<p>接下 ${e(o.boss)} 的「${e(o.game)} · ${e(o.product)}」订单？</p><p>${o.hours} 小时 · 订单总额 <strong>${money(o.amountCents)}</strong></p><p>我的分成 ${o.expectedShareBps / 100}% · 预计到手 <strong>${money(o.expectedIncomeCents)}</strong></p><p>${e(o.requirement)}</p><p class="detail-note">分成按游戏配置计算，接单后锁定。开始服务前请确认可服务时间。</p>`, '确认接单', () => updateOrder(o, 'accept'));
     if (action === 'accept') return dialog('确认派单', orderDetail(o), '确认接单', () => updateOrder(o, 'accept'));
     if (action === 'start') return dialog('开始服务', `<p>确认开始 ${e(o.game)} 的 ${o.hours} 小时服务？</p><p class="detail-note">开始后将记录服务时间。同一成员不能同时开始其他订单。</p>`, '开始服务', () => updateOrder(o, 'start'));
     if (action === 'finish') return dialog('提交完单', `<p>${e(o.id)} · ${e(o.game)}</p>${textarea('完单说明', 'evidence', '请记录服务内容、完成情况及需要客服核验的信息（至少 5 个字符）')}<p class="detail-note">由客服验收后入账，提交不会直接增加可提现余额。</p>`, '提交验收', form => updateOrder(o, 'finish', { evidence: form.get('evidence') }));
@@ -404,27 +521,34 @@ async function perform(el) {
     }
     if (action === 'newOrder') {
       const products = w.products.filter(p => p.state === '启用' && w.games.some(g => g.name === p.game && g.state === '上架'));
-      if (w.user.role === 'user') {
-        const form = dialog('创建陪玩订单', `${field('游戏与商品','productId','text','','list="productList"')}<datalist id="productList">${products.map(p => `<option value="${e(p.id)}">${e(p.game)} · ${e(p.name)} · ${money(p.priceCents)}/小时</option>`).join('')}</datalist><label class="form-field">服务方式<select name="orderMode"><option value="quick">快速下单，由客服安排</option><option value="filter">按游戏筛选打手</option><option value="designated">指定打手</option></select></label><label class="form-field">指定打手（可选）<select name="preferredEscortId"><option value="">由客服安排</option>${(w.members || []).map(m => `<option value="${e(m.id)}">${e(m.name)} · ${(m.games || []).join(' / ')}</option>`).join('')}</select></label>${field('服务时长（小时）','hours','number',1,'min="0.5" max="24" step="0.5"')} ${field('游戏区服','region','text','','maxlength="80"')}<label class="form-field">预约时间<input name="appointmentAt" type="datetime-local"></label><label class="form-field">语音方式<select name="voice"><option>游戏内语音</option><option>微信语音</option><option>不开语音</option></select></label>${textarea('备注及特殊要求','requirement','例如：开麦沟通、位置偏好、段位要求')}<div class="form-total">订单金额 <strong id="orderQuote"></strong></div><p class="detail-note">在线支付将从账户余额扣款，支付成功后进入待接单。当前余额：${money(w.wallet?.balanceCents)}</p>`, '在线支付并提交', data => api('/orders', { ...Object.fromEntries(data), boss: w.user.name, pay: '在线支付', levelId: 'gold' }));
+      if (!products.length) return dialog('暂无可售服务', '<p>目前没有上架的游戏商品，请稍后再试或联系客服。</p>');
+      if (['user','member'].includes(w.user.role)) {
+        const form = dialog('创建陪玩订单', `${field('游戏与商品','productId','text','','list="productList"')}<datalist id="productList">${products.map(p => `<option value="${e(p.id)}">${e(p.game)} · ${e(p.name)} · ${money(p.priceCents)}/小时</option>`).join('')}</datalist><label class="form-field">服务方式<select name="orderMode"><option value="quick">快速下单，由客服安排</option><option value="designated">指定打手</option></select></label><label class="form-field">指定打手（可选）<select name="preferredEscortId"><option value="">由客服安排</option>${(w.members || []).map(m => `<option value="${e(m.id)}">${e(m.name)} · ${(m.games || []).join(' / ')}</option>`).join('')}</select></label>${field('服务时长（小时）','hours','number',1,'min="0.5" max="24" step="0.5"')} ${field('游戏区服','region','text','','maxlength="80"')}<label class="form-field">预约时间<input name="appointmentAt" type="datetime-local"></label><label class="form-field">语音方式<select name="voice"><option>游戏内语音</option><option>微信语音</option><option>不开语音</option></select></label>${textarea('备注及特殊要求','requirement','例如：开麦沟通、位置偏好、段位要求')}<div class="form-total">订单金额 <strong id="orderQuote"></strong></div><p class="detail-note">确认后从账户余额扣款，订单进入待接单。当前余额：${money(w.wallet?.balanceCents)}</p>`, '余额支付并下单', data => api('/orders', { ...Object.fromEntries(data), boss: w.user.name, pay: '在线支付', levelId: 'gold' }));
         const productInput = form.querySelector('[name=productId]');
         const productSelect = document.createElement('select'); productSelect.name = 'productId'; productSelect.required = true; productSelect.innerHTML = products.map(p => `<option value="${e(p.id)}">${e(p.game)} · ${e(p.name)} · ${money(p.priceCents)}/小时</option>`).join(''); productInput.replaceWith(productSelect);
-        const updateQuote = () => { const p = products.find(p => p.id === form.querySelector('[name=productId]').value); form.querySelector('#orderQuote').textContent = money((p?.priceCents || 0) * Number(form.querySelector('[name=hours]').value || 0)); };
+        if (products.some(product => product.id === el.dataset.productId)) productSelect.value = el.dataset.productId;
+        const updateQuote = () => {
+          const p = products.find(p => p.id === form.querySelector('[name=productId]').value);
+          const total = Math.round((p?.priceCents || 0) * Number(form.querySelector('[name=hours]').value || 0));
+          form.querySelector('#orderQuote').textContent = money(total);
+          const submit = form.querySelector('[type=submit]'); submit.disabled = total > (w.wallet?.balanceCents || 0); submit.textContent = submit.disabled ? '余额不足，请联系客服充值' : '余额支付并下单';
+          const preferred=form.querySelector('[name=preferredEscortId]'), mode=form.querySelector('[name=orderMode]');
+          const singleMember = (w.games.find(game=>game.name===p?.game)?.min || 1) <= 1;
+          mode.querySelector('[value=designated]').disabled = !singleMember;
+          if (!singleMember && mode.value==='designated') mode.value='quick';
+          const previous=preferred.value;
+          preferred.innerHTML='<option value="">由客服安排</option>'+(w.members||[]).filter(m=>m.games?.includes(p?.game)).map(m=>`<option value="${e(m.id)}">${e(m.name)} · ${m.online?'在线':'离线'}</option>`).join('');
+          if([...preferred.options].some(option=>option.value===previous))preferred.value=previous;
+          preferred.closest('label').hidden=mode.value!=='designated'; preferred.disabled=mode.value!=='designated'; preferred.required=mode.value==='designated';
+        };
         form.addEventListener('input', updateQuote); updateQuote(); return;
       }
       const form = dialog('新建陪玩订单', `${field('老板称呼', 'boss', 'text', '', 'maxlength="30" list="customerList"')}<datalist id="customerList">${w.customers.map(c => `<option value="${e(c.name)}">余额 ${money(c.balanceCents)}</option>`).join('')}</datalist><label class="form-field">游戏商品<select name="productId">${products.map(p => `<option value="${p.id}">${e(p.game)} · ${e(p.name)} · ${money(p.priceCents)}/小时</option>`).join('')}</select></label><label class="form-field">订单等级<select name="levelId">${w.levels.map(l=>`<option value="${l.id}" ${l.id==='gold'?'selected':''}>${l.name}及以上</option>`).join('')}</select></label>${field('服务时长（小时）','hours','number',1,'min="0.5" max="24" step="0.5"')}<div class="form-total">订单金额 <strong id="orderQuote"></strong></div><label class="form-field">支付方式<select name="pay"><option>线下已收款</option><option>余额支付</option></select></label><label class="form-field">Tag 标签（可选，用逗号分隔）<input name="tags" maxlength="240" placeholder="例如：娱乐、上分、新人"></label>${textarea('服务要求', 'requirement', '例如：开麦沟通、游戏区服、服务时间和段位要求')}<p class="detail-note">选择“线下已收款”表示客服已经核实收款；余额支付会即时扣减老板余额。</p>`, '创建订单', data => api('/orders', Object.fromEntries(data)));
       const quote = () => { const p = products.find(p => p.id === form.querySelector('[name=productId]').value); form.querySelector('#orderQuote').textContent = money((p?.priceCents || 0) * Number(form.querySelector('[name=hours]').value)); }; form.addEventListener('input', quote); quote(); return;
     }
-    if (action === 'conversation') {
-      const chat = w.conversations.find(c => c.id === id);
-      const relatedOrder = chat?.order || w.orders?.find(order => order.id === chat?.orderId);
-      await api(`/conversations/${id}`, {}); await refresh();
-      const orderContext = relatedOrder ? `<h3>关联订单</h3><div class="current-order"><div class="current-order-icon purple">${icon('receipt')}</div><div><strong>${e(relatedOrder.id)} · ${e(relatedOrder.game)} · ${e(relatedOrder.product)}</strong><p>${e(relatedOrder.status)} · ${relatedOrder.hours} 小时 · 接单：${e(relatedOrder.participants?.map(p => p.name).join(' / ') || '待分配')}</p><button type="button" class="text-btn" id="viewChatOrder">查看订单详情 →</button></div></div>` : '<p class="detail-note">该会话未关联订单，按普通意见直接跟进即可。</p>';
-      const modal = dialog(`${chat.boss} · 会话记录`, `<div class="chat-dialog-meta"><span class="channel-tag">${e(chat.channel)}</span><span class="muted-text">支持向上翻阅历史记录</span></div>${orderContext}<div class="chat-window"><div class="chat-messages">${chat.messages.map(m => `<div><strong>${e(m.author)}</strong><p>${e(m.text)}</p><small>${date(m.at)}</small></div>`).join('') || '<p class="muted-text">暂无聊天记录</p>'}</div></div><h3>客服跟进记录</h3>${chat.notes.map(n => `<div class="detail-note">${e(n.text)}<small>${e(n.author)} · ${date(n.at)}</small></div>`).join('') || '<p class="muted-text">暂无跟进记录</p>'}${textarea('新增跟进记录', 'note', '记录已沟通的结果、改派安排或退款进展')}<label class="form-field">跟进状态<select name="state"><option value="处理中">处理中</option><option value="已结束">已结束</option></select></label><p class="detail-note">这里保存俱乐部内部跟进记录；客户消息渠道尚未连接。</p>`, '保存跟进', form => api(`/conversations/${id}`, Object.fromEntries(form)));
-      modal.classList.add('chat-dialog');
-      modal.querySelector('#viewChatOrder')?.addEventListener('click', () => { if (relatedOrder) dialog('订单详情', orderDetail(relatedOrder)); });
-      const messages = modal.querySelector('.chat-messages'); if (messages) messages.scrollTop = messages.scrollHeight;
-      return modal;
-    }
+    if (action === 'supportChat') { const created=await api('/conversations',{escortName:'俱乐部客服',message:'你好，我需要咨询服务或售后问题。'}); return await openConversation(created.id,{state,api,refresh,toast,onClose:renderApp}); }
+    if (action === 'conversation') return await openConversation(id, { state, api, refresh, toast, onClose: renderApp });
+    if (action.startsWith('catalog')) return catalogAction(action, id, { workspace:w, dialog, api });
     if (action === 'refundReview') {
       const refund = (w.refunds || []).find(item => item.orderId === id && item.status === '待审核');
       if (!refund) throw new Error('没有待审核的退款申请');
@@ -450,10 +574,15 @@ async function perform(el) {
   finally { state.busy = false; }
 }
 window.addEventListener('hashchange', async () => {
-  if (['#games', '#members', '#rules', '#help'].includes(location.hash)) return;
-  const { mode, page } = parseRoute(location.hash);
+  const { mode, page } = parseRoute(location.hash, location.pathname);
   try {
-    if (!state.workspace || state.mode !== mode) await switchWorkspace(mode, page);
+    if (mode === 'public') {
+      if (state.workspace?.user && state.mode === 'public') renderPublicRoute(state.workspace, page);
+      else {
+        let workspace = null; try { workspace = await api('/me'); } catch { /* anonymous public page */ }
+        renderPublicRoute(workspace, page);
+      }
+    } else if (!state.workspace || state.mode !== mode) await switchWorkspace(mode, page);
     else navigate(page);
   } catch (error) {
     if (error.status !== 401) toast(error.message);
@@ -461,12 +590,17 @@ window.addEventListener('hashchange', async () => {
 });
 window.addEventListener('pageshow', event => { if (event.persisted) boot(); });
 async function boot() {
-  const { mode: requestedMode, page: desired } = parseRoute(location.hash);
+  const { mode: requestedMode, page: desired } = parseRoute(location.hash, location.pathname);
   state.mode = requestedMode;
   document.querySelector('#app').innerHTML = '<div class="loading-screen"><span class="brand-mark">C</span><p>正在载入俱乐部工作台…</p></div>';
   try {
-    await refresh(false);
-    navigate(state.workspace.role.pages.includes(desired) ? desired : 'overview');
+    if (requestedMode === 'public') {
+      let workspace = null; try { workspace = await api('/me'); } catch { /* anonymous visitor */ }
+      renderPublicRoute(workspace, desired);
+    } else {
+      await refresh(false);
+      navigate(state.workspace.role.pages.includes(desired) ? desired : 'overview');
+    }
   }
   catch (error) {
     if (error.status === 401) renderLogin();

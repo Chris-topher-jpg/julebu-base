@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node --watch server.mjs",
     "start": "node server.mjs",
-    "build": "node --check src/main.js && node --check src/app.js && node --check src/ui.js && node --check src/owner.js && node --check server.mjs && node --check server/club.mjs && node --check server/analytics.mjs && node --check src/members.js && node --check server/membership.mjs",
+    "build": "node --check src/main.js && node --check src/app.js && node --check src/companion-chat.js && node --check src/ui.js && node --check src/owner.js && node --check server.mjs && node --check server/club.mjs && node --check server/analytics.mjs && node --check src/members.js && node --check server/membership.mjs && node --check src/catalog.js && node --check src/messages.js && node --check src/personal.js && node --check server/catalog.mjs && node --check server/flow.mjs && node --check server/identity.mjs",
     "test": "node --test tests/*.test.mjs",
     "preview": "node server.mjs"
   },

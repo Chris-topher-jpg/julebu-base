@@ -3,18 +3,19 @@ import { randomBytes, randomUUID, scryptSync, timingSafeEqual, createHash } from
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import * as seed from './seed.mjs';
+import { personalContext, walletPayment, settleOrder, reverseRefundEarnings } from './flow.mjs';
 import { FOUR_HOURS, clubDay, metrics, dailyBusinessMetrics, dateRange, trend, ranking, analyticsOptions } from './analytics.mjs';
 import { defaultLevels, levelOf, meetsLevel, rateOf, hasOpenOrders, profileConflicts, migrateMembership, memberRecord, lockEarnings } from './membership.mjs';
 import { isClubMember, attachCustomer, migrateIdentity, personalData } from './identity.mjs';
 
 export const roles = {
-  user: { label: '用户', tone: 'blue', pages: ['overview', 'placeOrder', 'memberOrders', 'memberAfterSales', 'memberWallet'], permissions: ['order:create', 'order:confirm', 'refund:create'] },
+  user: { label: '用户', tone: 'blue', pages: ['overview', 'memberProfile', 'placeOrder', 'memberOrders', 'memberAfterSales', 'memberWallet'], permissions: ['order:create', 'order:confirm', 'refund:create', 'conversation:create'] },
   admin: { label: '最高负责人', tone: 'purple', pages: ['overview', 'clubConfig', 'auditLog', 'memberManagement', 'clubMembers', 'clubEscorts', 'serviceManagement', 'examinerManagement', 'afterSales', 'financeManagement', 'financeList', 'commissionConfig', 'orderManagement', 'orderList', 'transferOrders', 'dispatchOrders', 'userManagement', 'orders', 'dispatch', 'conversations', 'escorts', 'catalog', 'topups', 'flows', 'settlements', 'accounts'], permissions: ['analytics:view', 'order:view', 'order:create', 'order:dispatch', 'order:review', 'refund:manage', 'conversation:manage', 'finance:manage', 'account:manage', 'assessment:view', 'assessment:manage'] },
   service: { label: '俱乐部客服', tone: 'orange', pages: ['overview', 'orders', 'conversations', 'dispatch'], permissions: ['order:view', 'order:create', 'order:dispatch', 'order:review', 'conversation:manage'] },
   examiner: { label: '俱乐部考官', tone: 'blue', pages: ['overview', 'examinerCandidates'], permissions: ['member:skills:view', 'assessment:view', 'assessment:manage'] },
   afterSales: { label: '俱乐部售后', tone: 'pink', pages: ['overview', 'orders', 'conversations'], permissions: ['order:view', 'order:review', 'refund:manage', 'conversation:manage'] },
   finance: { label: '俱乐部财务', tone: 'purple', pages: ['overview', 'topups', 'flows', 'settlements'], permissions: ['finance:manage', 'refund:manage'] },
-  member: { label: '普通成员', tone: 'navy', pages: ['overview'], permissions: [] },
+  member: { label: '普通成员', tone: 'navy', pages: ['overview','memberProfile','placeOrder','memberOrders','memberAfterSales','memberWallet'], permissions: ['order:create','order:confirm','refund:create','conversation:create'] },
   escort: { label: '打手', tone: 'green', pages: ['overview', 'availableOrders', 'myOrders', 'myEarnings'], permissions: ['order:accept', 'order:serve', 'withdrawal:create'] },
 };
 export function requireThat(condition, message, status = 400) {
@@ -29,17 +30,56 @@ function passwordHash(password, salt = randomBytes(16).toString('hex')) {
 }
 function checkPassword(password, hash) {
   if (typeof password !== 'string' || password.length > 128) return false;
+  if (typeof hash !== 'string') return false;
   const [salt, key] = hash.split(':');
-  return timingSafeEqual(Buffer.from(key, 'hex'), Buffer.from(passwordHash(password, salt).split(':')[1], 'hex'));
+  // Treat malformed persisted hashes as an authentication failure instead of
+  // allowing timingSafeEqual to throw and turn a login attempt into HTTP 500.
+  if (!salt || !key || !/^[0-9a-f]+$/i.test(key) || key.length % 2 !== 0) return false;
+  let expected;
+  try { expected = Buffer.from(passwordHash(password, salt).split(':')[1], 'hex'); } catch { return false; }
+  const actual = Buffer.from(key, 'hex');
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 function textInput(value, label, max = 100) {
   requireThat(typeof value === 'string' && value.trim().length > 0 && value.trim().length <= max, `${label}不能为空且最多 ${max} 个字符`);
   return value.trim();
 }
 const publicUser = user => ({ id: user.id, memberNo: user.memberNo, memberVersion: user.memberVersion, username: user.username, name: user.name, role: user.role, roleLabel: roles[user.role].label, tone: roles[user.role].tone, active: user.active, online: user.online, games: user.games, shareBps: user.shareBps, levelId: user.levelId, escortFrozen: Boolean(user.escortFrozen), examiner: Boolean(user.examiner) });
-const publicConversation = chat => ({ ...chat, slaOverdue: chat.state !== '已结束' && chat.slaDueAt ? Date.parse(chat.slaDueAt) <= Date.now() : false });
+const publicConversation = chat => ({ ...chat, unread:chat.staffUnread ?? chat.unread ?? 0, slaOverdue: chat.state !== '已结束' && chat.slaDueAt ? Date.parse(chat.slaDueAt) <= Date.now() : false });
+function managementConversation(data, chat) {
+  const author = chat.userId ? data.users.find(user => user.id === chat.userId) : undefined;
+  const order = chat.orderId ? data.orders.find(candidate => candidate.id === chat.orderId) : undefined;
+  // Names are not identities: an unlinked consultation must stay unlinked,
+  // even if this customer (or a namesake) already has other orders.
+  const customerId = chat.customerId || author?.customerId || order?.customerId;
+  const customer = customerId ? data.customers.find(candidate => candidate.id === customerId) : undefined;
+  const account = customer ? data.users.find(user => user.customerId === customer.id) : (!chat.customerId ? author : undefined);
+  return {
+    ...publicConversation(chat),
+    peer: {
+      customerId: customer?.id || '', userId: account?.id || '',
+      customerNo: account?.memberNo || customer?.customerNo || '',
+      name: account?.name || customer?.name || chat.boss || '',
+      username: account?.username || customer?.username || '', phone: customer?.phone || '',
+    },
+  };
+}
 export const can = (user, permission) => roles[user.role]?.permissions.includes(permission);
 function permit(user, permission) { requireThat(can(user, permission), '你的职责没有此操作权限', 403); }
+
+// Stable demo identities used for end-to-end testing. These accounts are
+// intentionally separate from the original fixture accounts so existing
+// sessions and test data remain untouched. All demo accounts use the same
+// easy-to-remember password documented in README.md.
+const demoAccounts = [
+  { id: 'demo-admin', username: 'demo_admin', name: '测试管理员', role: 'admin', demoPassword: 'Test1234!' },
+  { id: 'demo-service', username: 'demo_service', name: '测试客服', role: 'service', demoPassword: 'Test1234!' },
+  { id: 'demo-finance', username: 'demo_finance', name: '测试财务', role: 'finance', demoPassword: 'Test1234!' },
+  { id: 'demo-examiner', username: 'demo_examiner', name: '测试考官', role: 'examiner', demoPassword: 'Test1234!' },
+  { id: 'demo-aftersales', username: 'demo_aftersales', name: '测试售后', role: 'afterSales', demoPassword: 'Test1234!' },
+  { id: 'demo-escort', username: 'demo_escort', name: '测试陪玩', role: 'escort', games: ['王者荣耀', '和平精英'], online: true, shareBps: 7000, depositCents: 100000, demoPassword: 'Test1234!' },
+  { id: 'demo-user', username: 'demo_user', name: '测试用户', role: 'user', balanceCents: 100000, demoPassword: 'Test1234!' },
+];
 
 function initialState() {
   const logins = ['escort', 'xiaoman', 'ajiu', 'qiqi', 'taotao'];
@@ -51,10 +91,12 @@ function initialState() {
     { id: 'afterSales', username: 'afterSales', name: '小许', role: 'afterSales' },
     { id: 'member-demo', externalUserId: 'customer-3', memberNo: 'U100003', username: 'member', name: '林先生', role: 'member' },
     { id: 'user-demo', username: 'user', name: '新用户', role: 'user', balanceCents: 100000 },
+    ...demoAccounts,
     ...seed.escorts.map((e, i) => ({ id: logins[i], username: logins[i], name: e.name, role: 'escort', games: e.games.split(' · '), shareBps: parseInt(e.share) * 100 || 7000, online: ['在线', '陪玩中'].includes(e.state), active: e.state !== '待审核', depositCents: 100000, balanceCents: cents(e.balance) })),
   ].map(u => {
-    const password = ['admin', 'service', 'finance', 'examiner', 'afterSales', 'escort', 'member', 'user'].includes(u.username) ? '123456' : randomBytes(24).toString('hex');
-    return { active: true, online: false, games: [], balanceCents: 0, frozenBalanceCents: 0, depositCents: 0, shareBps: 0, ...u, passwordHash: passwordHash(password) };
+    const password = u.demoPassword || (['admin', 'service', 'finance', 'examiner', 'afterSales', 'escort', 'member', 'user'].includes(u.username) ? '123456' : randomBytes(24).toString('hex'));
+    const { demoPassword, ...safeUser } = u;
+    return { active: true, online: false, games: [], balanceCents: 0, frozenBalanceCents: 0, depositCents: 0, shareBps: 0, ...safeUser, passwordHash: passwordHash(password) };
   });
   const games = [...seed.games, { name: 'Apex', category: 'FPS', multiplier: '1.00x', min: 1, max: 3, state: '上架', tone: 'green' }].map(g => ({ ...g, multiplierBps: Math.round(parseFloat(g.multiplier) * 10000), ...(Number.isInteger(g.commissionBps) ? { commissionBps: g.commissionBps } : {}) }));
   const products = seed.products.map((p, i) => ({ ...p, id: `product-${i + 1}`, priceCents: cents(p.price) }));
@@ -104,11 +146,13 @@ export class ClubStore {
       { id: 'afterSales', username: 'afterSales', name: '小许', role: 'afterSales' },
       { id: 'member-demo', externalUserId: 'customer-3', memberNo: 'U100003', username: 'member', name: '林先生', role: 'member' },
       { id: 'user-demo', username: 'user', name: '新用户', role: 'user' },
+      ...demoAccounts,
     ];
     for (const staff of demoStaff) {
       if (data.users.some(user => user.username === staff.username)) continue;
       const memberNo = String(Math.max(81000000, ...data.users.map(user => Number(user.memberNo) || 0)) + 1);
-      const added = { ...staff, memberNo: staff.memberNo || memberNo, memberVersion: 0, passwordHash: passwordHash('123456'), active: true, online: false, games: [], balanceCents: staff.role === 'user' ? 100000 : 0, frozenBalanceCents: 0, depositCents: 0, shareBps: 0 };
+      const added = { ...staff, memberNo: staff.memberNo || memberNo, memberVersion: 0, passwordHash: passwordHash(staff.demoPassword || '123456'), active: true, online: Boolean(staff.online), games: staff.games || [], balanceCents: staff.balanceCents ?? (staff.role === 'user' ? 100000 : 0), frozenBalanceCents: 0, depositCents: staff.depositCents || 0, shareBps: staff.shareBps || 0 };
+      delete added.demoPassword;
       data.users.push(added);
       attachCustomer(data, added);
       migrated = true;
@@ -130,12 +174,14 @@ export class ClubStore {
   }
   read() { return JSON.parse(this.db.prepare('SELECT data FROM club WHERE id=1').get().data); }
   close() { this.db.close(); }
-  transaction(user, permission, action, work) {
+  transaction(user, permission, action, work, personal = false) {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const data = this.read();
-      const actor = data.users.find(u => u.id === user.id && u.active);
-      requireThat(actor, '账号已停用，请重新登录', 401);
+      const actual = data.users.find(u => u.id === user.id && u.active);
+      requireThat(actual, '账号已停用，请重新登录', 401);
+      if (personal) requireThat(['order:create','order:confirm','refund:create','conversation:create'].includes(permission), '个人工作区不支持此操作', 403);
+      const actor = personal ? { ...actual, role:'user' } : actual;
       permit(actor, permission);
       const result = work(data, actor);
       data.revision++;
@@ -225,13 +271,13 @@ export class ClubStore {
     }
     requireThat(isClubMember(user), '你尚未加入俱乐部，无法进入后台', 403);
     const mine = data.orders.filter(o => o.participants.some(p => p.userId === user.id)).map(o => ({ ...o, participants: o.participants.map(p => p.userId === user.id ? p : { userId: p.userId, name: p.name, accepted: p.accepted, finished: p.finished }) }));
-    const available = data.orders.filter(o => o.status === '待接单' && !o.participants.length && !user.escortFrozen && user.games.includes(o.game) && meetsLevel(data, user, o) && data.games.find(g => g.name === o.game)?.state === '上架').map(o => {
+    const available = data.orders.filter(o => o.status === '待接单' && !o.participants.length && !user.escortFrozen && (!o.preferredEscortId || o.preferredEscortId === user.id) && user.games.includes(o.game) && meetsLevel(data, user, o) && data.games.some(g => g.name === o.game)).map(o => {
       const rate = rateOf(data, user, o.game);
-      return { ...o, expectedShareBps: rate, expectedIncomeCents: Math.round(o.amountCents * rate / 10000) };
+      return { ...o, expectedShareBps: rate, expectedIncomeCents: Math.round((o.amountCents-(o.refundedCents||0)) * rate / 10000) };
     });
     const common = { user: publicUser(user), role: roles[user.role], levels: data.levels, revision: data.revision, clubName: '星河游戏俱乐部' };
-    if (user.role === 'escort') return { ...common, user: { ...publicUser(user), commissionByGame: Object.fromEntries((user.games || []).map(game => [game, rateOf(data, user, game)])) }, orders: mine, availableOrders: available, wallet: { balanceCents: user.balanceCents, depositCents: user.depositCents, frozenCents: (user.frozenBalanceCents || 0) + data.withdrawals.filter(w => w.userId === user.id && w.status === '待审核').reduce((a, w) => a + w.amountCents, 0) }, ledger: data.ledger.filter(l => l.userId === user.id), withdrawals: data.withdrawals.filter(w => w.userId === user.id) };
-    if (user.role === 'member') return common;
+    if (user.role === 'escort') return { ...common, user: { ...publicUser(user), commissionByGame: Object.fromEntries((user.games || []).map(game => [game, rateOf(data, user, game)])) }, orders: mine, availableOrders: available, wallet: { balanceCents: user.balanceCents, depositCents: user.depositCents, frozenCents: (user.frozenBalanceCents || 0) + data.withdrawals.filter(w => w.userId === user.id && ['待审核','待线下打款'].includes(w.status)).reduce((a, w) => a + w.amountCents, 0) }, ledger: data.ledger.filter(l => l.userId === user.id), withdrawals: data.withdrawals.filter(w => w.userId === user.id) };
+    if (user.role === 'member') { const personal=personalData(data,user,roles); return { ...personal, user:{...personal.user,role:'member',roleLabel:roles.member.label}, role:roles.member }; }
     if (user.role === 'finance') return { ...common, topups: data.topups, ledger: data.ledger, withdrawals: data.withdrawals, settlements: data.settlements, refunds: data.refunds };
     if (user.role === 'examiner') {
       const members = data.users.filter(u => ['escort', 'member'].includes(u.role)).map(u => {
@@ -242,10 +288,7 @@ export class ClubStore {
       return { ...common, levels: data.levels.map(({ id, name, rank }) => ({ id, name, rank })), members, assessments: data.assessments, assessmentRecords: data.assessments, qualityChecks: data.assessments.filter(item => item.type === '质检'), entryAssessments: data.assessments.filter(item => item.type === '入店考核') };
     }
     if (user.role === 'afterSales') {
-      const conversations = data.conversations.map(chat => {
-        const order = chat.orderId ? data.orders.find(o => o.id === chat.orderId) : data.orders.find(o => o.boss === chat.boss);
-        return publicConversation(order ? { ...chat, orderId: order.id } : chat);
-      });
+      const conversations = data.conversations.map(chat => managementConversation(data, chat));
       return { ...common, orders: data.orders, conversations, refunds: data.refunds };
     }
     const users = data.customers.map((customer, index) => {
@@ -257,7 +300,7 @@ export class ClubStore {
       const member = isClubMember(account) ? account : null;
       return { ...customer, id, customerNo: account?.memberNo || customerNo, userId: account?.id || '', registered: Boolean(account), username: account?.username || customer.username || customerNo, phone: customer.phone || '', active: account ? account.active : customer.active !== false, orderCount: customerOrders.length, completedOrderCount: completed.length, totalSpentCents: customerOrders.reduce((sum, order) => sum + Number(order.amountCents || 0), 0), joinedClub: Boolean(member), clubMemberId: member?.id || '', memberRole: member?.role || '', memberRoleLabel: member ? roles[member.role]?.label || '' : '' };
     });
-    const response = { ...common, orders: data.orders, games: data.games, products: data.products, conversations: data.conversations.map(publicConversation), refunds: data.refunds, members: data.users.filter(u => u.role === 'escort').map(publicUser), customers: data.customers };
+    const response = { ...common, orders: data.orders, games: data.games, products: data.products, conversations: data.conversations.map(chat => managementConversation(data, chat)), refunds: data.refunds, members: data.users.filter(u => u.role === 'escort').map(publicUser), customers: data.customers };
     if (user.role === 'admin') Object.assign(response, { accounts: data.users.map(u => memberRecord(data, u, publicUser)), members: data.users.filter(u => u.role === 'escort').map(u => memberRecord(data, u, publicUser)), roleOptions: Object.entries(roles).map(([id, r]) => ({ id, label: r.label, pages: r.pages, permissions: r.permissions })), topups: data.topups, ledger: data.ledger, withdrawals: data.withdrawals, settlements: data.settlements, refunds: data.refunds, assessments: data.assessments, assessmentRecords: data.assessments, qualityChecks: data.assessments.filter(item => item.type === '质检'), entryAssessments: data.assessments.filter(item => item.type === '入店考核'), audit: data.audit.slice(0, 30), users });
     if (user.role === 'admin') {
       response.accounts = response.accounts.filter(isClubMember);
@@ -267,7 +310,10 @@ export class ClubStore {
     return response;
   }
   assignable(data, order, user) {
-    return user?.active && !user.escortFrozen && user.online && user.role === 'escort' && user.games.includes(order.game) && meetsLevel(data, user, order) && data.games.find(g => g.name === order.game)?.state === '上架';
+    return user?.active && !user.escortFrozen && user.online && user.role === 'escort'
+      && (!order.preferredEscortId || order.preferredEscortId === user.id)
+      && user.games.includes(order.game) && meetsLevel(data, user, order)
+      && data.games.some(g => g.name === order.game);
   }
   createOrder(user, input) {
     return this.transaction(user, 'order:create', '创建订单', (data, actor) => {
@@ -280,16 +326,41 @@ export class ClubStore {
       const total = Math.round(product.priceCents * hours);
       const level = levelOf(data, input.levelId ?? 'gold');
       requireThat(level, '请选择有效的订单等级');
-      const tags = input.tags === undefined ? [product.name] : Array.isArray(input.tags) ? input.tags : String(input.tags).split(/[,，]/).map(t=>t.trim()).filter(Boolean);
+      const orderMode = input.orderMode === undefined ? 'quick' : String(input.orderMode);
+      requireThat(['quick', 'filter', 'designated'].includes(orderMode), '服务方式无效');
+      const preferredEscortId = input.preferredEscortId ? String(input.preferredEscortId).trim() : '';
+      if (orderMode === 'designated') requireThat(preferredEscortId, '指定打手下单时必须选择打手');
+      requireThat(!preferredEscortId || orderMode === 'designated', '仅指定打手模式可以选择指定成员');
+        if (preferredEscortId) {
+          requireThat(data.games.find(g => g.name === product.game).min <= 1, '该服务需要多人配合，请选择客服安排');
+          const preferred = data.users.find(candidate => candidate.id === preferredEscortId && candidate.role === 'escort');
+          requireThat(preferred?.active, '指定打手不存在或已停用', 404);
+          requireThat(!preferred.escortFrozen, '指定打手暂不可接单，请选择其他成员');
+          requireThat(preferred.games.includes(product.game), '指定打手暂不支持该游戏', 400);
+          requireThat(meetsLevel(data, preferred, { levelId: level.id }), '指定打手等级不满足订单要求');
+      }
+      let appointmentAt = null;
+      if (input.appointmentAt) {
+        const rawAppointment = String(input.appointmentAt).trim();
+        // datetime-local values have no timezone; interpret them in the
+        // club's business timezone (Asia/Hong_Kong, UTC+08:00).
+        const zonedAppointment = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(rawAppointment) ? rawAppointment : `${rawAppointment}+08:00`;
+        const timestamp = Date.parse(zonedAppointment);
+        requireThat(Number.isFinite(timestamp), '预约时间格式无效');
+        requireThat(timestamp >= Date.now() - 5 * 60 * 1000, '预约时间不能早于当前时间');
+        appointmentAt = new Date(timestamp).toISOString();
+      }
+        const tags = input.tags === undefined ? [product.name.slice(0, 30)] : Array.isArray(input.tags) ? input.tags : String(input.tags).split(/[,，]/).map(t=>t.trim()).filter(Boolean);
       requireThat(tags.length <= 8 && tags.every(t=>typeof t === 'string' && t.trim().length > 0 && t.length <= 30), 'Tag 最多 8 个，每个最多 30 个字符');
       requireThat(actor.role !== 'user' || input.pay === '在线支付', '顾客订单请使用在线支付');
-      const order = { id: `PO${Date.now()}${randomBytes(2).toString('hex').toUpperCase()}`, boss, game: product.game, tags: [...new Set(tags)], product: product.name, productId: product.id, hours, amountCents: total, pay: input.pay, paymentStatus: '已支付', orderMode: input.orderMode || 'quick', preferredEscortId: input.preferredEscortId || null, region: input.region ? textInput(input.region, '区服', 80) : '', voice: input.voice ? textInput(input.voice, '语音方式', 40) : '', appointmentAt: input.appointmentAt ? String(input.appointmentAt) : null, requirement: textInput(input.requirement, '服务要求', 300), status: '待接单', participants: [], version: 1, createdAt: now(), history: [{ action: '创建订单', by: actor.name, at: now() }] };
-      Object.assign(order, { levelId: level.id, levelName: level.name });
+      const order = { id: `PO${Date.now()}${randomBytes(2).toString('hex').toUpperCase()}`, boss, game: product.game, tags: [...new Set(tags)], product: product.name, productId: product.id, hours, amountCents: total, pay: input.pay, paymentStatus: '已支付', orderMode, preferredEscortId: preferredEscortId || null, region: input.region ? textInput(input.region, '区服', 80) : '', voice: input.voice ? textInput(input.voice, '语音方式', 40) : '', appointmentAt, requirement: textInput(input.requirement, '服务要求', 300), status: '待接单', participants: [], version: 1, createdAt: now(), history: [{ action: '创建订单', by: actor.name, at: now() }] };
+      Object.assign(order, { levelId: level.id, levelName: level.name, participantMin:data.games.find(g=>g.name===product.game).min, participantMax:data.games.find(g=>g.name===product.game).max });
       const matches = data.customers.filter(c => c.name === boss);
-      requireThat(input.customerId || matches.length <= 1, '存在同名用户，请选择用户 ID');
+        requireThat(actor.role === 'user' || input.customerId || matches.length <= 1, '存在同名用户，请选择用户 ID');
       let customer = actor.role === 'user' ? data.customers.find(c => c.id === actor.customerId) : (input.customerId ? data.customers.find(c => c.id === input.customerId) : matches[0]);
       if (actor.role === 'user') requireThat(customer && customer.name === boss, '顾客信息不匹配');
       if (input.customerId) requireThat(customer && customer.name === boss, '用户 ID 与昵称不匹配');
+      if (customer) requireThat(customer.active !== false, '用户账号已停用，无法创建订单', 409);
       if (!customer && input.pay === '线下已收款') {
         const index = data.customers.length;
         customer = { id: `customer-${index + 1}`, customerNo: `U${String(100001 + index).padStart(6, '0')}`, username: boss, phone: '', name: boss, balanceCents: 0, active: true };
@@ -303,10 +374,10 @@ export class ClubStore {
       }
       data.orders.unshift(order);
       return order;
-    });
+    }, personalContext(user,input));
   }
   orderAction(user, id, action, input) {
-    const permissions = { dispatch: 'order:dispatch', transfer: 'order:dispatch', accept: 'order:accept', reject: 'order:accept', start: 'order:serve', finish: 'order:serve', approve: user.role === 'user' ? 'order:confirm' : 'order:review', return: 'order:review' };
+    const permissions = { dispatch: 'order:dispatch', transfer: 'order:dispatch', accept: 'order:accept', reject: 'order:accept', start: 'order:serve', finish: 'order:serve', approve: personalContext(user,input) ? 'order:confirm' : 'order:review', return: 'order:review' };
     requireThat(permissions[action], '未知订单操作', 404);
     return this.transaction(user, permissions[action], `订单 ${id} · ${action}`, (data, actor) => {
       const order = data.orders.find(o => o.id === id);
@@ -320,16 +391,18 @@ export class ClubStore {
         const reason = textInput(input.reason, '转单原因', 200);
         const ids = input.memberIds;
         requireThat(Array.isArray(ids) && new Set(ids).size === ids.length, '请正确选择陪玩成员');
+        if (order.orderMode === 'designated') requireThat(ids.length === 1 && ids[0] === order.preferredEscortId, '指定打手订单只能分配给指定成员');
         const game = data.games.find(g => g.name === order.game);
-        requireThat(game?.state === '上架' && ids.length >= game.min && ids.length <= game.max, '游戏不可接单或陪玩人数超出游戏限制');
+        requireThat(game && ids.length >= (order.participantMin ?? game.min) && ids.length <= (order.participantMax ?? game.max), '游戏不可接单或陪玩人数超出游戏限制');
         const members = ids.map(id => data.users.find(u => u.id === id));
         requireThat(members.every(m => this.assignable(data, order, m)), '成员必须已启用、未冻结、在线、支持此游戏，且等级不低于订单等级');
         const previous = order.participants.map(p => p.name).join(' / ') || '待分配';
-        const activeStatus = order.status;
-        const participants = members.map(m => ({ userId: m.id, name: m.name, levelId: m.levelId, levelName: levelOf(data, m.levelId).name, baseShareBps: rateOf(data, m, order.game), shareBps: Math.floor(rateOf(data, m, order.game) / members.length), accepted: activeStatus !== '待确认', finished: false, evidence: '' }));
+        requireThat(!members.some(m=>data.orders.some(other=>other.id!==order.id && ['待确认','待服务','陪玩中'].includes(other.status) && other.participants.some(p=>p.userId===m.id && !p.finished))), '成员已有未完成服务，暂不可转派',409);
+        const participants = members.map(m => ({ userId: m.id, name: m.name, levelId: m.levelId, levelName: levelOf(data, m.levelId).name, baseShareBps: rateOf(data, m, order.game), shareBps: Math.floor(rateOf(data, m, order.game) / members.length), accepted: false, finished: false, evidence: '' }));
         requireThat(participants.reduce((a, p) => a + p.shareBps, 0) <= 10000, '陪玩分成合计超过 100%，请调整成员或分成配置');
-        lockEarnings(order.amountCents, participants);
+        lockEarnings(order.amountCents-(order.refundedCents||0), participants);
         order.participants = participants;
+        order.status = '待确认'; order.startedAt = null;
         order.history.push({ action: '转单', by: actor.name, at: now(), note: `${previous} → ${participants.map(p => p.name).join(' / ')}；${reason}` });
         order.version++;
         return order;
@@ -337,13 +410,14 @@ export class ClubStore {
         requireThat(order.status === '待接单' && !order.participants.length, '订单已被接走，不能重复分配', 409);
         const ids = action === 'accept' ? [actor.id] : input.memberIds;
         requireThat(Array.isArray(ids) && new Set(ids).size === ids.length, '请正确选择陪玩成员');
+        if (order.orderMode === 'designated') requireThat(ids.length === 1 && ids[0] === order.preferredEscortId, '指定打手订单只能分配给指定成员');
         const game = data.games.find(g => g.name === order.game);
-        requireThat(game?.state === '上架' && ids.length >= game.min && ids.length <= game.max, '游戏不可接单或陪玩人数超出游戏限制');
+        requireThat(game && ids.length >= (order.participantMin ?? game.min) && ids.length <= (order.participantMax ?? game.max), '游戏不可接单或陪玩人数超出游戏限制');
         const members = ids.map(id => data.users.find(u => u.id === id));
         requireThat(members.every(m => this.assignable(data, order, m)), '成员必须已启用、未冻结、在线、支持此游戏，且等级不低于订单等级');
         const participants = members.map(m => ({ userId: m.id, name: m.name, levelId: m.levelId, levelName: levelOf(data, m.levelId).name, baseShareBps: rateOf(data, m, order.game), shareBps: Math.floor(rateOf(data, m, order.game) / members.length), accepted: action === 'accept', finished: false, evidence: '' }));
         requireThat(participants.reduce((a, p) => a + p.shareBps, 0) <= 10000, '陪玩分成合计超过 100%，请调整成员或分成配置');
-        lockEarnings(order.amountCents, participants);
+        lockEarnings(order.amountCents-(order.refundedCents||0), participants);
         order.participants = participants;
         order.status = action === 'accept' ? '待服务' : '待确认';
       } else if (action === 'accept') {
@@ -374,32 +448,59 @@ export class ClubStore {
         order.participants.forEach(p => { p.finished = false; });
         order.status = '陪玩中';
       } else if (action === 'approve') {
-        requireThat(order.status === '待验收' && order.participants.every(p => p.finished), '只有已提交完单的订单可以验收', 409);
-        if (actor.role === 'user') {
-          order.status = '已完成'; order.completedAt = now();
-        } else for (const p of order.participants) {
-          const member = data.users.find(u => u.id === p.userId);
-          const earning = p.earningCents ?? Math.round(order.amountCents * p.shareBps / 10000);
-          member.balanceCents += earning;
-          data.ledger.unshift({ id: randomUUID(), userId: p.userId, account: p.name, deltaCents: earning, afterCents: member.balanceCents, source: order.id, label: '订单分成', at: now(), by: actor.name });
-        }
-        if (actor.role !== 'user') { order.status = '已完成'; order.completedAt = now(); }
+        requireThat(order.status === '待验收' && order.participants.length && order.participants.every(p => p.finished), '只有已提交完单的订单可以验收', 409);
+        settleOrder(data,order,actor);
       }
       order.version++;
       const labels = { dispatch: '客服派单', accept: '确认接单', reject: '退回派单池', start: '开始服务', finish: '提交完单', approve: '验收通过并入账', return: '退回补充服务' };
       order.history.push({ action: labels[action], by: actor.name, at: now(), note: input.reason || input.evidence || '' });
       return order;
-    });
+    }, personalContext(user,input));
   }
   conversationAction(user, id, input) {
-    return this.transaction(user, 'conversation:manage', '更新客服会话', (data, actor) => {
-      const chat = data.conversations.find(c => c.id === id);
-      requireThat(chat, '会话不存在', 404);
-      if (input.note) chat.notes.push({ text: textInput(input.note, '跟进记录', 1000), author: actor.name, at: now() });
-      if (input.state) { requireThat(['处理中', '已结束'].includes(input.state), '会话状态无效'); chat.state = input.state; chat.slaDueAt = input.state === '已结束' ? null : new Date(Date.now() + 2 * 3600000).toISOString(); }
-      chat.unread = 0;
-      return publicConversation(chat);
-    });
+    const personal=personalContext(user,input);
+    return this.transaction(user,personal?'conversation:create':'conversation:manage','更新客服会话',(data,actor)=>{
+      const chat=data.conversations.find(c=>c.id===id);requireThat(chat,'会话不存在',404);
+      if(personal){
+        requireThat(chat.customerId===actor.customerId || chat.userId===actor.id,'无权访问该会话',403);
+        requireThat(!input.note && !input.state,'个人用户不能修改内部跟进',403);chat.customerUnread=0;
+      }else{
+        if(input.note)(chat.notes||=[]).push({text:textInput(input.note,'跟进记录',1000),author:actor.name,at:now()});
+        if(input.state){requireThat(['处理中','已结束'].includes(input.state),'会话状态无效');chat.state=input.state;chat.slaDueAt=input.state==='已结束'?null:new Date(Date.now()+7200000).toISOString();}
+        chat.staffUnread=0;chat.unread=0;
+      }
+      return personal ? this.personalConversation(chat) : managementConversation(data,chat);
+    },personal);
+  }
+  personalConversation(chat) {
+    return {id:chat.id,orderId:chat.orderId||null,escortName:chat.escortName||'',channel:chat.channel,state:chat.state,last:chat.last,unread:chat.customerUnread||0,createdAt:chat.createdAt,updatedAt:chat.updatedAt,messages:chat.messages||[]};
+  }
+  conversationMessage(user,id,input) {
+    const personal=personalContext(user,input);
+    return this.transaction(user,personal?'conversation:create':'conversation:manage','发送会话消息',(data,actor)=>{
+      const chat=data.conversations.find(c=>c.id===id);requireThat(chat,'会话不存在',404);
+      if(personal)requireThat(chat.customerId===actor.customerId || chat.userId===actor.id,'无权访问该会话',403);
+      const text=textInput(input.message,'消息内容',1000);
+      (chat.messages||=[]).push({text,author:actor.name,authorId:actor.id,at:now()});chat.last=text;chat.updatedAt=now();
+      if(personal){chat.staffUnread=(chat.staffUnread??chat.unread??0)+1;chat.customerUnread=0;}
+      else {chat.customerUnread=(chat.customerUnread||0)+1;chat.staffUnread=0;}
+      chat.unread=chat.staffUnread;
+      if(chat.state==='已结束'){chat.state='处理中';chat.slaDueAt=new Date(Date.now()+7200000).toISOString();}
+      return personal ? this.personalConversation(chat) : managementConversation(data,chat);
+    },personal);
+  }
+  conversationCreate(user,input) {
+    return this.transaction(user,'conversation:create','创建服务咨询会话',(data,actor)=>{
+      const message=textInput(input.message||'你好，想咨询一下陪玩服务。','消息内容',1000);
+      const escortName=input.escortName?textInput(String(input.escortName),'陪玩名称',60):'';
+      const escort=data.users.find(u=>u.role==='escort' && u.active && (u.id===input.escortId || u.name===escortName));
+      const contact=escort || (escortName?{id:'showcase-'+Buffer.from(escortName).toString('hex').slice(0,24),name:escortName}:null);
+      requireThat(contact,'陪玩不存在或已停用',404);
+      const existing=data.conversations.find(c=>c.customerId===actor.customerId && c.escortId===contact.id && c.state!=='已结束');
+      if(existing){(existing.messages||=[]).push({text:message,author:actor.name,authorId:actor.id,at:now()});existing.last=message;existing.updatedAt=now();existing.staffUnread=(existing.staffUnread??existing.unread??0)+1;existing.unread=existing.staffUnread;return this.personalConversation(existing);}
+      const chat={id:'chat-'+randomUUID(),customerId:actor.customerId,userId:actor.id,escortId:contact.id,escortName:contact.name,boss:actor.name,channel:'站内信',state:'处理中',last:message,unread:1,staffUnread:1,customerUnread:0,createdAt:now(),updatedAt:now(),slaDueAt:new Date(Date.now()+7200000).toISOString(),notes:[],messages:[{text:message,author:actor.name,authorId:actor.id,at:now()}]};
+      data.conversations.unshift(chat);return this.personalConversation(chat);
+    },true);
   }
   withdrawal(user, input) {
     return this.transaction(user, 'withdrawal:create', '申请提现', (data, actor) => {
@@ -456,19 +557,19 @@ export class ClubStore {
     });
   }
   createRefund(user, input) {
-    return this.transaction(user, can(user, 'refund:manage') || can(user, 'refund:create') ? (can(user, 'refund:manage') ? 'refund:manage' : 'refund:create') : 'order:review', '创建退款申请', (data, actor) => {
+    return this.transaction(user, personalContext(user,input) ? 'refund:create' : can(user, 'refund:manage') || can(user, 'refund:create') ? (can(user, 'refund:manage') ? 'refund:manage' : 'refund:create') : 'order:review', '创建退款申请', (data, actor) => {
       const order = data.orders.find(o => o.id === input.orderId);
       requireThat(order, '订单不存在', 404);
       if (actor.role === 'user') requireThat(order.customerId === actor.customerId, '只能申请自己的订单退款', 403);
-      requireThat(['已完成', '待验收', '退款审核'].includes(order.status), '当前订单不可申请退款', 409);
+      requireThat(['待接单', '待确认', '待服务', '已完成', '待验收', '退款审核'].includes(order.status), '当前订单不可申请退款', 409);
       const value = Number(input.amountCents);
       const refunded = Number(order.refundedCents || 0);
       requireThat(Number.isSafeInteger(value) && value > 0 && value <= order.amountCents - refunded, '退款金额不能超过订单可退余额');
       requireThat(!data.refunds.some(r => r.orderId === order.id && r.status === '待审核'), '该订单已有待审核退款', 409);
-      const item = { id: `RF${Date.now()}${randomBytes(2).toString('hex').toUpperCase()}`, orderId: order.id, customer: order.boss, amountCents: value, reason: textInput(input.reason, '退款原因', 200), status: '待审核', originalStatus: order.status, requestedAt: now(), requestedBy: actor.name, channel: order.pay === '余额支付' ? '余额原路' : '线下人工' };
-      data.refunds.unshift(item); order.status = '退款审核'; order.history.push({ action: '创建退款申请', by: actor.name, at: now(), note: item.reason });
+      const item = { id: `RF${Date.now()}${randomBytes(2).toString('hex').toUpperCase()}`, orderId: order.id, customer: order.boss, amountCents: value, reason: textInput(input.reason, '退款原因', 200), status: '待审核', originalStatus: order.status, requestedAt: now(), requestedBy: actor.name, channel: walletPayment(order) ? '余额原路' : '线下人工' };
+      data.refunds.unshift(item); order.status = '退款审核'; order.version++; order.history.push({ action: '创建退款申请', by: actor.name, at: now(), note: item.reason });
       return item;
-    });
+    }, personalContext(user,input));
   }
   reviewRefund(user, id, input) {
     return this.transaction(user, 'refund:manage', '复核退款申请', (data, actor) => {
@@ -479,19 +580,24 @@ export class ClubStore {
       const order = data.orders.find(o => o.id === item.orderId);
       requireThat(order, '关联订单不存在', 409);
       if (input.action === 'reject') {
-        item.status = '已驳回'; item.reason = textInput(input.reason, '驳回原因', 200); order.status = item.originalStatus || (order.refundedCents ? '已完成' : '已完成');
+        item.status = '已驳回'; item.reason = textInput(input.reason, '驳回原因', 200); order.status = item.originalStatus || '已完成';
       } else {
         const customer = data.customers.find(c => c.id === order.customerId);
-        if (order.pay === '余额支付') {
+        requireThat(item.amountCents <= order.amountCents - (order.refundedCents || 0), '退款金额超过剩余可退金额', 409);
+        reverseRefundEarnings(data,order,item,actor);
+        if (walletPayment(order)) {
           requireThat(customer, '找不到原支付用户，无法原路退款', 409);
           customer.balanceCents += item.amountCents;
           data.ledger.unshift({ id: randomUUID(), userId: null, customerId: customer.id, account: customer.name, deltaCents: item.amountCents, afterCents: customer.balanceCents, source: item.id, label: '订单退款', by: actor.name, at: now() });
         }
         order.refundedCents = Number(order.refundedCents || 0) + item.amountCents;
-        order.status = order.refundedCents >= order.amountCents ? '已退款' : '已完成';
+        order.status = order.refundedCents >= order.amountCents ? '已退款' : (item.originalStatus || '已完成');
+        if (!order.settledAt && !data.ledger.some(l=>l.source===order.id && l.label==='订单分成')) lockEarnings(order.amountCents-order.refundedCents, order.participants);
         item.status = '已通过'; item.approvedAt = now(); item.approvedBy = actor.name;
         order.history.push({ action: '退款审核通过', by: actor.name, at: now(), note: `${amount(item.amountCents)} · ${item.channel}` });
       }
+      order.version++;
+      if(input.action==='reject')order.history.push({action:'退款申请驳回',by:actor.name,at:now(),note:item.reason});
       return item;
     });
   }
@@ -702,7 +808,7 @@ export class ClubStore {
       const name = textInput(input.name, '成员名称', 30);
       requireThat(typeof input.active === 'boolean', '账号状态无效');
       requireThat(actor.id !== id || (input.role === 'admin' && input.active), '不能停用自己或移除自己的管理员权限');
-      if (target && target.role !== input.role) requireThat(!data.orders.some(o => !['已完成', '退款审核'].includes(o.status) && o.participants.some(p => p.userId === id)), '成员仍有未完成订单，请处理后再调整职责');
+      if (target && target.role !== input.role) requireThat(!hasOpenOrders(data, id), '成员仍有未完成订单，请处理后再调整职责');
       if (target?.role === 'escort' && input.role !== 'escort') requireThat(target.balanceCents === 0 && !data.withdrawals.some(w => w.userId === id && ['待审核','待线下打款'].includes(w.status)), '请先结清陪玩余额和提现，再调整职责', 409);
       if (!target) {
         const username = textInput(input.username, '登录账号', 30);
