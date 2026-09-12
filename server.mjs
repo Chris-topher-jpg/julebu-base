@@ -31,15 +31,16 @@ export function createClubServer({ database = resolve(root, 'data/club.sqlite') 
           requireThat(body && typeof body === 'object' && !Array.isArray(body), '请求格式错误');
         }
         const token = (req.headers.cookie || '').split(';').map(s => s.trim()).find(s => s.startsWith('club_session='))?.slice(13) || '';
-        if (url.pathname === '/api/login' && req.method === 'POST') {
+        if (['/api/login', '/api/register'].includes(url.pathname) && req.method === 'POST') {
           const key = req.socket.remoteAddress;
           const limit = attempts.get(key);
           requireThat(!limit || limit.until < Date.now() || limit.count < 10, '登录尝试过多，请 10 分钟后再试', 429);
           try {
-            const result = store.login(typeof body.username === 'string' ? body.username.trim() : '', body.password);
+            const result = url.pathname === '/api/register' ? store.register(body) : store.login(typeof body.username === 'string' ? body.username.trim() : '', body.password);
             attempts.delete(key); store.logout(token);
             res.setHeader('Set-Cookie', `club_session=${result.token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800`);
-            return json({ user: result.user });
+            const personal = store.personal(result.user);
+            return json({ user: personal.user, membership: personal.membership }, url.pathname === '/api/register' ? 201 : 200);
           } catch (e) { attempts.set(key, { count: limit?.until > Date.now() ? limit.count + 1 : 1, until: Date.now() + 600000 }); throw e; }
         }
         if (url.pathname === '/api/logout' && req.method === 'POST') {
@@ -50,6 +51,7 @@ export function createClubServer({ database = resolve(root, 'data/club.sqlite') 
         const user = store.session(token);
         requireThat(user, '登录已失效，请重新登录', 401);
         if (req.method === 'GET') {
+          if (url.pathname === '/api/me') return json(store.personal(user));
           if (url.pathname === '/api/workspace') return json(store.workspace(user));
           if (url.pathname === '/api/audit') return json(store.auditList(user, Object.fromEntries(url.searchParams)));
           const analyticsExport = url.pathname === '/api/analytics/export';
@@ -102,9 +104,9 @@ export function createClubServer({ database = resolve(root, 'data/club.sqlite') 
       requireThat(req.method === 'GET' || req.method === 'HEAD', '请求方法不支持', 405);
       if (url.pathname === '/favicon.ico') { res.writeHead(204); return res.end(); }
       const path = url.pathname === '/' ? '/index.html' : url.pathname;
-      requireThat(path === '/index.html' || /^\/src\/[a-zA-Z0-9_-]+\.(js|css|svg)$/.test(path), '文件不存在', 404);
+      requireThat(path === '/index.html' || /^\/src\/[a-zA-Z0-9_-]+\.(js|css|svg|jpg)$/.test(path), '文件不存在', 404);
       const contents = await readFile(resolve(root, path.slice(1)));
-      const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
+      const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.jpg': 'image/jpeg' };
       res.writeHead(200, { 'Content-Type': `${types[extname(path)]}; charset=utf-8` });
       res.end(req.method === 'HEAD' ? undefined : contents);
     } catch (error) {

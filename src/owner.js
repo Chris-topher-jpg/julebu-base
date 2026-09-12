@@ -4,7 +4,7 @@ import { membersMarkup, bindMembers } from './members.js';
 const names = { overview: '首页', clubConfig: '俱乐部配置', memberManagement: '成员管理', serviceManagement: '客服管理', examinerManagement: '考官管理', afterSales: '售后管理', financeManagement:'财务管理', orderManagement:'订单管理', userManagement:'用户管理' };
 const navIcons = { overview: 'grid', clubConfig: 'game', memberManagement: 'users', serviceManagement: 'headset', examinerManagement: 'headset', afterSales: 'receipt', financeManagement:'wallet', orderManagement:'receipt', userManagement:'users' };
 const parent = { catalog: 'clubConfig', auditLog: 'clubConfig', topups: 'financeManagement', flows: 'financeManagement', settlements: 'financeManagement', accounts: 'memberManagement', escorts: 'memberManagement', clubMembers: 'memberManagement', clubEscorts: 'memberManagement', conversations: 'afterSales', financeList:'financeManagement', commissionConfig:'financeManagement', orderList:'orderManagement', transferOrders:'orderManagement', dispatchOrders:'orderManagement' };
-const pageNames = { ...names, auditLog:'操作审计', clubMembers:'俱乐部成员管理', clubEscorts:'俱乐部陪玩管理', serviceManagement:'客服管理', financeList:'财务列表', commissionConfig:'抽佣配置', orderList:'订单列表', transferOrders:'转单列表', dispatchOrders:'派单列表', catalog:'游戏与商品', topups:'充值审核', flows:'资金流水', settlements:'提现与结算', accounts:'账号与权限', escorts:'陪玩档案', conversations:'客户会话', orders:'订单记录', dispatch:'派单台' };
+const pageNames = { ...names, auditLog:'操作审计', clubMembers:'俱乐部成员管理', clubEscorts:'俱乐部陪玩管理', serviceManagement:'客服管理', financeList:'财务列表', commissionConfig:'抽佣配置', orderList:'订单列表', transferOrders:'转单列表', dispatchOrders:'派单列表', catalog:'游戏与商品', topups:'充值审核', flows:'资金流水', settlements:'提现与结算', accounts:'账号与权限', escorts:'陪玩档案', conversations:'客户会话', orders:'订单记录', dispatch:'派单台', placeOrder:'开始点单', memberOrders:'我的点单', memberAfterSales:'售后记录', memberWallet:'我的钱包' };
 const dtf = new Intl.DateTimeFormat('sv-SE', {timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
 const timestamp = value => dtf.format(new Date(value));
 const day = () => timestamp(Date.now()).slice(0,10);
@@ -86,7 +86,7 @@ function bindStaffManagement(role) {
   if(!input||!body)return;
   const status=u=>`<span class="owner-status ${u.active?'':'off'}">${u.active?'正常':'停用'}</span>`;
   const online=u=>`<span class="owner-status ${u.online?'online':''}">${u.online?'在线':'离线'}</span>`;
-  const draw=()=>{const q=input.value.trim().toLowerCase();const visible=rows.filter(u=>[u.id,u.memberNo,u.name,u.username].some(v=>String(v||'').toLowerCase().includes(q)));body.innerHTML=visible.map(u=>`<tr><td>${e(u.memberNo)}</td><td>${e(u.name)}</td><td><span class="owner-staff-avatar" aria-label="${e(u.name)}的头像">${e(u.name.slice(0,1))}</span></td><td>${status(u)}</td><td>${online(u)}</td><td>${e(u.roleLabel)}</td></tr>`).join('')||'<tr><td colspan="6"><div class="owner-empty">没有找到符合条件的成员</div></td></tr>';};
+  const draw=()=>{const q=input.value.trim().toLowerCase();const visible=rows.filter(u=>[u.id,u.memberNo,u.name,u.username].some(v=>String(v||'').toLowerCase().includes(q)));body.innerHTML=visible.map(u=>`<tr><td title="编号 ${e(u.memberNo || '')}">${e(u.id)}</td><td>${e(u.name)}</td><td><span class="owner-staff-avatar" aria-label="${e(u.name)}的头像">${e(u.name.slice(0,1))}</span></td><td>${status(u)}</td><td>${online(u)}</td><td>${e(u.roleLabel)}</td></tr>`).join('')||'<tr><td colspan="6"><div class="owner-empty">没有找到符合条件的成员</div></td></tr>';};
   input.oninput=draw;draw();
 }
 function userManagementPage(w) {
@@ -152,11 +152,12 @@ const restrictedGroups = {
   afterSales: [['overview','工作台'],['orders','订单管理'],['conversations','会话中心']],
   finance: [['overview','工作台'],['topups','充值审核'],['flows','资金流水'],['settlements','提现与结算']],
   escort: [['overview','工作台'],['availableOrders','接单大厅'],['myOrders','我的订单'],['myEarnings','我的收益']],
-  member: [['overview','工作台']],
+  member: [['overview','个人中心'],['memberOrders','我的点单'],['memberAfterSales','售后记录'],['memberWallet','我的钱包']],
+  user: [['overview','个人中心'],['placeOrder','开始点单'],['memberOrders','我的点单'],['memberAfterSales','售后记录']],
 };
 function restrictedNavigation(w, page) {
   const items = restrictedGroups[w.user.role] || [['overview','工作台']];
-  return items.map(([target, label]) => `<button class="owner-nav-item ${page===target?'active':''}" data-page="${target}" aria-label="${label}" ${page===target?'aria-current="page"':''}>${icon(target==='overview'?'grid':target==='availableOrders'?'game':target==='myEarnings'?'wallet':target==='conversations'?'users':target==='dispatch'?'trend':target==='topups'?'wallet':target==='flows'?'trend':target==='settlements'?'wallet':target==='examinerCandidates'?'users':'receipt',17)}<span>${label}</span></button>`).join('');
+  return items.map(([target, label]) => `<button class="owner-nav-item ${page===target?'active':''}" data-page="${target}" aria-label="${label}" ${page===target?'aria-current="page"':''}>${icon(target==='overview'?'grid':target==='availableOrders'?'game':target==='myEarnings'?'wallet':target==='memberWallet'?'wallet':target==='conversations'?'users':target==='dispatch'?'trend':target==='topups'?'wallet':target==='flows'?'trend':target==='settlements'?'wallet':target==='examinerCandidates'?'users':target==='memberAfterSales'?'headset':'receipt',17)}<span>${label}</span></button>`).join('');
 }
 export function leaveOwner() { clearTimeout(refreshTimer); view.generation++; }
 async function request(section, values={}) { return context.api(`/analytics/${section}?${new URLSearchParams(values)}`); }

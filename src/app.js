@@ -1,9 +1,9 @@
 import { escapeHtml as e, icon, loginMarkup } from './ui.js';
 import { renderOwner, leaveOwner } from './owner.js';
 
-const labels = { overview: '工作台', serviceManagement: '客服管理', examinerCandidates: '考核与质检', orders: '订单管理', dispatch: '派单台', conversations: '会话中心', escorts: '陪玩成员', catalog: '游戏与商品', topups: '充值审核', flows: '资金流水', settlements: '提现与结算', accounts: '成员与权限', availableOrders: '接单大厅', myOrders: '我的订单', myEarnings: '我的收益' };
-const symbols = { overview: 'grid', serviceManagement:'headset', examinerCandidates:'users', orders: 'receipt', dispatch: 'trend', conversations: 'users', escorts: 'headset', catalog: 'game', topups: 'wallet', flows: 'trend', settlements: 'wallet', accounts: 'users', availableOrders: 'game', myOrders: 'receipt', myEarnings: 'wallet' };
-const state = { workspace: null, page: 'overview', filter: '全部', query: '', busy: false };
+const labels = { overview: '工作台', serviceManagement: '客服管理', examinerCandidates: '考核与质检', orders: '订单管理', dispatch: '派单台', conversations: '会话中心', escorts: '陪玩成员', catalog: '游戏与商品', topups: '充值审核', flows: '资金流水', settlements: '提现与结算', accounts: '成员与权限', availableOrders: '接单大厅', myOrders: '我的订单', myEarnings: '我的收益', memberOrders: '我的点单', memberAfterSales: '售后记录' };
+const symbols = { overview: 'grid', serviceManagement:'headset', examinerCandidates:'users', orders: 'receipt', dispatch: 'trend', conversations: 'users', escorts: 'headset', catalog: 'game', topups: 'wallet', flows: 'trend', settlements: 'wallet', accounts: 'users', availableOrders: 'game', myOrders: 'receipt', myEarnings: 'wallet', memberOrders: 'receipt', memberAfterSales: 'headset' };
+const state = { workspace: null, mode: 'personal', page: 'overview', filter: '全部', query: '', busy: false };
 const money = cents => `¥ ${(Number(cents || 0) / 100).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const date = value => value ? new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) : '—';
 const has = permission => state.workspace?.role.permissions.includes(permission);
@@ -26,52 +26,181 @@ async function api(path, body) {
   catch { throw new Error('无法连接俱乐部服务，请检查服务是否已启动后重试'); }
   const result = await response.json();
   if (!response.ok) {
-    if (response.status === 401 && path !== '/login') { closeDialog(); state.workspace = null; renderLogin(); }
+    if (response.status === 401 && !['/login', '/register'].includes(path)) { closeDialog(); state.workspace = null; renderLogin(); }
     throw Object.assign(new Error(result.error || '操作失败，请重试'), { status: response.status });
   }
   return result;
 }
-async function refresh(render = true) { state.workspace = await api('/workspace'); if (render) renderApp(); }
+async function refresh(render = true) { state.workspace = await api(state.mode === 'management' ? '/workspace' : '/me'); if (render) state.mode === 'management' ? renderApp() : renderPublicHome(state.workspace); }
+const route = page => `#/${state.mode}/${page}`;
+async function switchWorkspace(mode, page = 'overview') {
+  const workspace = await api(mode === 'management' ? '/workspace' : '/me');
+  closeDialog(); leaveOwner(); state.mode = mode; state.workspace = workspace;
+  if (mode === 'management' || mode === 'personal') navigate(page); else renderPublicHome(workspace);
+}
 function navigate(page) {
   if(state.workspace?.user.role==='admin') page=({memberManagement:'clubMembers',accounts:'clubMembers',escorts:'clubEscorts'})[page]||page;
   if (!state.workspace?.role.pages.includes(page)) { page = 'overview'; toast('你没有访问该板块的权限'); }
   state.page = page; state.filter = '全部'; state.query = '';
-  history.replaceState(null, '', `#/${page}`); renderApp();
+  closeDialog(); history.replaceState(null, '', route(page)); renderApp();
   window.scrollTo({ top: 0, behavior: 'instant' });
 }
 function renderLogin() {
   leaveOwner();
-  state.workspace = null; history.replaceState(null, '', '#/login');
+  state.workspace = null; state.mode = 'public'; history.replaceState(null, '', '#/');
   document.querySelector('#app').innerHTML = loginMarkup();
-  const demo = document.querySelector('.demo-accounts');
-  if (demo) {
-    demo.insertAdjacentHTML('beforeend', '<button type="button" class="demo-account" data-username="finance"><span class="mini-avatar purple">周</span><span><strong>财务</strong><small>充值 / 流水 / 提现</small></span></button><button type="button" class="demo-account" data-username="examiner"><span class="mini-avatar navy">泽</span><span><strong>考官</strong><small>陪玩游戏资料</small></span></button><button type="button" class="demo-account" data-username="afterSales"><span class="mini-avatar pink">许</span><span><strong>售后</strong><small>退款 / 验收 / 会话</small></span></button>');
-  }
-  const hint = document.querySelector('.login-hint');
-  if (hint) hint.innerHTML = '演示账号：<strong>admin / service / finance / examiner / afterSales / escort</strong><br>统一密码：<strong>123456</strong>';
-  document.querySelector('#loginError').setAttribute('role', 'alert');
-  document.querySelectorAll('.demo-account').forEach(el => el.onclick = () => {
-    document.querySelector('#loginUsername').value = el.dataset.username;
-    document.querySelector('#loginPassword').value = '123456';
-    document.querySelectorAll('.demo-account').forEach(b => b.classList.toggle('selected', b === el));
+  enhancePublicHome();
+  const dialog = document.querySelector('#authDialog');
+  const form = document.querySelector('#loginForm');
+  form.innerHTML = `<button class="auth-close" type="button" data-action="closeLogin" aria-label="关闭登录弹窗">×</button><div class="auth-dialog-head"><div class="login-logo">${icon('game', 21)}</div><strong>星河游戏俱乐部</strong></div><h2 id="authTitle">手机号登录</h2><p class="login-subtitle">登录后查看订单进度、收藏账号和报价提醒</p><label>手机号<input id="loginUsername" autocomplete="tel" inputmode="tel" placeholder="请输入手机号" required minlength="3" maxlength="30"></label><label id="passwordField">密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入密码" required maxlength="128"></label><label id="codeField" hidden>手机验证码<div class="code-input-row"><input id="loginCode" inputmode="numeric" placeholder="请输入 6 位验证码" maxlength="6"><button type="button" id="sendCode">获取验证码</button></div></label><button class="login-submit" type="submit" id="authSubmit">登录 / 注册 ${icon('arrow',16)}</button><p class="login-error" id="loginError" role="alert"></p><button class="auth-switch" type="button" id="authModeToggle">验证码登录</button><p class="auth-tip">未注册手机号登录后将自动创建账号</p>`;
+  let verificationMode = false;
+  const setAuthMode = value => {
+    verificationMode = value;
+    document.querySelector('#codeField').hidden = !value;
+    document.querySelector('#passwordField').hidden = value;
+    document.querySelector('#loginPassword').required = !value;
+    document.querySelector('#loginCode').required = value;
+    document.querySelector('#authTitle').textContent = value ? '验证码登录' : '手机号登录';
+    document.querySelector('#authModeToggle').textContent = value ? '密码登录' : '验证码登录';
     document.querySelector('#loginError').textContent = '';
+  };
+  const openLogin = event => { event?.preventDefault(); setAuthMode(false); dialog?.showModal(); document.querySelector('#loginUsername')?.focus(); };
+  document.querySelectorAll('[data-action="openLogin"]').forEach(el => el.onclick = openLogin);
+  document.querySelector('[data-action="closeLogin"]')?.addEventListener('click', () => dialog?.close());
+  dialog?.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
+  const toggle = document.querySelector('#authModeToggle');
+  toggle?.addEventListener('click', () => setAuthMode(!verificationMode));
+  document.querySelector('#sendCode')?.addEventListener('click', () => {
+    const phone = document.querySelector('#loginUsername').value.trim();
+    if (!phone) { document.querySelector('#loginError').textContent = '请先输入手机号'; return; }
+    document.querySelector('#loginCode').value = '123456';
+    document.querySelector('#loginError').textContent = '演示验证码已填入：123456';
   });
+  const loginFoot = document.querySelector('.login-card-foot span');
+  if (loginFoot) loginFoot.textContent = '首次使用？登录后自动创建账号';
+  setAuthMode(false);
+  document.querySelector('#loginError').setAttribute('role', 'alert');
   document.querySelector('#loginForm').onsubmit = async event => {
-    event.preventDefault(); const form = event.currentTarget; const submit = form.querySelector('button');
+    event.preventDefault(); const form = event.currentTarget; const submit = document.querySelector('#authSubmit');
     if (submit.disabled) return;
     submit.disabled = true; submit.textContent = '正在验证身份…'; document.querySelector('#loginError').textContent = '';
     try {
-      await api('/login', { username: document.querySelector('#loginUsername').value.trim(), password: document.querySelector('#loginPassword').value });
-      await refresh(false); navigate('overview');
+      const code = document.querySelector('#loginCode')?.value.trim();
+      if (verificationMode && code !== '123456') throw new Error('演示验证码为 123456');
+      const username = document.querySelector('#loginUsername').value.trim();
+      const password = verificationMode ? '123456' : document.querySelector('#loginPassword').value;
+      try {
+        await api('/login', { username, password });
+      } catch (error) {
+        // Public login doubles as registration for new accounts. Keep existing
+        // staff/demo credentials on the normal login path and only register
+        // when the supplied password meets the server's account requirements.
+        if (error.status !== 401 || verificationMode || password.length < 8) throw error;
+        await api('/register', { username, password, name: username });
+      }
+      dialog?.close();
+      const personal = await api('/me');
+      renderPublicHome(personal);
     } catch (error) { if (document.querySelector('#loginError')) document.querySelector('#loginError').textContent = error.message; }
-    finally { submit.disabled = false; submit.textContent = '登录工作台 →'; }
+    finally { submit.disabled = false; submit.innerHTML = `登录 / 注册 ${icon('arrow', 16)}`; }
   };
+}
+function enhancePublicHome() {
+  const home = document.querySelector('.public-home');
+  if (!home || home.dataset.enhanced === 'true') return;
+  home.dataset.enhanced = 'true';
+  home.querySelector('.public-nav-actions .register-link')?.remove();
+  const navLogin = home.querySelector('.public-nav-actions .nav-login-link');
+  if (navLogin) navLogin.textContent = '登录 / 注册';
+  const navLinks = home.querySelectorAll('.public-nav nav a');
+  if (navLinks[0]) navLinks[0].textContent = '首页';
+  if (navLinks[1]) navLinks[1].textContent = '大神陪玩';
+  const online = home.querySelector('.public-online');
+  if (online) online.innerHTML = '<i></i>在线陪玩 24 人 ' + icon('chevron', 13);
+  const members = home.querySelector('#members');
+  if (members) {
+    const heading = members.querySelector('.section-heading');
+    if (heading) {
+      const caption = document.createElement('p'); caption.className = 'section-caption';
+      caption.textContent = '按游戏、风格和服务节奏挑选合适的陪玩，登录后即可发起预约。';
+      heading.querySelector('h1')?.after(caption);
+    }
+    const stats = document.createElement('div'); stats.className = 'member-quick-stats';
+    stats.innerHTML = '<span><i></i>当前在线 <b>24</b> 人</span><span>' + icon('clock', 14) + '平均响应 <b>2.4 分钟</b></span><span>' + icon('check', 14) + '今日已完成 <b>128</b> 单</span>';
+    members.querySelector('.game-filters')?.before(stats);
+    const details = [['辅助位','开麦耐心','巅峰赛','响应约 1 分钟','342 单'],['指挥带队','战术复盘','四排','响应约 2 分钟','286 单'],['打野带节奏','轻松聊天','排位','响应约 3 分钟','219 单'],['决斗位','枪法教学','竞技','响应约 1 分钟','176 单'],['娱乐陪伴','氛围轻松','开黑','响应约 4 分钟','198 单'],['王牌冲刺','细节教学','耐心','响应约 2 分钟','154 单']];
+    members.querySelectorAll('.companion-card').forEach((card, index) => {
+      const body = card.querySelector('.companion-body'); const item = details[index] || details[0]; if (!body) return;
+      const tags = document.createElement('div'); tags.className = 'companion-tags'; tags.innerHTML = item.slice(0, 3).map(tag => `<span>${tag}</span>`).join('');
+      body.querySelector('.companion-meta')?.before(tags);
+      const response = document.createElement('div'); response.className = 'companion-response'; response.innerHTML = `<span>${item[4]}</span><span>${item[3]}</span>`;
+      body.querySelector('.companion-action')?.before(response);
+      const action = body.querySelector('.companion-action');
+      if (action) { action.innerHTML = '查看档案并预约 ' + icon('arrow', 14); action.dataset.action = 'openEscort'; action.dataset.escortIndex = String(index); }
+      card.dataset.game = card.querySelector('.companion-body p')?.textContent.split(' · ')[0] || '';
+      card.tabIndex = 0;
+      card.addEventListener('click', event => { if (!event.target.closest('button')) openEscortDialog(index); });
+      card.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openEscortDialog(index); } });
+    });
+    members.querySelectorAll('.game-filters button').forEach(filter => filter.addEventListener('click', () => {
+      members.querySelectorAll('.game-filters button').forEach(item => item.classList.remove('active'));
+      filter.classList.add('active');
+      const game = filter.textContent.trim();
+      members.querySelectorAll('.companion-card').forEach(card => { card.hidden = game !== '全部' && game !== '更多游戏' && card.dataset.game !== game; });
+    }));
+  }
+  const footer = home.querySelector('.public-footer'); footer?.removeAttribute('id');
+  if (!home.querySelector('#rules')) {
+    const section = document.createElement('section'); section.className = 'guarantee-section'; section.id = 'rules';
+    section.innerHTML = `<div class="section-heading"><div><span>服务保障</span><h1>每一单，都有清晰的进度和依据</h1><p class="section-caption">从支付到售后，平台记录关键节点，遇到问题可以随时追踪处理。</p></div><button class="filter-button" type="button" data-action="openLogin">开始下单 ${icon('arrow', 14)}</button></div><div class="guarantee-grid"><article class="guarantee-item"><span class="guarantee-icon blue">${icon('lock', 21)}</span><div><h3>支付托管</h3><p>支付成功后平台暂存订单金额，服务验收通过再进入结算。</p></div></article><article class="guarantee-item"><span class="guarantee-icon green">${icon('check', 21)}</span><div><h3>接单确认</h3><p>订单同步给客服与匹配打手，接单前可查看服务要求和时间。</p></div></article><article class="guarantee-item"><span class="guarantee-icon orange">${icon('clock', 21)}</span><div><h3>过程留痕</h3><p>预约、签到、开始服务、完单和验收均有记录，状态变化清楚可查。</p></div></article><article class="guarantee-item"><span class="guarantee-icon pink">${icon('headset', 21)}</span><div><h3>售后介入</h3><p>迟到、掉线、时长不足或质量争议，可提交证据申请补做或退款。</p></div></article></div><div class="process-strip"><div><b>01</b><span>提交需求</span></div><i></i><div><b>02</b><span>在线支付</span></div><i></i><div><b>03</b><span>接单服务</span></div><i></i><div><b>04</b><span>验收评价</span></div><i></i><div><b>05</b><span>售后保护</span></div></div>`;
+    footer?.before(section);
+  }
+  home.querySelectorAll('[data-action="openEscort"]').forEach(el => el.onclick = () => openEscortDialog(Number(el.dataset.escortIndex || 0)));
+}
+function openEscortDialog(index = 0) {
+  const profiles = [
+    ['玥玥', '王者荣耀 · 巅峰赛陪玩', '巅峰赛辅助位，擅长保护射手和团队沟通。服务节奏稳定，适合上分、复盘和轻松开黑。', '98%', '342', '1 分钟', '辅助位 / 开麦耐心 / 巅峰赛'],
+    ['阿布', '和平精英 · 四排陪练', '熟悉海岛、沙漠多种战术，擅长四排指挥和残局处理，陪你稳定打出团队节奏。', '99%', '286', '2 分钟', '指挥带队 / 战术复盘 / 四排'],
+    ['小鹿', '英雄联盟 · 峡谷排位', '主打野位，擅长节奏规划和赛后复盘，沟通轻松，适合双排上分。', '98%', '219', '3 分钟', '打野带节奏 / 轻松聊天 / 排位'],
+    ['Koi', '无畏契约 · 竞技上分', '决斗位枪法教学与实战陪练，帮助你熟悉地图思路和回合决策。', '100%', '176', '1 分钟', '决斗位 / 枪法教学 / 竞技'],
+    ['奶糖', '王者荣耀 · 娱乐陪伴', '擅长娱乐局和轻松聊天，氛围友好，适合下班后的放松开黑。', '97%', '198', '4 分钟', '娱乐陪伴 / 氛围轻松 / 开黑'],
+    ['星野', '和平精英 · 王牌冲刺', '耐心陪练王牌冲刺，重视细节沟通和战术执行，适合稳定提升。', '99%', '154', '2 分钟', '王牌冲刺 / 细节教学 / 耐心'],
+  ];
+  const p = profiles[index] || profiles[0];
+  return dialog(`${p[0]} · 陪玩档案`, `<div class="escort-profile-dialog"><div class="escort-profile-head"><div class="escort-profile-avatar">${p[0].slice(0, 1)}</div><div><h3>${p[0]}</h3><p>${p[1]}</p><span class="escort-online"><i></i>当前${index % 3 === 1 ? '游戏中' : '空闲中'}</span></div></div><p class="escort-profile-bio">${p[2]}</p><div class="escort-profile-tags">${p[6].split(' / ').map(tag => `<span>${tag}</span>`).join('')}</div><div class="escort-profile-stats"><div><b>${p[3]}</b><span>好评率</span></div><div><b>${p[4]}</b><span>累计服务</span></div><div><b>${p[5]}</b><span>平均响应</span></div></div><div class="escort-profile-note"><strong>服务说明</strong><span>支持预约时间、区服和语音方式备注；下单后可在订单中心查看接单与服务进度。</span></div></div>`, '登录后预约', () => { closeDialog(); document.querySelector('[data-action="openLogin"]')?.click(); });
+}
+function renderPublicHome(workspace) {
+  leaveOwner(); state.workspace = workspace; state.mode = 'public'; state.page = 'overview';
+  history.replaceState(null, '', '#/');
+  document.querySelector('#app').innerHTML = loginMarkup();
+  enhancePublicHome();
+  const user = workspace?.user;
+  const membership = workspace?.membership;
+  const canEnterManagement = Boolean(membership?.active && membership.role !== 'member');
+  const actions = document.querySelector('.public-nav-actions');
+  if (user && actions) {
+    actions.innerHTML = `${canEnterManagement ? `<button class="nav-management-link" type="button" data-action="enterManagement">${icon('building', 14)} 进入后台管理</button>` : ''}<span class="public-user-name">${e(user.name || user.username)}</span><button class="nav-logout-link" type="button" data-action="logout">退出</button>`;
+  }
+  const hero = document.querySelector('.hero-login');
+  if (user && hero) {
+    const orderCount = Array.isArray(workspace.orders) ? workspace.orders.length : 0;
+    const balance = money(workspace.wallet?.balanceCents || 0);
+    hero.innerHTML = `<div class="login-card-head"><div class="login-logo">${icon('users', 21)}</div><div><strong>${e(user.name || user.username)}</strong><small>${e(membership?.label || '用户')}</small></div></div><h2>个人信息</h2><div class="public-profile-grid"><div><span>用户 ID</span><strong>${e(user.id)}</strong></div><div><span>账户余额</span><strong>${balance}</strong></div><div><span>累计点单</span><strong>${orderCount} 笔</strong></div><div><span>当前身份</span><strong>${e(membership?.label || '普通用户')}</strong></div></div><div class="public-personal-actions"><button class="login-submit" type="button" data-action="personalOrder">我要点单 ${icon('arrow', 16)}</button><button class="public-secondary-action" type="button" data-action="personalAfterSales">我要售后 ${icon('headset', 15)}</button></div>${canEnterManagement ? `<button class="public-management-action" type="button" data-action="enterManagement">进入后台管理 ${icon('building', 15)}</button>` : ''}<button class="public-secondary-action public-logout-action" type="button" data-action="logout">退出登录</button>`;
+  }
+  document.querySelectorAll('[data-action="enterManagement"]').forEach(el => el.onclick = () => switchWorkspace('management'));
+  document.querySelectorAll('[data-action="personalOrder"]').forEach(el => el.onclick = () => switchWorkspace('personal', 'placeOrder'));
+  document.querySelectorAll('[data-action="personalAfterSales"]').forEach(el => el.onclick = () => switchWorkspace('personal', 'memberAfterSales'));
+  document.querySelectorAll('[data-action="logout"]').forEach(el => el.onclick = async () => { await api('/logout', {}); renderLogin(); });
+  document.querySelectorAll('[data-action="openLogin"]').forEach(el => el.onclick = () => toast('你已登录，可直接进入后台管理或选择陪玩'));
 }
 function renderApp() {
   const w = state.workspace; if (!w) return renderLogin();
-  if (!w.role.pages.includes(state.page)) { state.page = 'overview'; history.replaceState(null, '', '#/overview'); }
+  if (!w.role.pages.includes(state.page)) { state.page = 'overview'; history.replaceState(null, '', route('overview')); }
   const u = w.user;
   renderOwner({ state, api, navigate, refresh, dialog, orderDetail, toast, legacyContent: pageContent });
+  const personal = state.mode === 'personal';
+  document.querySelector('.owner-shell').classList.toggle('personal-shell', personal);
+  if (!personal || w.membership?.active) document.querySelector('.owner-top-actions').insertAdjacentHTML('afterbegin', `<button class="owner-link workspace-switch" data-action="${personal ? 'enterManagement' : 'enterPersonal'}">${icon(personal ? 'building' : 'users',16)} ${personal ? '进入俱乐部后台' : '返回个人中心'}</button>`);
   bindSharedActions();
 }
 function bindSharedActions() {
@@ -82,11 +211,14 @@ function bindSharedActions() {
     state.query = event.target.value;
     const query = state.query.trim().toLowerCase(); let count = 0;
     document.querySelectorAll('[data-searchable]').forEach(item => { const visible = item.textContent.toLowerCase().includes(query); item.hidden = !visible; if (visible) count++; });
-    document.querySelector('#noSearchResults').hidden = count > 0 || !query;
+    const emptyResults = document.querySelector('#noSearchResults');
+    if (emptyResults) emptyResults.hidden = count > 0 || !query;
   });
+  if (state.query) document.querySelector('#listSearch')?.dispatchEvent(new Event('input'));
 }
 function pageContent() {
-  const pages = { examinerCandidates: examinerCandidatesPage, overview, orders: () => orderPage(false), orderList: () => orderPage(false), transferOrders: () => orderPage(false), dispatchOrders: dispatchPage, myOrders: () => orderPage(true), dispatch: dispatchPage, availableOrders: availablePage, conversations: conversationPage, myEarnings: earningsPage, accounts: accountsPage, escorts: membersPage, catalog: catalogPage, flows: flowPage, topups: topupsPage, settlements: settlementsPage };
+  if (state.mode === 'personal') return ({ overview: personalOverview, placeOrder: placeOrderPage, memberOrders: memberOrdersPage, memberAfterSales: memberAfterSalesPage, memberWallet: memberWalletPage })[state.page]();
+  const pages = { examinerCandidates: examinerCandidatesPage, overview, placeOrder: placeOrderPage, orders: () => orderPage(false), orderList: () => orderPage(false), transferOrders: () => orderPage(false), dispatchOrders: dispatchPage, myOrders: () => orderPage(true), dispatch: dispatchPage, availableOrders: availablePage, conversations: conversationPage, myEarnings: earningsPage, accounts: accountsPage, escorts: membersPage, catalog: catalogPage, flows: flowPage, topups: topupsPage, settlements: settlementsPage, memberOrders: memberOrdersPage, memberAfterSales: memberAfterSalesPage };
   return pages[state.page]();
 }
 const assessmentStatus = value => {
@@ -124,7 +256,11 @@ function overview() {
   if(w.user.role==='examiner') { const records = assessmentRecords(); return intro('考官工作台','处理入店考核与在店质检，所有结论均保留操作记录。') + `<section class="stats">${metric('待处理考核',records.filter(a=>['待考核','进行中','待复核'].includes(a.status)).length,'优先处理新入店申请','orange','calendar')}${metric('待质检',records.filter(a=>a.type==='quality' && ['待考核','进行中','待复核'].includes(a.status)).length,'跟进水平下降或周期复检','purple','trend')}${metric('历史记录',records.length,'可追溯评分与改进建议','blue','receipt')}</section>` + panel('今日工作', '按成员档案进入考核与质检', `<div class="owner-subnav"><button data-page="examinerCandidates">进入考核与质检 →</button></div>`); }
   if(w.user.role==='afterSales') { const linked = w.conversations.filter(c=>c.orderId || c.order || w.orders.some(o=>o.id===c.orderId || o.boss===c.boss)); return intro('售后工作台','围绕订单处理异议、退款和服务质量问题；非订单诉求直接在会话中跟进。') + `<section class="stats">${metric('退款待跟进',w.orders.filter(o=>o.status==='退款审核').length,'及时处理售后申请','orange','receipt')}${metric('待验收订单',w.orders.filter(o=>o.status==='待验收').length,'核对服务完成情况','green','trend')}${metric('待跟进会话',w.conversations.filter(c=>c.state!=='已结束').length,'回复客户并记录结果','blue','users')}${metric('订单关联会话',linked.length,'可直接查看接单打手和订单记录','purple','headset')}</section>` + panel('售后业务','订单争议与非订单意见统一从会话进入',`<div class="owner-subnav"><button data-page="conversations">打开会话中心 →</button><button data-page="orders">查看订单记录 →</button></div>`); }
   if(w.user.role==='finance') return intro('财务工作台','处理所有与金钱相关的充值、退款赔偿、资金流水与提现结算。') + `<section class="stats">${metric('待审核充值',w.topups.filter(t=>t.state==='待审核').length,'核实实际收款后入账','blue','wallet')}${metric('待处理退款',w.refunds.filter(r=>r.status==='待审核').length,'确认赔付金额与返还渠道','pink','receipt')}${metric('待审核提现',w.withdrawals.filter(t=>t.status==='待审核').length,'审核后安排线下打款','orange','receipt')}${metric('资金流水',w.ledger.length,'所有账户变动均可追溯','green','trend')}</section>` + panel('财务业务','按实际凭证核验并留存审核说明',`<div class="owner-subnav"><button data-page="topups">充值 / 退款审核</button><button data-page="flows">资金流水</button><button data-page="settlements">提现与结算</button></div>`);
-  if(w.user.role==='member') return intro('我的成员信息','你已加入星河游戏俱乐部。') + panel('当前身份',w.user.roleLabel,`<p>成员：${e(w.user.name)}</p><p>用户ID：${e(w.user.memberNo)}</p><p>业务权限由俱乐部会长设置，开通陪玩后可使用接单功能。</p>`);
+  if(w.user.role==='user') {
+    const orders = w.orders || []; const spent = orders.reduce((sum, o) => sum + Number(o.amountCents || 0), 0);
+    return intro('用户个人中心', '余额、点单与售后进度集中展示，服务状态和资金变动一目了然。', button('newOrder', '开始点单', '', true)) + `<section class="stats">${metric('账户余额', money(w.wallet?.balanceCents), '可用于支付俱乐部订单', 'purple', 'wallet')}${metric('累计点单', orders.length, '全部历史订单', 'blue', 'receipt')}${metric('进行中', orders.filter(o => ['待接单','待确认','待服务','陪玩中','待验收'].includes(o.status)).length, '正在处理的服务', 'orange', 'trend')}${metric('累计消费', money(spent), '订单实付金额合计', 'green', 'receipt')}</section>` + panel('快捷入口', '从下单到售后全程可追踪', `<div class="owner-subnav"><button data-page="placeOrder">开始点单 →</button><button data-page="memberOrders">查看点单记录 →</button><button data-page="memberAfterSales">查看售后记录 →</button></div>`) + panel('最近点单', '按创建时间展示最新订单', orderList(orders.slice(0, 4), false));
+  }
+  if(w.user.role==='member') return intro('俱乐部成员', '') + panel('成员资料', '', `<div class="detail-grid"><div><span>用户 ID</span><strong>${e(w.user.id)}</strong></div><div><span>用户编号</span><strong>${e(w.user.memberNo || '—')}</strong></div><div><span>昵称</span><strong>${e(w.user.name)}</strong></div><div><span>俱乐部职务</span><strong>普通成员</strong></div><div><span>业务权限</span><strong>待最高管理员分配</strong></div></div>`);
   const pending = w.orders.filter(o => ['待接单', '待确认', '待服务'].includes(o.status));
   const live = w.orders.filter(o => o.status === '陪玩中');
   const review = w.orders.filter(o => o.status === '待验收');
@@ -139,6 +275,11 @@ function orderList(list, mine) {
 function myIncome(order) { const p = order.participants.find(p => p.userId === state.workspace.user.id); return p?.earningCents ?? Math.round(order.amountCents * (p?.shareBps || 0) / 10000); }
 function orderButtons(o, mine) {
   let actions = button('detail', '详情', o.id);
+  if (state.workspace.user.role === 'user') {
+    if (o.status === '待验收') actions += button('customerConfirm', '确认完成', o.id, true);
+    if (['已完成', '待验收'].includes(o.status)) actions += button('refundRequest', '申请售后', o.id);
+    return actions;
+  }
   if (mine) {
     const p = o.participants.find(p => p.userId === state.workspace.user.id);
     if (o.status === '待确认' && !p.accepted) actions += button('accept', '确认接单', o.id, true);
@@ -146,7 +287,7 @@ function orderButtons(o, mine) {
     if (o.status === '待服务') actions += button('start', '开始服务', o.id, true);
     if (o.status === '陪玩中' && !p.finished) actions += button('finish', '提交完单', o.id, true);
     if (p.finished && o.status === '陪玩中') actions += '<span class="muted-text">等待其他成员完单</span>';
-  } else {
+  } else if (state.workspace.user.role !== 'user') {
     if (['待确认', '待服务', '陪玩中'].includes(o.status) && has('order:dispatch')) actions += button('transfer', '转单', o.id);
     if (o.status === '待接单' && has('order:dispatch')) actions += button('dispatch', '派单', o.id, true);
     if (o.status === '待验收' && has('order:review')) actions += button('review', '验收订单', o.id, true);
@@ -155,10 +296,33 @@ function orderButtons(o, mine) {
   }
   return actions;
 }
+function placeOrderPage() {
+  return intro('开始点单', '选择游戏、服务方式和预约要求，支付成功后订单会自动进入待接单并通知客服。', button('newOrder', '填写服务要求', '', true)) + panel('陪玩服务流程', '下单后可在我的点单中跟踪每一步', '<div class="workflow"><div><b>01</b><strong>选择服务</strong><span>按游戏、商品或指定打手点单</span></div><div><b>02</b><strong>在线支付</strong><span>平台暂存订单金额，等待接单</span></div><div><b>03</b><strong>匹配接单</strong><span>客服改派或打手直接接单</span></div><div><b>04</b><strong>服务验收</strong><span>完成后确认并进入售后保护期</span></div></div>');
+}
 function orderPage(mine) {
   const statuses = ['全部', '待接单', '待确认', '待服务', '陪玩中', '待验收', '已完成', '退款审核'].filter(s => !mine || s !== '待接单');
   const orders = state.workspace.orders.filter(o => state.filter === '全部' || o.status === state.filter);
   return intro(mine ? '我的订单' : '订单管理', mine ? '只显示分配给你的订单；完单后由客服验收，收益按接单时的分成计算。' : '创建、派单、服务、验收，完整记录每一步。') + `<div class="filter-strip"><div class="filter-tabs">${statuses.map(s => `<button data-filter="${s}" class="${s === state.filter ? 'active' : ''}">${s} <b>${state.workspace.orders.filter(o => s === '全部' || o.status === s).length}</b></button>`).join('')}</div></div>${panel(mine ? '我的服务记录' : '俱乐部订单', `共 ${orders.length} 笔`, `<label class="list-search">${icon('search', 16)}<input id="listSearch" type="search" placeholder="搜索订单号、老板、游戏" aria-label="搜索订单" value="${e(state.query)}"></label>${orderList(orders, mine)}<div id="noSearchResults" class="empty-state" hidden>没有找到匹配的订单</div>`)}`;
+}
+function personalOverview() {
+  const w = state.workspace, orders = w.orders;
+  const spent = orders.filter(o => !['已取消','未支付','待支付'].includes(o.status)).reduce((sum, o) => sum + Math.max(0, o.amountCents - o.refundedCents), 0);
+  return intro('个人中心', '') + `<section class="personal-profile"><span class="personal-avatar">${e(w.user.name.slice(0,1))}</span><div><h2>${e(w.user.name)}</h2><p>用户 ID <strong>${e(w.user.id)}</strong>${w.user.memberNo ? ` <small>编号 ${e(w.user.memberNo)}</small>` : ''}</p></div><div class="personal-membership"><span>用户</span><span>${w.membership ? `俱乐部成员 · ${e(w.membership.label)}` : '尚未加入俱乐部'}</span></div></section><section class="stats">${metric('账户余额', money(w.wallet.balanceCents), '消费余额', 'blue', 'wallet')}${metric('累计点单', orders.length, '笔', 'green', 'receipt')}${metric('服务进行中', orders.filter(o => ['待接单','待确认','待服务','陪玩中','待验收'].includes(o.status)).length, '笔', 'orange', 'headset')}${metric('累计消费', money(spent), '已扣除退款', 'pink', 'trend')}</section>` + panel('最近点单', '', orderList(orders.slice(0, 4), false), '<button class="text-btn" data-page="memberOrders">全部点单记录 →</button>');
+}
+function memberWalletPage() {
+  return intro('我的钱包', '') + `<section class="personal-balance"><span>账户余额</span><strong>${money(state.workspace.wallet.balanceCents)}</strong></section>` + panel('余额明细', '', ledgerTable(state.workspace.ledger));
+}
+function memberOrdersPage() {
+  const w = state.workspace; const orders = w.orders || [];
+  const statuses = ['全部', '待接单', '待确认', '待服务', '陪玩中', '待验收', '已完成', '退款审核', '已退款', '已取消'];
+  const filtered = orders.filter(o => state.filter === '全部' || o.status === state.filter);
+  return intro('我的点单记录', '') + `<div class="filter-strip"><div class="filter-tabs">${statuses.map(s => `<button data-filter="${s}" class="${s === state.filter ? 'active' : ''}">${s} <b>${orders.filter(o => s === '全部' || o.status === s).length}</b></button>`).join('')}</div></div>` + panel('订单明细', `共 ${filtered.length} 笔`, `<label class="list-search">${icon('search', 16)}<input id="listSearch" type="search" placeholder="搜索订单号、游戏或陪玩" aria-label="搜索点单记录" value="${e(state.query)}"></label>${orderList(filtered, false)}<div id="noSearchResults" class="empty-state" hidden>没有找到匹配的订单</div>`);
+}
+function memberAfterSalesPage() {
+  const w = state.workspace; const refunds = w.refunds || []; const conversations = w.conversations || [];
+  const refundRows = refunds.map(r => { const o = (w.orders || []).find(order => order.id === r.orderId); return row([e(r.id), e(r.orderId), e(o?.game || '—'), money(r.amountCents), badge(r.status), date(r.requestedAt), e(r.reason || '—')]); });
+  const chatRows = conversations.map(c => row([e(c.id), e(c.channel || '站内信'), e(c.last || c.messages?.at(-1)?.text || '—'), badge(c.state || '处理中'), date(c.updatedAt || c.messages?.at(-1)?.at)]));
+  return intro('售后记录', '') + panel('退款与赔偿', '', table(['申请单号','订单号','游戏','申请金额','处理状态','申请时间','原因'], refundRows)) + panel('客服沟通记录', '', table(['会话','渠道','最近消息','状态','更新时间'], chatRows));
 }
 function dispatchPage() {
   const queue = state.workspace.orders.filter(o => o.status === '待接单').sort((a,b) => a.createdAt.localeCompare(b.createdAt));
@@ -227,10 +391,13 @@ async function perform(el) {
   const w = state.workspace; const o = getOrder(id);
   try {
     if (action === 'logout') { await api('/logout', {}); closeDialog(); renderLogin(); return; }
+    if (action === 'enterManagement') return switchWorkspace('management');
+    if (action === 'enterPersonal') return switchWorkspace('personal');
     if (action === 'refresh') { state.busy = true; await refresh(); toast('已获取最新业务状态'); return; }
     if (action === 'accounts') return navigate('accounts');
     if (action === 'online') { state.busy = true; await api('/online', { online: !w.user.online }); await refresh(); toast(state.workspace.user.online ? '已上线，可以接单' : '已休息，暂不接新单'); return; }
     if (action === 'detail') return dialog('订单详情', orderDetail(o));
+    if (action === 'customerConfirm') return dialog('确认服务完成', orderDetail(o) + '<p class="detail-note">确认后订单完成，陪玩分成将按规则结算；如有问题可在售后记录中申请处理。</p>', '确认完成', () => updateOrder(o, 'approve'));
     if (action === 'claim') return dialog('确认接单', `<p>接下 ${e(o.boss)} 的「${e(o.game)} · ${e(o.product)}」订单？</p><p>${o.hours} 小时 · 订单总额 <strong>${money(o.amountCents)}</strong></p><p>我的分成 ${o.expectedShareBps / 100}% · 预计到手 <strong>${money(o.expectedIncomeCents)}</strong></p><p>${e(o.requirement)}</p><p class="detail-note">分成按陪玩等级计算，接单后锁定。开始服务前请确认可服务时间。</p>`, '确认接单', () => updateOrder(o, 'accept'));
     if (action === 'accept') return dialog('确认派单', orderDetail(o), '确认接单', () => updateOrder(o, 'accept'));
     if (action === 'start') return dialog('开始服务', `<p>确认开始 ${e(o.game)} 的 ${o.hours} 小时服务？</p><p class="detail-note">开始后将记录服务时间。同一成员不能同时开始其他订单。</p>`, '开始服务', () => updateOrder(o, 'start'));
@@ -264,6 +431,13 @@ async function perform(el) {
     }
     if (action === 'newOrder') {
       const products = w.products.filter(p => p.state === '启用' && w.games.some(g => g.name === p.game && g.state === '上架'));
+      if (w.user.role === 'user') {
+        const form = dialog('创建陪玩订单', `${field('游戏与商品','productId','text','','list="productList"')}<datalist id="productList">${products.map(p => `<option value="${e(p.id)}">${e(p.game)} · ${e(p.name)} · ${money(p.priceCents)}/小时</option>`).join('')}</datalist><label class="form-field">服务方式<select name="orderMode"><option value="quick">快速下单，由客服安排</option><option value="filter">按游戏筛选打手</option><option value="designated">指定打手</option></select></label><label class="form-field">指定打手（可选）<select name="preferredEscortId"><option value="">由客服安排</option>${(w.members || []).map(m => `<option value="${e(m.id)}">${e(m.name)} · ${(m.games || []).join(' / ')}</option>`).join('')}</select></label>${field('服务时长（小时）','hours','number',1,'min="0.5" max="24" step="0.5"')} ${field('游戏区服','region','text','','maxlength="80"')}<label class="form-field">预约时间<input name="appointmentAt" type="datetime-local"></label><label class="form-field">语音方式<select name="voice"><option>游戏内语音</option><option>微信语音</option><option>不开语音</option></select></label>${textarea('备注及特殊要求','requirement','例如：开麦沟通、位置偏好、段位要求')}<div class="form-total">订单金额 <strong id="orderQuote"></strong></div><p class="detail-note">在线支付将从账户余额扣款，支付成功后进入待接单。当前余额：${money(w.wallet?.balanceCents)}</p>`, '在线支付并提交', data => api('/orders', { ...Object.fromEntries(data), boss: w.user.name, pay: '在线支付', levelId: 'gold' }));
+        const productInput = form.querySelector('[name=productId]');
+        const productSelect = document.createElement('select'); productSelect.name = 'productId'; productSelect.required = true; productSelect.innerHTML = products.map(p => `<option value="${e(p.id)}">${e(p.game)} · ${e(p.name)} · ${money(p.priceCents)}/小时</option>`).join(''); productInput.replaceWith(productSelect);
+        const updateQuote = () => { const p = products.find(p => p.id === form.querySelector('[name=productId]').value); form.querySelector('#orderQuote').textContent = money((p?.priceCents || 0) * Number(form.querySelector('[name=hours]').value || 0)); };
+        form.addEventListener('input', updateQuote); updateQuote(); return;
+      }
       const form = dialog('新建陪玩订单', `${field('老板称呼', 'boss', 'text', '', 'maxlength="30" list="customerList"')}<datalist id="customerList">${w.customers.map(c => `<option value="${e(c.name)}">余额 ${money(c.balanceCents)}</option>`).join('')}</datalist><label class="form-field">游戏商品<select name="productId">${products.map(p => `<option value="${p.id}">${e(p.game)} · ${e(p.name)} · ${money(p.priceCents)}/小时</option>`).join('')}</select></label><label class="form-field">订单等级<select name="levelId">${w.levels.map(l=>`<option value="${l.id}" ${l.id==='gold'?'selected':''}>${l.name}及以上</option>`).join('')}</select></label>${field('服务时长（小时）','hours','number',1,'min="0.5" max="24" step="0.5"')}<div class="form-total">订单金额 <strong id="orderQuote"></strong></div><label class="form-field">支付方式<select name="pay"><option>线下已收款</option><option>余额支付</option></select></label><label class="form-field">Tag 标签（可选，用逗号分隔）<input name="tags" maxlength="240" placeholder="例如：娱乐、上分、新人"></label>${textarea('服务要求', 'requirement', '例如：开麦沟通、游戏区服、服务时间和段位要求')}<p class="detail-note">选择“线下已收款”表示客服已经核实收款；余额支付会即时扣减老板余额。</p>`, '创建订单', data => api('/orders', Object.fromEntries(data)));
       const quote = () => { const p = products.find(p => p.id === form.querySelector('[name=productId]').value); form.querySelector('#orderQuote').textContent = money((p?.priceCents || 0) * Number(form.querySelector('[name=hours]').value)); }; form.addEventListener('input', quote); quote(); return;
     }
@@ -302,12 +476,32 @@ async function perform(el) {
   } catch (error) { toast(error.message); }
   finally { state.busy = false; }
 }
-window.addEventListener('hashchange', () => { if (state.workspace) navigate(location.hash.slice(2)); });
+window.addEventListener('hashchange', async () => {
+  const hash = location.hash.replace(/^#\/?/, '').split('/');
+  if (hash[0] && !['management', 'public', 'personal'].includes(hash[0])) return;
+  const mode = hash[0] === 'management' ? 'management' : hash[0] === 'personal' ? 'personal' : 'public';
+  const page = hash[1] || 'overview';
+  if (mode === 'management') {
+    if (!state.workspace || state.mode !== 'management') return switchWorkspace('management', page);
+    return navigate(page);
+  }
+  if (mode === 'personal' && state.workspace && state.mode === 'personal') return navigate(page);
+  if (state.workspace && state.mode === 'public') return renderPublicHome(state.workspace);
+  try { const personal = await api('/me'); renderPublicHome(personal); } catch (error) { if (error.status === 401) renderLogin(); }
+});
 window.addEventListener('pageshow', event => { if (event.persisted) boot(); });
 async function boot() {
-  const desired = location.hash.slice(2);
+  const hash = location.hash.slice(2).split('/');
+  const requestedMode = hash[0] === 'management' ? 'management' : hash[0] === 'personal' ? 'personal' : 'public';
+  const desired = hash[1] || 'overview';
+  state.mode = requestedMode;
   document.querySelector('#app').innerHTML = '<div class="loading-screen"><span class="brand-mark">C</span><p>正在载入俱乐部工作台…</p></div>';
-  try { await refresh(false); navigate(state.workspace.role.pages.includes(desired) ? desired : 'overview'); }
+  try {
+    await refresh(false);
+    if (requestedMode === 'management') navigate(state.workspace.role.pages.includes(desired) ? desired : 'overview');
+    else if (requestedMode === 'personal') { state.mode = 'personal'; navigate(state.workspace.role.pages.includes(desired) ? desired : 'overview'); }
+    else renderPublicHome(state.workspace);
+  }
   catch (error) {
     if (error.status === 401) renderLogin();
     else { document.querySelector('#app').innerHTML = `<div class="loading-screen"><h1>暂时无法连接俱乐部</h1><p>${e(error.message)}</p><button class="primary-action" id="retryBoot">重新连接</button></div>`; document.querySelector('#retryBoot').onclick = boot; }
