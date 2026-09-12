@@ -51,7 +51,8 @@ function navigate(page) {
 }
 function renderLogin() {
   leaveOwner();
-  state.workspace = null; state.mode = 'public'; history.replaceState(null, '', '#/');
+  state.workspace = null; state.mode = 'public';
+  if (!['#games', '#members', '#rules'].includes(location.hash)) history.replaceState(null, '', '#/');
   document.querySelector('#app').innerHTML = loginMarkup();
   enhancePublicHome();
   const dialog = document.querySelector('#authDialog');
@@ -113,71 +114,31 @@ function enhancePublicHome() {
   const home = document.querySelector('.public-home');
   if (!home || home.dataset.enhanced === 'true') return;
   home.dataset.enhanced = 'true';
-  home.querySelector('.public-nav-actions .register-link')?.remove();
-  const navLogin = home.querySelector('.public-nav-actions .nav-login-link');
-  if (navLogin) navLogin.textContent = '登录 / 注册';
-  const navLinks = home.querySelectorAll('.public-nav nav a');
-  if (navLinks[0]) navLinks[0].textContent = '首页';
-  if (navLinks[1]) navLinks[1].textContent = '大神陪玩';
+  const links = [...home.querySelectorAll('.public-nav nav a')];
+  const markNavigation = hash => links.forEach(link => {
+    if (link.hash === hash) link.setAttribute('aria-current', 'location');
+    else link.removeAttribute('aria-current');
+  });
+  links.forEach(link => link.addEventListener('click', () => markNavigation(link.hash)));
+  const section = ['#games', '#members', '#rules'].includes(location.hash) ? location.hash : '#games';
+  markNavigation(section);
   const online = home.querySelector('.public-online');
-  if (online) online.innerHTML = '<i></i>在线陪玩 24 人 ' + icon('chevron', 13);
+  if (online) online.textContent = '星河陪玩';
   const members = home.querySelector('#members');
-  if (members) {
-    const heading = members.querySelector('.section-heading');
-    if (heading) {
-      const caption = document.createElement('p'); caption.className = 'section-caption';
-      caption.textContent = '按游戏、风格和服务节奏挑选合适的陪玩，登录后即可发起预约。';
-      heading.querySelector('h1')?.after(caption);
+  if (members) mountCompanions(members, { requestService: () => {
+    if (state.workspace?.user) {
+      switchWorkspace('personal', 'placeOrder');
+      return;
     }
-    const stats = document.createElement('div'); stats.className = 'member-quick-stats';
-    stats.innerHTML = '<span><i></i>当前在线 <b>24</b> 人</span><span>' + icon('clock', 14) + '平均响应 <b>2.4 分钟</b></span><span>' + icon('check', 14) + '今日已完成 <b>128</b> 单</span>';
-    members.querySelector('.game-filters')?.before(stats);
-    const details = [['辅助位','开麦耐心','巅峰赛','响应约 1 分钟','342 单'],['指挥带队','战术复盘','四排','响应约 2 分钟','286 单'],['打野带节奏','轻松聊天','排位','响应约 3 分钟','219 单'],['决斗位','枪法教学','竞技','响应约 1 分钟','176 单'],['娱乐陪伴','氛围轻松','开黑','响应约 4 分钟','198 单'],['王牌冲刺','细节教学','耐心','响应约 2 分钟','154 单']];
-    members.querySelectorAll('.companion-card').forEach((card, index) => {
-      const body = card.querySelector('.companion-body'); const item = details[index] || details[0]; if (!body) return;
-      const tags = document.createElement('div'); tags.className = 'companion-tags'; tags.innerHTML = item.slice(0, 3).map(tag => `<span>${tag}</span>`).join('');
-      body.querySelector('.companion-meta')?.before(tags);
-      const response = document.createElement('div'); response.className = 'companion-response'; response.innerHTML = `<span>${item[4]}</span><span>${item[3]}</span>`;
-      body.querySelector('.companion-action')?.before(response);
-      const action = body.querySelector('.companion-action');
-      if (action) { action.innerHTML = '查看档案并预约 ' + icon('arrow', 14); action.dataset.action = 'openEscort'; action.dataset.escortIndex = String(index); }
-      card.dataset.game = card.querySelector('.companion-body p')?.textContent.split(' · ')[0] || '';
-      card.tabIndex = 0;
-      card.addEventListener('click', event => { if (!event.target.closest('button')) openEscortDialog(index); });
-      card.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openEscortDialog(index); } });
-    });
-    members.querySelectorAll('.game-filters button').forEach(filter => filter.addEventListener('click', () => {
-      members.querySelectorAll('.game-filters button').forEach(item => item.classList.remove('active'));
-      filter.classList.add('active');
-      const game = filter.textContent.trim();
-      members.querySelectorAll('.companion-card').forEach(card => { card.hidden = game !== '全部' && game !== '更多游戏' && card.dataset.game !== game; });
-    }));
-  }
+    home.querySelector('.nav-login-link[data-action="openLogin"]')?.click();
+  } });
   const footer = home.querySelector('.public-footer'); footer?.removeAttribute('id');
   if (!home.querySelector('#rules')) {
     const section = document.createElement('section'); section.className = 'guarantee-section'; section.id = 'rules';
     section.innerHTML = `<div class="section-heading"><div><span>服务保障</span><h1>每一单，都有清晰的进度和依据</h1><p class="section-caption">从支付到售后，平台记录关键节点，遇到问题可以随时追踪处理。</p></div><button class="filter-button" type="button" data-action="openLogin">开始下单 ${icon('arrow', 14)}</button></div><div class="guarantee-grid"><article class="guarantee-item"><span class="guarantee-icon blue">${icon('lock', 21)}</span><div><h3>支付托管</h3><p>支付成功后平台暂存订单金额，服务验收通过再进入结算。</p></div></article><article class="guarantee-item"><span class="guarantee-icon green">${icon('check', 21)}</span><div><h3>接单确认</h3><p>订单同步给客服与匹配打手，接单前可查看服务要求和时间。</p></div></article><article class="guarantee-item"><span class="guarantee-icon orange">${icon('clock', 21)}</span><div><h3>过程留痕</h3><p>预约、签到、开始服务、完单和验收均有记录，状态变化清楚可查。</p></div></article><article class="guarantee-item"><span class="guarantee-icon pink">${icon('headset', 21)}</span><div><h3>售后介入</h3><p>迟到、掉线、时长不足或质量争议，可提交证据申请补做或退款。</p></div></article></div><div class="process-strip"><div><b>01</b><span>提交需求</span></div><i></i><div><b>02</b><span>在线支付</span></div><i></i><div><b>03</b><span>接单服务</span></div><i></i><div><b>04</b><span>验收评价</span></div><i></i><div><b>05</b><span>售后保护</span></div></div>`;
     footer?.before(section);
   }
-  home.querySelectorAll('[data-action="openEscort"]').forEach(el => el.onclick = () => openEscortDialog(Number(el.dataset.escortIndex || 0)));
-  const directoryHost = home.querySelector('#members');
-  if (directoryHost) {
-    const legacy = directoryHost.querySelector('.companion-grid');
-    if (legacy) legacy.remove();
-    mountCompanions(directoryHost, { requestService: () => { home.querySelector('[data-action="openLogin"]')?.click(); } });
-  }
-}
-function openEscortDialog(index = 0) {
-  const profiles = [
-    ['玥玥', '王者荣耀 · 巅峰赛陪玩', '巅峰赛辅助位，擅长保护射手和团队沟通。服务节奏稳定，适合上分、复盘和轻松开黑。', '98%', '342', '1 分钟', '辅助位 / 开麦耐心 / 巅峰赛'],
-    ['阿布', '和平精英 · 四排陪练', '熟悉海岛、沙漠多种战术，擅长四排指挥和残局处理，陪你稳定打出团队节奏。', '99%', '286', '2 分钟', '指挥带队 / 战术复盘 / 四排'],
-    ['小鹿', '英雄联盟 · 峡谷排位', '主打野位，擅长节奏规划和赛后复盘，沟通轻松，适合双排上分。', '98%', '219', '3 分钟', '打野带节奏 / 轻松聊天 / 排位'],
-    ['Koi', '无畏契约 · 竞技上分', '决斗位枪法教学与实战陪练，帮助你熟悉地图思路和回合决策。', '100%', '176', '1 分钟', '决斗位 / 枪法教学 / 竞技'],
-    ['奶糖', '王者荣耀 · 娱乐陪伴', '擅长娱乐局和轻松聊天，氛围友好，适合下班后的放松开黑。', '97%', '198', '4 分钟', '娱乐陪伴 / 氛围轻松 / 开黑'],
-    ['星野', '和平精英 · 王牌冲刺', '耐心陪练王牌冲刺，重视细节沟通和战术执行，适合稳定提升。', '99%', '154', '2 分钟', '王牌冲刺 / 细节教学 / 耐心'],
-  ];
-  const p = profiles[index] || profiles[0];
-  return dialog(`${p[0]} · 陪玩档案`, `<div class="escort-profile-dialog"><div class="escort-profile-head"><div class="escort-profile-avatar">${p[0].slice(0, 1)}</div><div><h3>${p[0]}</h3><p>${p[1]}</p><span class="escort-online"><i></i>当前${index % 3 === 1 ? '游戏中' : '空闲中'}</span></div></div><p class="escort-profile-bio">${p[2]}</p><div class="escort-profile-tags">${p[6].split(' / ').map(tag => `<span>${tag}</span>`).join('')}</div><div class="escort-profile-stats"><div><b>${p[3]}</b><span>好评率</span></div><div><b>${p[4]}</b><span>累计服务</span></div><div><b>${p[5]}</b><span>平均响应</span></div></div><div class="escort-profile-note"><strong>服务说明</strong><span>支持预约时间、区服和语音方式备注；下单后可在订单中心查看接单与服务进度。</span></div></div>`, '登录后预约', () => { closeDialog(); document.querySelector('[data-action="openLogin"]')?.click(); });
+  if (section !== '#games') requestAnimationFrame(() => home.querySelector(section)?.scrollIntoView({ block: 'start' }));
 }
 function renderPublicHome(workspace) {
   if (!workspace) return renderLogin();
