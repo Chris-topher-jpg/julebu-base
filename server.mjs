@@ -74,7 +74,10 @@ export function createClubServer({ database, production = process.env.NODE_ENV =
       // In production TLS is normally terminated by a reverse proxy. Validate
       // the configured host here while keeping the externally visible origin
       // (and Origin header) pinned to CLUB_PUBLIC_ORIGIN below.
-      requireThat(origin ? url.hostname === origin.hostname && (!origin.port || url.port === origin.port) : ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname), '不允许的访问主机', 403);
+      // Compare normalized origins so a configured HTTPS site cannot be
+      // reached through an unexpected port (for example `:4173`) while still
+      // accepting the default `:443` spelling that URL normalizes away.
+      requireThat(origin ? url.origin === origin.origin : ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname), '不允许的访问主机', 403);
       if (url.pathname.startsWith('/api/')) {
         let body = {};
         if (req.method !== 'GET') {
