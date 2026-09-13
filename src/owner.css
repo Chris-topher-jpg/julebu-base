@@ -83,3 +83,24 @@
 @media(max-width:1200px){.owner-content{padding:20px}.owner-panel{padding:23px 20px}.owner-section-head{flex-wrap:wrap;gap:12px}.owner-rank-grid{gap:14px}.owner-rank-card{padding:16px 10px 10px}.owner-rank-date{flex-wrap:wrap}.owner-rank-date .owner-date-range{width:100%;flex:auto}.owner-rank-date .owner-date-range input{font-size:11px}.owner-rank-date .owner-primary{width:100%}.owner-metric strong{font-size:23px}}
 @media(max-width:1000px){.owner-sidebar{width:180px}.owner-main{margin-left:180px;width:calc(100% - 180px)}.owner-brand strong{font-size:12px}.owner-nav-item{font-size:13px}.owner-rank-grid{grid-template-columns:1fr}.owner-rank-date{flex-wrap:nowrap}.owner-rank-date .owner-date-range{width:auto;flex:1}.owner-rank-date .owner-primary{width:auto}.owner-rank-date .owner-date-range input{font-size:12px}.owner-rank-table .owner-empty{min-height:140px}.owner-rank-table th:first-child{width:12%}.owner-rank-table td,.owner-rank-table th{font-size:12px}.owner-rank-name{font-size:12px}.owner-rank-selects{margin-top:12px}.owner-rank-selects select{font-size:12px}.owner-rank-hint{display:none}.owner-metrics{gap:12px}.daily-business-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}.owner-metric{padding:15px 12px}.owner-metric p{font-size:11px}.owner-metric strong{font-size:20px}}
 @media(max-width:700px){.owner-sidebar{width:60px}.owner-main{margin-left:60px;width:calc(100% - 60px)}.owner-brand strong,.owner-nav-item span,.owner-nav-item>svg:last-child:not(:first-child){display:none}.owner-nav-item{padding:0;justify-content:center}.owner-content{padding:14px}.owner-panel{padding:20px 15px;margin-bottom:16px;border-radius:10px}.owner-topbar{padding:0 12px;height:50px}.owner-topbar>div{gap:10px}.owner-top-actions{gap:8px!important}.owner-top-actions .owner-link,.owner-role,.owner-user-avatar{display:none}.owner-metrics{grid-template-columns:1fr;gap:11px}.owner-metric{min-height:88px;padding:13px 16px}.owner-metric strong{font-size:25px}.owner-metric p{font-size:12px}.owner-section-head h2{font-size:17px}.owner-update{font-size:10px}.owner-query{width:100%;gap:7px}.owner-date-range{flex:1;padding:0 6px;gap:3px}.owner-date-range input{width:87px;font-size:10px}.owner-date-range>svg{display:none}.owner-primary{padding:0 10px;min-width:50px;font-size:12px}.owner-chart-wrap>svg{min-height:190px}.owner-chart-tooltip{min-width:140px;left:10%!important;top:15%;font-size:10px}.owner-chart-foot{gap:9px;align-items:flex-start;font-size:10px}.owner-chart-foot .owner-link{font-size:10px}.owner-rank-date .owner-date-range input{font-size:10px}.owner-rank-table td,.owner-rank-table th{font-size:10px;padding:8px 6px}.owner-rank-name{font-size:10px}.owner-rank-selects select{font-size:10px}.owner-config-grid{grid-template-columns:1fr}.owner-info:before{width:200px;left:0;transform:translateX(-45%)}.owner-rank-card{padding:15px 12px}.owner-username{font-size:12px}.owner-user-search{width:100%;min-width:0}.owner-user-search input{width:100%}}
+
+/* The staff console must remain usable at phone widths. Keep the navigation
+   icon-only and allow business tables to scroll inside their panel. */
+@media (max-width: 700px) {
+  .owner-shell { min-width: 0; }
+  .owner-sidebar { width: 56px !important; }
+  .owner-main { width: calc(100% - 56px) !important; margin-left: 56px !important; min-width: 0; }
+  .owner-content { min-width: 0; overflow-x: hidden; padding: 12px 10px; }
+  .owner-topbar { min-width: 0; padding: 0 8px; }
+  .owner-topbar > div { min-width: 0; }
+  .owner-breadcrumb { max-width: 30vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .owner-top-actions { min-width: 0; overflow: hidden; }
+  .owner-top-actions .owner-home-button, .owner-top-actions .owner-icon-button:last-child { font-size: 0; width: 28px; }
+  .owner-top-actions .owner-home-button::before { content: '⌂'; font-size: 18px; }
+  .owner-top-actions .owner-icon-button:last-child::before { content: '↪'; font-size: 17px; }
+  .owner-page-tabs { overflow: hidden; padding: 0 10px; }
+  .owner-page-tab { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .owner-panel { min-width: 0; overflow: hidden; }
+  .owner-standard-table, .owner-rank-table { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .owner-standard-table table, .owner-rank-table table { min-width: 560px; }
+}

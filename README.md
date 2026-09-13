@@ -10,6 +10,24 @@ node server.mjs
 
 打开 http://127.0.0.1:4173/ 。开发时可使用 `node --watch server.mjs`。数据首次启动时写入 `data/club.sqlite`，后续启动会保留。默认仅监听本机。
 
+### 正式环境启动
+
+正式环境不会加载演示账号、示例订单或示例商品。复制 `.env.example`，设置 `NODE_ENV=production`、对外 HTTPS 来源 `CLUB_PUBLIC_ORIGIN`、独立持久化数据库 `CLUB_DATABASE`，以及首次启动用的管理员账号、强密码和名称；反向代理应自行按真实客户端 IP 做登录/注册限流，并将 Host 原样转发。Node 服务继续只监听 `127.0.0.1`，Cookie 会自动启用 `Secure`。
+
+首次启动成功后可删除 `CLUB_ADMIN_PASSWORD`；已有正式数据库重启不再要求初始密码。正式数据库不能与演示库混用，启动时会拒绝迁移演示数据。
+
+### 数据库备份与恢复
+
+备份会在线读取 SQLite WAL、校验完整性并拒绝覆盖已有文件：
+
+```powershell
+node scripts/database.mjs backup
+node scripts/database.mjs backup C:\data\club\club.sqlite C:\backup\club-2026-09-13.sqlite
+node scripts/database.mjs restore C:\backup\club-2026-09-13.sqlite C:\data\club\club-restored.sqlite
+```
+
+恢复前请停止服务并使用全新目标路径；恢复会清除旧登录会话和统计缓存。备份目录已加入 `.gitignore`，不要把 SQLite 文件提交到代码仓库。
+
 ## 演示账号
 
 | 账号 | 密码 | 职责 |

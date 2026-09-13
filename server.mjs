@@ -7,47 +7,107 @@ import { catalogAction } from './server/catalog.mjs';
 import { catalogList } from './server/game-catalog.mjs';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
-export function createClubServer({ database = resolve(root, 'data/club.sqlite') } = {}) {
-  const store = new ClubStore(database);
+const jsonLimit = 24000;
+const loginWindow = 10 * 60 * 1000;
+
+function configuredOrigin(value, production) {
+  if (!value) {
+    if (production) throw new Error('正式环境必须配置 CLUB_PUBLIC_ORIGIN 为 HTTPS 站点地址');
+    return null;
+  }
+  let url;
+  try { url = new URL(value); } catch { throw new Error('CLUB_PUBLIC_ORIGIN 不是有效的站点地址'); }
+  if (!['http:', 'https:'].includes(url.protocol) || (production && url.protocol !== 'https:') || url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
+    throw new Error('CLUB_PUBLIC_ORIGIN 必须是完整站点来源地址，正式环境须使用 HTTPS，不包含路径、查询参数或账号');
+  }
+  return url;
+}
+
+async function readJson(req) {
+  requireThat(req.headers['content-type']?.split(';')[0].trim().toLowerCase() === 'application/json', '需要 JSON 请求', 415);
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req.iterator({ destroyOnReturn: false })) {
+    size += chunk.length;
+    if (size > jsonLimit) {
+      req.resume();
+      requireThat(false, '请求过大', 413);
+    }
+    chunks.push(chunk);
+  }
+  let body;
+  try { body = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)) || '{}'); }
+  catch { requireThat(false, '请求格式错误'); }
+  requireThat(body && typeof body === 'object' && !Array.isArray(body), '请求格式错误');
+  return body;
+}
+
+// Spreadsheet programs execute formula-looking cells even when CSV-quoted.
+function csvCell(value) {
+  if (typeof value === 'number') return String(value);
+  let text = String(value ?? '');
+  if (/^[\s\u0000-\u001f]*[=+\-@]/u.test(text) || /^[\t\r\n]/.test(text)) text = `'${text}`;
+  return `"${text.replaceAll('"', '""')}"`;
+}
+
+export function createClubServer({ database, production = process.env.NODE_ENV === 'production', publicOrigin = process.env.CLUB_PUBLIC_ORIGIN, bootstrapAdmin = { username: process.env.CLUB_ADMIN_USERNAME, password: process.env.CLUB_ADMIN_PASSWORD, name: process.env.CLUB_ADMIN_NAME } } = {}) {
+  const origin = configuredOrigin(publicOrigin, production);
+  if (production && (!database || database === ':memory:')) throw new Error('正式环境必须通过 CLUB_DATABASE 指定独立且持久化的数据库路径');
+  const store = new ClubStore(database || resolve(root, 'data/club.sqlite'), { production, bootstrapAdmin });
   const attempts = new Map();
+  const cookieFlags = `HttpOnly; SameSite=Strict; Path=/${origin?.protocol === 'https:' ? '; Secure' : ''}`;
   const server = createServer(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Referrer-Policy', 'same-origin');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    if (origin?.protocol === 'https:') res.setHeader('Strict-Transport-Security', 'max-age=31536000');
     res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
     const json = (value, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(value)); };
     try {
-      const base = `http://${req.headers.host}`;
-      const url = new URL(req.url, base);
-      requireThat(['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname), '不允许的访问主机', 403);
+      requireThat(typeof req.headers.host === 'string' && /^(?:[a-z0-9.-]+|\[[a-f0-9:]+\])(?::\d{1,5})?$/i.test(req.headers.host), '无效的访问主机', 400);
+      requireThat(req.url?.startsWith('/') && !req.url.startsWith('//'), '无效的请求地址', 400);
+      const base = `${origin?.protocol || 'http:'}//${req.headers.host}`;
+      let url;
+      try { url = new URL(req.url, base); } catch { requireThat(false, '无效的请求地址', 400); }
+      // In production TLS is normally terminated by a reverse proxy. Validate
+      // the configured host here while keeping the externally visible origin
+      // (and Origin header) pinned to CLUB_PUBLIC_ORIGIN below.
+      requireThat(origin ? url.hostname === origin.hostname && (!origin.port || url.port === origin.port) : ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname), '不允许的访问主机', 403);
       if (url.pathname.startsWith('/api/')) {
         let body = {};
         if (req.method !== 'GET') {
           requireThat(req.method === 'POST', '请求方法不支持', 405);
-          requireThat(!req.headers.origin || req.headers.origin === base, '请求来源不被允许', 403);
-          requireThat(req.headers['content-type']?.startsWith('application/json'), '需要 JSON 请求', 415);
-          let raw = '';
-          for await (const chunk of req) { raw += chunk; requireThat(Buffer.byteLength(raw) < 24000, '请求过大', 413); }
-          try { body = JSON.parse(raw || '{}'); } catch { requireThat(false, '请求格式错误'); }
-          requireThat(body && typeof body === 'object' && !Array.isArray(body), '请求格式错误');
+          requireThat(!req.headers.origin || req.headers.origin === (origin ? origin.origin : url.origin), '请求来源不被允许', 403);
+          requireThat(req.headers['sec-fetch-site'] !== 'cross-site', '请求来源不被允许', 403);
+          body = await readJson(req);
         }
         const token = (req.headers.cookie || '').split(';').map(s => s.trim()).find(s => s.startsWith('club_session='))?.slice(13) || '';
         if (['/api/login', '/api/register'].includes(url.pathname) && req.method === 'POST') {
-          const key = req.socket.remoteAddress;
+          const accountName = typeof body.username === 'string' ? body.username.trim() : '';
+          requireThat(accountName.length > 0 && accountName.length <= 128, '请输入有效的登录账号');
+          // A local HTTPS reverse proxy shares one socket IP for every visitor.
+          // Account limits stay independent; the proxy also needs IP rate limits.
+          const key = production ? `account:${accountName.toLowerCase()}` : req.socket.remoteAddress;
+          const currentTime = Date.now();
+          for (const [address, attempt] of attempts) if (attempt.until <= currentTime) attempts.delete(address);
           const limit = attempts.get(key);
-          requireThat(!limit || limit.until < Date.now() || limit.count < 10, '登录尝试过多，请 10 分钟后再试', 429);
+          if (limit?.count >= 10) {
+            res.setHeader('Retry-After', String(Math.ceil((limit.until - currentTime) / 1000)));
+            requireThat(false, '登录尝试过多，请稍后再试', 429);
+          }
           try {
-            const result = url.pathname === '/api/register' ? store.register(body) : store.login(typeof body.username === 'string' ? body.username.trim() : '', body.password);
-            attempts.delete(key); store.logout(token);
-            res.setHeader('Set-Cookie', `club_session=${result.token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800`);
+            const result = url.pathname === '/api/register' ? store.register(body) : store.login(accountName, body.password);
+            store.logout(token);
+            res.setHeader('Set-Cookie', `club_session=${result.token}; ${cookieFlags}; Max-Age=28800`);
             const personal = store.personal(result.user);
             return json({ user: personal.user, membership: personal.membership }, url.pathname === '/api/register' ? 201 : 200);
-          } catch (e) { attempts.set(key, { count: limit?.until > Date.now() ? limit.count + 1 : 1, until: Date.now() + 600000 }); throw e; }
+          } catch (e) { attempts.set(key, { count: (limit?.count || 0) + 1, until: limit?.until || currentTime + loginWindow }); throw e; }
         }
         if (url.pathname === '/api/logout' && req.method === 'POST') {
           store.logout(token);
-          res.setHeader('Set-Cookie', 'club_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
+          res.setHeader('Set-Cookie', `club_session=; ${cookieFlags}; Max-Age=0`);
           return json({ ok: true });
         }
         if (url.pathname === '/api/public/catalog' && req.method === 'GET') {
@@ -73,7 +133,7 @@ export function createClubServer({ database = resolve(root, 'data/club.sqlite') 
             const result = store.analytics(user, kind === 'summary' ? 'summary' : kind === 'trend' ? 'trend' : 'rankings', kind === 'rankings' ? { ...query, kind: query.rankKind || 'orders' } : query);
             const rows = kind === 'summary' ? [{ metric: '完成订单总金额', value: result.daily.amountCents / 100 }, { metric: '完成订单总笔数', value: result.daily.orderCount }, { metric: '下单总用户人数', value: result.daily.buyerCount }] : kind === 'trend' ? result.points.map(point => ({ date: point.day, orderCount: point.orderCount, amountCents: point.amountCents / 100 })) : result.rows.map(row => ({ rank: row.rank, name: row.name, orderCount: row.orderCount, amountCents: row.amountCents / 100 }));
             const keys = Object.keys(rows[0] || { value: '' });
-            const csv = [keys.join(','), ...rows.map(row => keys.map(key => JSON.stringify(row[key] ?? '')).join(','))].join('\n');
+            const csv = [keys.join(','), ...rows.map(row => keys.map(key => csvCell(row[key])).join(','))].join('\r\n');
             return json({ filename: `club-${kind}-${Date.now()}.csv`, content: `\uFEFF${csv}`, mime: 'text/csv;charset=utf-8' });
           }
           if (analytics) return json(store.analytics(user, analytics[1], Object.fromEntries(url.searchParams)));
@@ -132,6 +192,9 @@ export function createClubServer({ database = resolve(root, 'data/club.sqlite') 
       json({ error: error.status ? error.message : error.code === 'ENOENT' ? '文件不存在' : '服务暂时出错，请稍后重试' }, error.status || (error.code === 'ENOENT' ? 404 : 500));
     }
   });
+  server.requestTimeout = 15000;
+  server.headersTimeout = 10000;
+  server.keepAliveTimeout = 5000;
   store.totalSnapshot();
   const statisticsTimer = setInterval(() => { try { store.totalSnapshot(); } catch (error) { console.error('统计快照更新失败', error); } }, 60000);
   statisticsTimer.unref();

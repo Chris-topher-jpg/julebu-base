@@ -121,7 +121,7 @@ function initialState() {
     return { id: item.id, memberId: target?.id || '', memberNo: target?.memberNo || '', memberName: item.member, type: item.type, game: item.game || '', levelId: target?.levelId || null, status: item.result ? '已完成' : '待考核', result: item.result || null, score: item.score ?? null, wins: item.wins ?? null, losses: item.losses ?? null, kills: item.kills ?? null, deaths: item.deaths ?? null, mvp: item.mvp ?? null, performance: { wins: item.wins ?? null, losses: item.losses ?? null, kills: item.kills ?? null, deaths: item.deaths ?? null, mvp: item.mvp ?? null }, evidence: '', note: item.note || '', examinerId: 'examiner', examinerName: '阿泽', createdAt: at, updatedAt: at, version: 1 };
   });
   return {
-    users, games, catalogGames: games.filter(game => game.name === '三角洲行动'), products, orders, assessments, revision: 1, catalogScopeVersion: 1, levelPrices: { ...defaultLevelPrices }, levelPriceVersion: 1, audit: [], withdrawals: [], ledger: [],
+    deploymentMode: 'demo', users, games, catalogGames: games.filter(game => game.name === '三角洲行动'), products, orders, assessments, revision: 1, catalogScopeVersion: 1, levelPrices: { ...defaultLevelPrices }, levelPriceVersion: 1, audit: [], withdrawals: [], ledger: [],
     customers: [
       { id: 'customer-1', customerNo: 'U100001', username: 'zhouzhiyuan', phone: '138****0001', name: '周致远', balanceCents: 46000, active: true },
       { id: 'customer-2', customerNo: 'U100002', username: 'shenjiahe', phone: '139****0002', name: '沈嘉禾', balanceCents: 32000, active: true },
@@ -134,15 +134,36 @@ function initialState() {
   };
 }
 
+function productionState(bootstrapAdmin = {}) {
+  const username = textInput(bootstrapAdmin.username, '初始管理员账号', 30);
+  requireThat(/^[a-zA-Z0-9_]{3,30}$/.test(username), '初始管理员账号需为 3–30 位英文、数字或下划线');
+  const password = textInput(bootstrapAdmin.password, '初始管理员密码', 128);
+  requireThat(password.length >= 12 && /[a-z]/i.test(password) && /\d/.test(password) && /[^a-z0-9]/i.test(password), '生产环境初始管理员密码至少 12 位，并包含字母、数字和符号');
+  requireThat(!['123456', 'Test1234!'].includes(password), '生产环境不能使用演示密码');
+  const admin = { id: randomUUID(), username, name: textInput(bootstrapAdmin.name || '管理员', '管理员名称', 30), passwordHash: passwordHash(password), role: 'admin', active: true, online: false, games: [], memberNo: '81000001', memberVersion: 1, balanceCents: 0, frozenBalanceCents: 0, depositCents: 0, shareBps: 0, levelId: null, escortFrozen: false };
+  const data = {
+    deploymentMode: 'production', users: [admin], games: [], catalogGames: [], products: [], orders: [], assessments: [], customers: [],
+    topups: [], settlements: [], conversations: [], refunds: [], notifications: [], audit: [], withdrawals: [], ledger: [],
+    revision: 1, catalogScopeVersion: 1, membershipVersion: 5, identityVersion: 1,
+    levels: structuredClone(defaultLevels), levelPrices: { ...defaultLevelPrices }, levelPriceVersion: 1, gameLevelConfigs: {},
+  };
+  attachCustomer(data, admin);
+  return data;
+}
+
 export class ClubStore {
-  constructor(path) {
+  constructor(path, { production = false, bootstrapAdmin } = {}) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
+    try {
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS club (id INTEGER PRIMARY KEY CHECK (id=1), data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires INTEGER NOT NULL);');
-    if (!this.db.prepare('SELECT id FROM club').get()) this.db.prepare('INSERT INTO club VALUES (1, ?)').run(JSON.stringify(initialState()));
+    this.db.exec('BEGIN IMMEDIATE');
+    if (!this.db.prepare('SELECT id FROM club').get()) this.db.prepare('INSERT INTO club VALUES (1, ?)').run(JSON.stringify(production ? productionState(bootstrapAdmin) : initialState()));
     const data = this.read();
+    requireThat(!production || data.deploymentMode === 'production', '生产环境不能使用演示或旧版数据库，请配置全新的 CLUB_DATABASE 并初始化管理员', 503);
+    const productionData = data.deploymentMode === 'production';
     let migrated = false;
-    if (data.catalogScopeVersion !== 1) {
+    if (!productionData && data.catalogScopeVersion !== 1) {
       const delta = data.games?.find(game => game.name === '三角洲行动') || { name: '三角洲行动', category: 'FPS', multiplier: '1.00x', multiplierBps: 10000, min: 1, max: 3, state: '上架', tone: 'green', version: 1 };
       if (!data.games?.some(game => game.name === delta.name)) data.games = [...(data.games || []), delta];
       data.catalogGames = [delta];
@@ -150,7 +171,7 @@ export class ClubStore {
       data.catalogScopeVersion = 1;
       migrated = true;
     }
-    if (!(data.products || []).some(product => product.game === '三角洲行动')) {
+    if (!productionData && !(data.products || []).some(product => product.game === '三角洲行动')) {
       data.products = [...(data.products || []), { id: `product-${randomUUID()}`, name: '三角洲行动陪玩', game: '三角洲行动', unit: '小时', price: '¥ 58.00', priceCents: 5800, note: '按陪玩等级定价', state: '启用', tone: 'green', version: 1 }];
       migrated = true;
     }
@@ -162,7 +183,7 @@ export class ClubStore {
       { id: 'user-demo', username: 'user', name: '新用户', role: 'user' },
       ...demoAccounts,
     ];
-    for (const staff of demoStaff) {
+    for (const staff of productionData ? [] : demoStaff) {
       if (data.users.some(user => user.username === staff.username)) continue;
       const memberNo = String(Math.max(81000000, ...data.users.map(user => Number(user.memberNo) || 0)) + 1);
       const added = { ...staff, memberNo: staff.memberNo || memberNo, memberVersion: 0, passwordHash: passwordHash(staff.demoPassword || '123456'), active: true, online: Boolean(staff.online), games: staff.games || [], balanceCents: staff.balanceCents ?? (staff.role === 'user' ? 100000 : 0), frozenBalanceCents: 0, depositCents: staff.depositCents || 0, shareBps: staff.shareBps || 0 };
@@ -184,13 +205,19 @@ export class ClubStore {
     if (migrated) this.db.prepare('UPDATE club SET data=? WHERE id=1').run(JSON.stringify(data));
     if (migrateMembership(data)) this.db.prepare('UPDATE club SET data=? WHERE id=1').run(JSON.stringify(data));
     const deltaConfig = data.gameLevelConfigs?.['三角洲行动'];
-    if (!data.gameLevelConfigs || !deltaConfig) {
+    if (!productionData && (!data.gameLevelConfigs || !deltaConfig)) {
       data.gameLevelConfigs = { ...(data.gameLevelConfigs || {}), '三角洲行动': { levels: data.levels.map(level => ({ ...level, priceCents: priceOf(data, level.id) })), version: data.levelPriceVersion || 1 } };
       this.db.prepare('UPDATE club SET data=? WHERE id=1').run(JSON.stringify(data));
     }
     if (migrateIdentity(data)) this.db.prepare('UPDATE club SET data=? WHERE id=1').run(JSON.stringify(data));
     this.db.exec('CREATE TABLE IF NOT EXISTS analytics_cache (key TEXT PRIMARY KEY, data TEXT NOT NULL)');
+    this.db.exec('COMMIT');
     this.dummyHash = passwordHash(randomBytes(24).toString('hex'));
+    } catch (error) {
+      try { this.db.exec('ROLLBACK'); } catch {}
+      this.db.close();
+      throw error;
+    }
   }
   read() { return JSON.parse(this.db.prepare('SELECT data FROM club WHERE id=1').get().data); }
   close() { this.db.close(); }
@@ -625,7 +652,7 @@ export class ClubStore {
       const total = Math.round(Number(value) * 100);
       requireThat(Number.isSafeInteger(total) && total >= 100 && total <= actor.balanceCents, '提现至少 ¥1，且不能超过可提现余额');
       requireThat(!data.withdrawals.some(w => w.userId === actor.id && w.status === '待审核'), '已有待审核提现，请等待处理', 409);
-      const withdrawal = { id: `TX${Date.now()}`, userId: actor.id, name: actor.name, amountCents: total, status: '待审核', at: now() };
+      const withdrawal = { id: `TX${Date.now()}${randomBytes(6).toString('hex').toUpperCase()}`, userId: actor.id, name: actor.name, amountCents: total, status: '待审核', at: now() };
       actor.balanceCents -= total;
       data.withdrawals.unshift(withdrawal);
       data.ledger.unshift({ id: randomUUID(), userId: actor.id, account: actor.name, deltaCents: -total, afterCents: actor.balanceCents, source: withdrawal.id, label: '提现冻结', by: actor.name, at: now() });
@@ -639,6 +666,7 @@ export class ClubStore {
       requireThat(['approve', 'reject', 'markPaid'].includes(input.action), '审核动作无效');
       requireThat(input.action === 'markPaid' ? item.status === '待线下打款' : item.status === '待审核', '该申请已经处理', 409);
       const member = data.users.find(u => u.id === item.userId);
+      requireThat(member, '提现成员不存在，请先核对账户', 409);
       if (input.action === 'approve') {
         requireThat(member.active && member.depositCents >= 100000, '成员已停用或押金不足，请先处理');
         item.status = '待线下打款';
@@ -837,7 +865,7 @@ export class ClubStore {
       } else if (action === 'remove') {
         requireThat(target.role === 'escort', '该成员不是陪玩');
         requireThat(!hasOpenOrders(data, id), '仍有未完成订单，请处理后再取消陪玩身份', 409);
-        requireThat(target.balanceCents === 0 && !data.withdrawals.some(w => w.userId === id && ['待审核','待线下打款'].includes(w.status)), '请先结清陪玩余额和提现，再取消陪玩身份', 409);
+        requireThat(target.balanceCents === 0 && !target.frozenBalanceCents && !data.withdrawals.some(w => w.userId === id && ['待审核','待线下打款'].includes(w.status)), '请先结清陪玩余额、冻结收益和提现，再取消陪玩身份', 409);
         Object.assign(target, { role: 'member', levelId: null, games: [], shareBps: 0, examiner: false, online: false, escortFrozen: false });
       } else if (action === 'leaveClub') {
         requireThat(target.id !== actor.id, '不能移除自己的最高负责人权限');
@@ -992,7 +1020,7 @@ export class ClubStore {
       requireThat(typeof input.active === 'boolean', '账号状态无效');
       requireThat(actor.id !== id || (input.role === 'admin' && input.active), '不能停用自己或移除自己的管理员权限');
       if (target && target.role !== input.role) requireThat(!hasOpenOrders(data, id), '成员仍有未完成订单，请处理后再调整职责');
-      if (target?.role === 'escort' && input.role !== 'escort') requireThat(target.balanceCents === 0 && !data.withdrawals.some(w => w.userId === id && ['待审核','待线下打款'].includes(w.status)), '请先结清陪玩余额和提现，再调整职责', 409);
+      if (target?.role === 'escort' && input.role !== 'escort') requireThat(target.balanceCents === 0 && !target.frozenBalanceCents && !data.withdrawals.some(w => w.userId === id && ['待审核','待线下打款'].includes(w.status)), '请先结清陪玩余额、冻结收益和提现，再调整职责', 409);
       if (!target) {
         const username = textInput(input.username, '登录账号', 30);
         requireThat(/^[a-zA-Z0-9_]{3,30}$/.test(username), '账号需为 3–30 位英文、数字或下划线');

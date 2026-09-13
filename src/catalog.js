@@ -30,7 +30,20 @@ export function catalogAction(kind, id, ctx) {
     const gameConfig = gameName ? w.gameLevelConfigs?.[gameName] : null;
     const levels = (gameConfig?.levels || []).slice().sort((a, b) => (b.rank || 0) - (a.rank || 0));
     const body = `<div id="levelEditor">${levels.map((level, index) => `<div class="form-grid-2 level-editor-row"><label class="form-field">等级名称<input name="name-${index}" value="${e(level.name)}" required></label><label class="form-field">每小时价格<input name="price-${index}" type="number" value="${Number(level.priceCents || 0) / 100 || ''}" min="0.01" step="0.01" required></label><input type="hidden" name="id-${index}" value="${e(level.id)}"><input type="hidden" name="rank-${index}" value="${level.rank || levels.length - index}"><button type="button" class="ghost-btn" data-remove-level="${index}">删除等级</button></div>`).join('')}</div><button type="button" class="ghost-btn" data-add-level>添加新等级</button>`;
-    const dlg = dialog(`修改${gameName || ''}等级和价格`, body, '保存配置', async form => { const indices = [...new Set([...form.keys()].map(key => key.match(/^(?:name|price|id|rank)-(\d+)$/)?.[1]).filter(Boolean))].sort((a, b) => Number(a) - Number(b)); const levelsPayload = indices.map((index, i) => ({ id: form.get(`id-${index}`) || `level-${Date.now()}-${i}`, name: String(form.get(`name-${index}`) || '').trim(), rank: Number(form.get(`rank-${index}`) || indices.length - i), shareBps: Math.max(1000, 7000 - i * 500) })); if (!levelsPayload.length) throw new Error('请至少保留一个等级'); const version = Number(gameConfig?.version || 1); await api('/levels', { game: gameName, version, levels: levelsPayload }); return api('/catalog/prices', { game: gameName, version, prices: indices.map((index, i) => ({ levelId: levelsPayload[i].id, priceCents: Math.round(Number(form.get(`price-${index}`)) * 100) })) }); });
+    const dlg = dialog(`修改${gameName || ''}等级和价格`, body, '保存配置', async form => {
+      const indices = [...new Set([...form.keys()].map(key => key.match(/^(?:name|price|id|rank)-(\d+)$/)?.[1]).filter(Boolean))].sort((a, b) => Number(a) - Number(b));
+      const levelsPayload = indices.map((index, i) => ({
+        id: form.get(`id-${index}`) || `level-${Date.now()}-${i}`,
+        name: String(form.get(`name-${index}`) || '').trim(),
+        rank: indices.length - i,
+        shareBps: Number(levels.find(level => level.id === form.get(`id-${index}`))?.shareBps || Math.max(1000, 7000 - i * 500)),
+        priceCents: Math.round(Number(form.get(`price-${index}`)) * 100),
+      }));
+      if (!levelsPayload.length) throw new Error('请至少保留一个等级');
+      if (levelsPayload.some(level => !level.name || !Number.isSafeInteger(level.priceCents) || level.priceCents < 1 || level.priceCents > 100000000)) throw new Error('等级名称不能为空，价格须为 0.01–1,000,000 元');
+      const version = Number(gameConfig?.version || 1);
+      return api('/levels', { game: gameName, version, levels: levelsPayload });
+    });
     dlg.querySelector('[data-add-level]')?.addEventListener('click', () => { const index = dlg.querySelectorAll('.level-editor-row').length; dlg.querySelector('#levelEditor').insertAdjacentHTML('beforeend', `<div class="form-grid-2 level-editor-row"><label class="form-field">等级名称<input name="name-${index}" required></label><label class="form-field">每小时价格<input name="price-${index}" type="number" min="0.01" step="0.01" required></label><input type="hidden" name="rank-${index}" value="${index + 1}"><button type="button" class="ghost-btn" data-remove-level>删除等级</button></div>`); });
     dlg.addEventListener('click', event => { if (event.target.matches('[data-remove-level]')) event.target.closest('.level-editor-row')?.remove(); }); return dlg;
   }

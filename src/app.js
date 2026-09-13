@@ -10,6 +10,8 @@ import { createLiveSync } from './live-sync.js';
 import { createNotificationCenter } from './notifications.js';
 import { openOrderPicker } from './order-picker.js';
 import { openSupportPicker } from './support-picker.js';
+import { requestJson } from './request.js';
+import { lockForm } from './form-state.js';
 
 const labels = { overview: '工作台', serviceManagement: '客服管理', examinerCandidates: '考核与质检', orders: '订单管理', dispatch: '派单台', conversations: '会话中心', escorts: '陪玩成员', catalog: '游戏与商品', topups: '充值审核', flows: '资金流水', settlements: '提现与结算', accounts: '成员与权限', availableOrders: '接单大厅', myOrders: '我的订单', myEarnings: '我的收益', memberOrders: '我的点单', memberAfterSales: '售后记录' };
 const symbols = { overview: 'grid', serviceManagement:'headset', examinerCandidates:'users', orders: 'receipt', dispatch: 'trend', conversations: 'users', escorts: 'headset', catalog: 'game', topups: 'wallet', flows: 'trend', settlements: 'wallet', accounts: 'users', availableOrders: 'game', myOrders: 'receipt', myEarnings: 'wallet', memberOrders: 'receipt', memberAfterSales: 'headset' };
@@ -61,15 +63,10 @@ async function api(path, body, { background = false } = {}) {
   if (mutation && ['/login', '/register', '/logout'].includes(path)) viewEpoch++;
   if (mutation) { pendingMutations++; syncGeneration++; }
   try {
-  let response;
-  try { response = await fetch(`/api${path}`, { credentials: 'same-origin', headers: body === undefined ? {} : { 'Content-Type': 'application/json' }, method: body === undefined ? 'GET' : 'POST', body: body === undefined ? undefined : JSON.stringify({ ...body, ...(state.mode !== 'management' ? { context: 'personal' } : {}) }) }); }
-  catch { throw new Error('无法连接俱乐部服务，请检查服务是否已启动后重试'); }
-  const result = await response.json();
-  if (!response.ok) {
-    if (!background && response.status === 401 && !['/login', '/register'].includes(path)) { closeDialog(); state.workspace = null; renderLogin(); }
-    throw Object.assign(new Error(result.error || '操作失败，请重试'), { status: response.status });
-  }
-  return result;
+    return await requestJson(`/api${path}`, { credentials: 'same-origin', headers: body === undefined ? {} : { 'Content-Type': 'application/json' }, method: body === undefined ? 'GET' : 'POST', body: body === undefined ? undefined : JSON.stringify({ ...body, ...(state.mode !== 'management' ? { context: 'personal' } : {}) }) });
+  } catch (error) {
+    if (!background && error.status === 401 && !['/login', '/register'].includes(path)) { closeDialog(); state.workspace = null; renderLogin(); }
+    throw error;
   } finally { if (mutation) { pendingMutations--; syncGeneration++; } }
 }
 async function refresh(render = true) {
@@ -679,23 +676,48 @@ function flowPage() { return intro('资金流水', '记录订单消费、充值�
 function topupsPage() { const w = state.workspace; const pendingRefunds = (w.refunds || []).filter(r => r.status === '待审核'); return intro('充值与退款审核', '所有涉及老板资金的充值、退款与赔偿统一由财务复核，凭证、原因和原支付方式必须留痕。') + `<section class="stats">${metric('待审核充值', (w.topups || []).filter(t => t.state === '待审核').length, '核验到账后再入账', 'blue', 'wallet')}${metric('待处理退款', pendingRefunds.length, '确认赔付金额与渠道', 'orange', 'receipt')}${metric('资金流水', (w.ledger || []).length, '充值、订单与提现全量记录', 'green', 'trend')}</section>` + panel('充值申请', '请根据实际收款凭证核验后审核', `<label class="list-search">${icon('search', 16)}<input id="listSearch" type="search" placeholder="搜索充值单号、用户 ID 或昵称" aria-label="搜索充值申请" value="${e(state.query)}"></label>${table(['充值单号', '老板', '金额', '充值前余额', '充值后余额', '状态', '操作'], (w.topups || []).map(t => row([e(t.id), e(t.user), e(t.amount), e(t.before), t.state === '已通过' ? e(t.after) : '待审核后计算', badge(t.state), t.state === '待审核' ? button('topupReview', '审核', t.id) : e(t.proof)])))}`) + panel('退款 / 赔偿申请', '审核通过后按原支付方式返还老板，驳回必须填写依据', table(['申请单号', '订单', '老板', '金额', '渠道', '状态', '操作'], (w.refunds || []).map(r => row([e(r.id), e(r.orderId), e(r.customer), money(r.amountCents), e(r.channel || '—'), badge(r.status), r.status === '待审核' ? button('refundReview', '审核', r.orderId, true) : e(r.reason || '已处理')]))) ); }
 function settlementsPage() { return intro('提现与结算', '独立复核成员提现申请。通过审核后待线下打款，不代表已经付款。') + panel('成员提现申请', '可提现余额已在申请时冻结', `<label class="list-search">${icon('search', 16)}<input id="listSearch" type="search" placeholder="搜索用户 ID、昵称或提现单号" aria-label="搜索提现申请" value="${e(state.query)}"></label>${withdrawalTable(state.workspace.withdrawals, true)}`) + panel('历史结算批次', '参考项目中的历史示例记录', table(['批次', '周期', '成员数', '金额', '状态'], state.workspace.settlements.map(s => row([e(s.id), e(s.period), s.escorts, e(s.amount), badge(s.state)])))); }
 
-function closeDialog() { document.querySelector('#actionDialog')?.remove(); queueMicrotask(flushSyncedView); }
+function closeDialog(modal = document.querySelector('#actionDialog')) {
+  if (modal?.open) modal.close();
+  modal?.remove(); queueMicrotask(flushSyncedView);
+}
 function dialog(title, body, submit, onSubmit, secondary = '') {
   closeDialog();
   const el = document.createElement('dialog'); el.id = 'actionDialog';
   el.innerHTML = `<form id="actionForm"><div class="dialog-head"><h2 id="dialogTitle">${e(title)}</h2><button type="button" class="icon-btn close-dialog" aria-label="关闭弹窗">×</button></div><div class="dialog-body">${body}</div><p class="form-error" role="alert" id="actionError"></p><div class="dialog-actions">${secondary}<button type="button" class="ghost-btn close-dialog">关闭</button>${submit ? `<button type="submit" class="primary-action">${submit}</button>` : ''}</div></form>`;
   el.setAttribute('aria-labelledby', 'dialogTitle'); document.body.append(el); el.showModal();
-  el.querySelectorAll('.close-dialog').forEach(b => b.onclick = closeDialog);
-  el.addEventListener('click', event => { if (event.target === el) closeDialog(); });
-  el.querySelector('form').onsubmit = async event => {
-    event.preventDefault(); const btn = event.submitter; if (btn?.disabled) return;
-    if (btn) btn.disabled = true;
-    el.querySelector('#actionError').textContent = '';
-    try { await onSubmit(new FormData(event.currentTarget)); closeDialog(); await refresh(); toast('操作成功，业务状态已更新'); }
-    catch (error) { const errorBox = el.querySelector('#actionError'); if (errorBox) errorBox.textContent = error.message; if (error.status === 409) await refresh(); }
-    finally { if (btn) btn.disabled = false; }
+  const form = el.querySelector('form'), errorBox = el.querySelector('#actionError');
+  let submitting = false;
+  const dismiss = () => { if (!submitting) closeDialog(el); };
+  el.querySelectorAll('.close-dialog').forEach(b => b.onclick = dismiss);
+  el.addEventListener('cancel', event => { event.preventDefault(); dismiss(); });
+  el.addEventListener('click', event => {
+    if (event.target !== el) return;
+    const bounds = el.getBoundingClientRect();
+    if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) dismiss();
+  });
+  const submitAction = async secondaryAction => {
+    if (submitting || !onSubmit || !el.isConnected || !form.reportValidity()) return;
+    const data = new FormData(form), view = captureView();
+    submitting = true; errorBox.textContent = '';
+    const unlock = lockForm(form);
+    try {
+      await onSubmit(data, secondaryAction);
+      closeDialog(el);
+      if (!currentView(view)) return;
+      try { await refresh(); if (currentView(view)) toast('操作成功，业务状态已更新'); }
+      catch (error) { toast(`操作已成功，但页面暂未刷新：${error.message}`); }
+    } catch (error) {
+      if (!currentView(view)) return;
+      errorBox.textContent = error.message;
+      if (error.status === 409) {
+        try { await refresh(false); }
+        catch (refreshError) { if (el.isConnected) errorBox.textContent = `${error.message}；${refreshError.message}`; }
+      }
+      if (!el.isConnected) toast(error.message);
+    } finally { submitting = false; unlock(); }
   };
-  el.querySelectorAll('[data-dialog-action]').forEach(b => b.onclick = async () => { b.disabled = true; try { await onSubmit(new FormData(el.querySelector('form')), b.dataset.dialogAction); closeDialog(); await refresh(); toast('已更新'); } catch (error) { el.querySelector('#actionError').textContent = error.message; } finally { b.disabled = false; } });
+  form.onsubmit = event => { event.preventDefault(); void submitAction(); };
+  el.querySelectorAll('[data-dialog-action]').forEach(b => b.onclick = () => void submitAction(b.dataset.dialogAction));
   return el;
 }
 const field = (label, name, type = 'text', value = '', attributes = '') => `<label class="form-field">${label}<input name="${name}" type="${type}" value="${e(value)}" ${attributes} required></label>`;

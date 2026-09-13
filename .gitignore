@@ -2,3 +2,7 @@ data/
 node_modules/
 *.log
 test-results/
+backups/
+.env
+.env.*
+!.env.example
