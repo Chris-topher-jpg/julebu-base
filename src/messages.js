@@ -171,7 +171,7 @@ export async function openConversation(id, ctx) {
     };
   }
   modal.showModal(); draw(true); input.focus();
-  const schedule = () => { timer = setTimeout(async () => { if (!active()) return; if (!document.hidden) await sync(); if (active()) schedule(); }, 8000); };
+  const schedule = () => { timer = setTimeout(async () => { if (!active()) return; if (!document.hidden) await sync(); if (active()) schedule(); }, 3000); };
   schedule();
   return modal;
 }

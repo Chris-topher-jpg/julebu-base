@@ -1,0 +1,60 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { once } from 'node:events';
+import { ClubStore } from '../server/club.mjs';
+import { catalogAction } from '../server/catalog.mjs';
+import { createClubServer } from '../server.mjs';
+
+test('all workspaces use club games and reject legacy game choices', t => {
+  const store = new ClubStore(':memory:');
+  t.after(() => store.close());
+  const admin = { id: 'admin' };
+  const originalOrders = store.read().orders;
+  const check = expected => {
+    const names = new Set(expected);
+    for (const user of store.read().users.filter(user => user.active)) {
+      for (const workspace of [store.workspace(user), store.personal(user)]) {
+        assert.deepEqual(workspace.games.map(game => game.name), expected);
+        assert.deepEqual(workspace.catalogGames.map(game => game.name), expected);
+        assert.ok((workspace.products || []).every(product => names.has(product.game)));
+        assert.ok((workspace.members || []).every(member => member.games.every(game => names.has(game))));
+        assert.ok((workspace.accounts || []).every(member => member.games.every(game => names.has(game))));
+      }
+    }
+    assert.deepEqual(store.analytics(admin, 'summary').options.games, expected);
+  };
+  check(['三角洲行动']);
+  const game = catalogAction(store, admin, 'games', { action: 'save', name: '123', category: 'FPS', min: 1, max: 3, state: '上架' });
+  check(['三角洲行动', '123']);
+  const renamed = catalogAction(store, admin, 'games', { ...game, originalName: game.name, name: '456', action: 'save' });
+  check(['三角洲行动', '456']);
+  const commissions = store.workspace(admin).games.map(game => ({ name: game.name, commissionBps: 7500 }));
+  assert.equal(store.configureCommissions(admin, { games: commissions }).length, 2);
+  catalogAction(store, admin, 'games', { action: 'delete', originalName: renamed.name, version: renamed.version });
+  check(['三角洲行动']);
+  assert.throws(() => store.createOrder(admin, { productId: 'product-1' }), /游戏维护中或商品不可售/);
+  assert.throws(() => store.configureLevels(admin, { game: '王者荣耀' }), /有效的游戏/);
+  assert.throws(() => store.configureLevelPrices(admin, { game: '王者荣耀' }), /有效的游戏/);
+  assert.throws(() => catalogAction(store, admin, 'products', { action: 'save', name: '旧游戏服务', game: '王者荣耀', state: '启用' }), /所属游戏不存在/);
+  const target = store.read().users.find(user => user.id === 'demo-escort');
+  assert.throws(() => store.membershipAction(admin, target.id, 'profile', { memberVersion: target.memberVersion, games: ['王者荣耀'], levelId: 'gold' }), /有效的游戏/);
+  assert.deepEqual(store.read().orders, originalOrders);
+});
+
+test('public catalog is anonymous, current and contains no staff data', async t => {
+  const { server, store } = createClubServer({ database: ':memory:' });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const read = async () => {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/public/catalog`);
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+  const initial = await read();
+  assert.deepEqual(initial.games.map(game => game.name), ['三角洲行动']);
+  assert.equal(initial.users, undefined);
+  assert.ok(initial.games.every(game => !('commissionBps' in game)));
+  catalogAction(store, { id: 'admin' }, 'games', { action: 'save', name: '123', category: 'FPS', min: 1, max: 1, state: '上架' });
+  assert.deepEqual((await read()).games.map(game => game.name), ['三角洲行动', '123']);
+});

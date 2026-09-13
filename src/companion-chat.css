@@ -76,6 +76,11 @@ body.cc-modal-open { overflow: hidden; }
 .cc-list-toggle, .cc-info-toggle, .cc-details-close, .cc-mobile-close { display: none; }
 .cc-notice { display: flex; align-items: center; gap: 8px; flex-shrink: 0; padding: 11px 18px; color: #648780; background: #f0faf6; font-size: 10px; }
 .cc-notice svg { color: #0ca773; }
+.cc-order-context { flex-shrink: 0; margin: 10px 18px 0; padding: 11px 13px; border: 1px solid #dce5ef; border-radius: 7px; background: #fff; }
+.cc-order-context > div { display: flex; justify-content: space-between; align-items: start; gap: 10px; }
+.cc-order-context strong { color: #3c526c; font-size: 12px; overflow-wrap: anywhere; }
+.cc-order-context span { flex-shrink: 0; color: #5c7eab; font-size: 10px; }
+.cc-order-context p { margin-top: 6px; color: #8b98aa; font-size: 10px; overflow-wrap: anywhere; }
 .cc-history { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 16px 18px 24px; overscroll-behavior: contain; }
 .cc-day { display: flex; justify-content: center; margin: 1px 0 21px; color: #9aa6b6; font-size: 10px; }
 .cc-day span { padding: 3px 10px; border-radius: 4px; background: #eaf0f5; }

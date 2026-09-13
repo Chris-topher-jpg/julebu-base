@@ -1,15 +1,16 @@
 import { escapeHtml as e, icon } from './ui.js';
 import { findCompanionProfile } from './companions.js';
 
-const SUPPORT_NAME = '俱乐部客服';
+const SUPPORT_NAMES = new Set(['俱乐部客服', '在线客服']);
 const stamp = (value, options) => {
   const date = new Date(value);
   return value && Number.isFinite(date.getTime()) ? date.toLocaleString('zh-CN', options) : '';
 };
 const time = value => stamp(value, { hour: '2-digit', minute: '2-digit', hour12: false });
 const day = value => stamp(value, { month: 'long', day: 'numeric' });
-const nameOf = chat => chat.escortName || '俱乐部客服';
-const isSupport = chat => !chat.escortName || chat.escortName === SUPPORT_NAME;
+const isSupport = chat => !chat.escortName || SUPPORT_NAMES.has(chat.escortName) || chat.channel === '在线客服';
+const nameOf = chat => isSupport(chat) ? '在线客服' : chat.escortName;
+const contextOf = chat => isSupport(chat) ? chat.orderId ? `订单问题 · ${chat.orderId}` : '非订单咨询' : '陪玩咨询';
 const avatar = (name, profile, support = false) => `<span class="cc-avatar ${support ? 'cc-avatar-support' : ''}" aria-hidden="true">${profile?.image ? `<img src="${e(profile.image)}" alt="">` : support ? icon('headset', 20) : e(Array.from(name || '客')[0])}</span>`;
 
 export function openCompanionMessenger({ workspace, initialChatId, profile, api: request, onNavigate, onWorkspace }) {
@@ -33,6 +34,7 @@ export function openCompanionMessenger({ workspace, initialChatId, profile, api:
     <section class="cc-main" aria-label="当前会话">
       <header class="cc-peer-head"><button type="button" class="cc-icon cc-list-toggle" data-cc-list aria-controls="ccSidebar" aria-expanded="false" aria-label="打开会话列表">${icon('message', 19)}</button><div class="cc-peer"></div><button type="button" class="cc-support-button" data-cc-support aria-label="联系平台客服">${icon('headset', 16)}<span>联系平台客服</span></button><button type="button" class="cc-icon cc-info-toggle" data-cc-info aria-controls="ccDetails" aria-expanded="false" aria-label="查看会话资料">${icon('users', 18)}</button><button type="button" class="cc-icon" data-cc-close aria-label="关闭消息中心">${icon('x', 20)}</button></header>
       <div class="cc-notice">${icon('lock', 14)}<span>服务时间、游戏区服和特殊要求，请在下单前与对方确认。</span></div>
+      <section class="cc-order-context" aria-label="当前售后订单" hidden></section>
       <div class="cc-history" role="log" aria-label="会话消息" aria-live="polite" aria-relevant="additions text"></div>
       <div class="cc-sync" role="status">${icon('check', 13)}<span>消息已同步</span><small>站内沟通 · 记录可查</small></div>
       <section class="cc-composer"><div class="cc-quick-heading">${icon('message', 14)}<strong>快捷提问</strong><span>点击填入，编辑后发送</span></div><div class="cc-quick-questions">${['如何确认服务时间？', '付款后多久可以开始？', '我想修改游戏区服'].map(text => `<button type="button" data-cc-quick="${e(text)}">${e(text)}</button>`).join('')}</div>
@@ -54,7 +56,7 @@ export function openCompanionMessenger({ workspace, initialChatId, profile, api:
   let filter = 'all', query = '', busy = false, syncing = false, version = 0, timer;
   let listSignature = '', peerSignature = '', messageSignature = '', profileSignature = '';
   const active = () => chats.find(chat => chat.id === activeId);
-  const getProfile = chat => chat?.id === initialChatId ? profile : findCompanionProfile(chat?.escortName);
+  const getProfile = chat => !chat || isSupport(chat) ? undefined : chat.id === initialChatId ? profile : findCompanionProfile(chat.escortName, workspace);
   const syncText = text => modal.querySelector('.cc-sync > span').textContent = text;
   const remember = () => { workspace = { ...workspace, conversations: chats }; onWorkspace?.(workspace); };
   const replaceChat = chat => {
@@ -73,7 +75,7 @@ export function openCompanionMessenger({ workspace, initialChatId, profile, api:
     if (!modal.isConnected) return;
     const chat = active();
     const visible = chats.filter(item => (filter === 'all' || (filter === 'support' ? isSupport(item) : !isSupport(item))) && `${nameOf(item)} ${(item.messages || []).map(message => message.text).join(' ')} ${item.last || ''}`.toLowerCase().includes(query.toLowerCase().trim()));
-    const list = visible.map(item => `<button type="button" class="cc-contact" data-cc-chat="${e(item.id)}" ${item.id === activeId ? 'aria-current="true"' : ''} aria-label="打开与${e(nameOf(item))}的会话">${avatar(nameOf(item), getProfile(item), isSupport(item))}<span class="cc-contact-copy"><strong>${e(nameOf(item))}</strong><span>${e(item.last || item.messages?.at(-1)?.text || '暂无消息')}</span><small>${isSupport(item) ? '平台客服' : '陪玩咨询'} · ${e(item.state || '处理中')}</small></span><span class="cc-contact-meta"><time>${e(time(item.updatedAt || item.messages?.at(-1)?.at))}</time>${item.unread ? `<b>${e(item.unread > 99 ? '99+' : item.unread)}</b>` : ''}</span></button>`).join('') || `<div class="cc-empty-list">${icon('search', 24)}<p>${query ? '没有匹配的会话' : '暂无此类会话'}</p></div>`;
+    const list = visible.map(item => `<button type="button" class="cc-contact" data-cc-chat="${e(item.id)}" ${item.id === activeId ? 'aria-current="true"' : ''} aria-label="打开与${e(nameOf(item))}的会话，${e(contextOf(item))}">${avatar(nameOf(item), getProfile(item), isSupport(item))}<span class="cc-contact-copy"><strong>${e(nameOf(item))}</strong><span>${e(item.last || item.messages?.at(-1)?.text || '暂无消息')}</span><small>${e(contextOf(item))} · ${e(item.state || '处理中')}</small></span><span class="cc-contact-meta"><time>${e(time(item.updatedAt || item.messages?.at(-1)?.at))}</time>${item.unread ? `<b>${e(item.unread > 99 ? '99+' : item.unread)}</b>` : ''}</span></button>`).join('') || `<div class="cc-empty-list">${icon('search', 24)}<p>${query ? '没有匹配的会话' : '暂无此类会话'}</p></div>`;
     if (list !== listSignature) { modal.querySelector('.cc-contacts').innerHTML = list; listSignature = list; }
     modal.querySelector('.cc-total').textContent = chats.length;
     if (!chat) {
@@ -81,10 +83,16 @@ export function openCompanionMessenger({ workspace, initialChatId, profile, api:
       modal.querySelector('.cc-peer').innerHTML = '';
       modal.querySelector('.cc-profile').innerHTML = '';
       modal.querySelector('[data-cc-support]').hidden = true;
+      modal.querySelector('.cc-order-context').hidden = true;
       peerSignature = messageSignature = profileSignature = '';
       updateComposer(); return;
     }
     const p = getProfile(chat);
+    const relatedOrder = workspace.orders?.find(order => order.id === chat.orderId);
+    const orderContext = modal.querySelector('.cc-order-context');
+    orderContext.hidden = !chat.orderId;
+    orderContext.innerHTML = chat.orderId ? `<div><strong>${e(relatedOrder ? `${relatedOrder.game} · ${relatedOrder.product}` : '关联订单')}</strong><span>${e(relatedOrder?.status || '订单售后')}</span></div><p>${e(chat.orderId)}${relatedOrder ? ` · ${e(relatedOrder.hours)} 小时 · ¥ ${(Number(relatedOrder.amountCents || 0) / 100).toFixed(2)}` : ''}</p>` : '';
+    modal.querySelector('.cc-notice > span').textContent = isSupport(chat) ? chat.orderId ? '已关联所选订单，请描述遇到的问题，客服会为你跟进处理。' : '请描述需要帮助的问题，在线客服会在此回复。' : '服务时间、游戏区服和特殊要求，请在下单前与对方确认。';
     const peer = `${avatar(nameOf(chat), p, isSupport(chat))}<div><h3>${e(nameOf(chat))}</h3><p><i class="${p?.online === false ? 'is-offline' : ''}"></i>${isSupport(chat) ? '平台客服' : p ? (p.online ? '在线 · 陪玩咨询' : '离线 · 支持预约') : '陪玩咨询'} · ${e(chat.state || '处理中')}</p></div>`;
     if (peer !== peerSignature) { modal.querySelector('.cc-peer').innerHTML = peer; peerSignature = peer; }
     modal.querySelector('[data-cc-support]').hidden = isSupport(chat);
@@ -138,11 +146,11 @@ export function openCompanionMessenger({ workspace, initialChatId, profile, api:
     if (button.dataset.ccQuick) { input.value = input.value ? `${input.value}\n${button.dataset.ccQuick}`.slice(0, 1000) : button.dataset.ccQuick; updateComposer(); input.focus(); return; }
     if (button.dataset.ccNavigate) { const target = button.dataset.ccNavigate; modal.close(); await onNavigate(target); return; }
     if (button.hasAttribute('data-cc-support')) {
-      const existing = chats.find(chat => isSupport(chat) && chat.state !== '已结束');
+      const existing = chats.find(chat => isSupport(chat) && !chat.orderId && chat.state !== '已结束');
       if (existing) { filter = 'all'; modal.querySelector('[data-cc-filter="all"]').click(); chooseChat(existing.id); return; }
       busy = true; version++; updateComposer(); error.textContent = '';
       try {
-        const support = await api('/conversations', { escortName: SUPPORT_NAME, message: `你好，我需要咨询与${nameOf(active())}相关的陪玩服务，请客服协助。` });
+        const support = await api('/conversations', { type: 'support', message: `你好，我需要咨询与${nameOf(active())}相关的陪玩服务，请客服协助。` });
         if (modal.isConnected) { replaceChat(support); busy = false; filter = 'all'; modal.querySelector('[data-cc-filter="all"]').click(); chooseChat(support.id); }
       } catch (err) { if (modal.isConnected) error.textContent = err.message; }
       finally { busy = false; version++; if (modal.isConnected) updateComposer(); }
@@ -185,7 +193,7 @@ export function openCompanionMessenger({ workspace, initialChatId, profile, api:
     } catch (err) { if (modal.isConnected) syncText(`同步失败：${err.message}`); }
     finally { syncing = false; }
   }
-  const schedule = () => { timer = setTimeout(async () => { if (!modal.isConnected) return; await sync(); if (modal.isConnected) schedule(); }, 8000); };
+  const schedule = () => { timer = setTimeout(async () => { if (!modal.isConnected) return; await sync(); if (modal.isConnected) schedule(); }, 3000); };
   modal.showModal(); draw(true); void markRead(activeId); schedule();
   return modal;
 }

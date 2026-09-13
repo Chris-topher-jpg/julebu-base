@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ClubStore } from '../server/club.mjs';
 import { createClubServer } from '../server.mjs';
+import { addFixtureGames } from './catalog-fixture.mjs';
 
 test('身份切换同步三份名单、撤销旧会话，并在重启后保留', t => {
   const folder = mkdtempSync(join(tmpdir(), 'club-staff-test-'));
@@ -81,6 +82,7 @@ test('考官和售后工作区只返回各自需要的数据', async t => {
 
 test('负责人陪玩押金使用实际账户金额，与陪玩本人钱包一致，新账号为零', t => {
   const store = new ClubStore(':memory:'); t.after(() => store.close());
+  addFixtureGames(store, ['王者荣耀']);
   const admin = store.read().users.find(u => u.id === 'admin');
   const added = store.accountAction(admin, null, { username:'deposit_zero', password:'testing123', name:'押金测试', role:'escort', active:true, games:['王者荣耀'] });
   store.transaction(admin, 'account:manage', '测试押金读取', data => { data.users.find(u => u.id === 'escort').depositCents = 123456; });
@@ -96,17 +98,18 @@ test('负责人陪玩押金使用实际账户金额，与陪玩本人钱包一�
 
 test('抽佣配置按游戏技能生效，等级只负责接单门槛且已派订单比例锁定', t => {
   const store = new ClubStore(':memory:'); t.after(() => store.close());
+  addFixtureGames(store, ['王者荣耀']);
   const admin = store.read().users.find(u => u.id === 'admin');
   const escort = store.read().users.find(u => u.id === 'escort');
   const game = store.read().games.find(g => g.name === escort.games[0]);
-  store.configureCommissions(admin, { games: store.read().games.map(g => ({ name: g.name, commissionBps: g.name === game.name ? 6100 : 7200 })) });
+  store.configureCommissions(admin, { games: store.read().catalogGames.map(g => ({ name: g.name, commissionBps: g.name === game.name ? 6100 : 7200 })) });
   const first = store.workspace(escort);
   assert.equal(first.user.commissionByGame[game.name], 6100);
   const order = store.createOrder(admin, { boss:'抽佣测试老板', productId:'product-1', hours:1, requirement:'测试游戏抽佣', pay:'线下已收款', levelId:'gold' });
   store.setOnline(escort, { online: true });
   const accepted = store.orderAction(escort, order.id, 'accept', { version: order.version });
   assert.equal(accepted.participants[0].baseShareBps, 6100);
-  store.configureCommissions(admin, { games: store.read().games.map(g => ({ name: g.name, commissionBps: g.name === game.name ? 6200 : 7200 })) });
+  store.configureCommissions(admin, { games: store.read().catalogGames.map(g => ({ name: g.name, commissionBps: g.name === game.name ? 6200 : 7200 })) });
   assert.equal(store.read().orders.find(o => o.id === order.id).participants[0].shareBps, 6100);
   assert.equal(store.workspace(escort).user.commissionByGame[game.name], 6200);
 });
@@ -129,6 +132,7 @@ test('成员可冻结不超过可提现余额的金额，冻结余额单独展�
 test('用户按 ID 入会不创建登录账号，并在用户管理同步职责', () => {
   const store = new ClubStore(':memory:');
   try {
+    addFixtureGames(store, ['王者荣耀']);
     const admin = store.read().users.find(u => u.id === 'admin');
     const before = store.read().users.length;
     const added = store.accountAction(admin, null, { action: 'joinById', userId: 'U100001' });

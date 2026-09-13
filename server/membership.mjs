@@ -4,6 +4,10 @@ export const defaultLevels = [
   { id: 'peak', name: '巅峰', rank: 2, shareBps: 7500 },
   { id: 'gold', name: '金牌', rank: 1, shareBps: 7000 },
 ];
+// Current product scope: Delta Force companion play is priced per escort level.
+// Prices are stored in cents and only affect new orders.
+export const defaultLevelPrices = { star: 9800, demon: 8800, peak: 7800, gold: 5800 };
+export const priceOf = (data, levelId) => Number.isSafeInteger(data.levelPrices?.[levelId]) ? data.levelPrices[levelId] : defaultLevelPrices[levelId];
 export const levelOf = (data, id) => data.levels.find(level => level.id === id);
 export const meetsLevel = (data, user, order) => (levelOf(data, user.levelId)?.rank || 0) >= (levelOf(data, order.levelId)?.rank || Infinity);
 export const rateOf = (data, user, gameName = '') => {
@@ -23,12 +27,18 @@ export const profileConflicts = (data, user) => data.orders.some(order => ['待�
 
 // Upgrade existing local data once, preserving order prices and locked participant shares.
 export function migrateMembership(data) {
-  if (data.membershipVersion >= 4) return false;
+  if (data.membershipVersion >= 5) {
+    if (!data.levelPrices) { data.levelPrices = { ...defaultLevelPrices }; data.levelPriceVersion ||= 1; return true; }
+    if (!data.levelPriceVersion) { data.levelPriceVersion = 1; return true; }
+    return false;
+  }
   if (data.membershipVersion === 1) {
     data.membershipVersion = 2;
     // Continue through the customer identity migration below.
   }
   if (!data.levels) data.levels = structuredClone(defaultLevels);
+  if (!data.levelPrices) data.levelPrices = { ...defaultLevelPrices };
+  data.levelPriceVersion ||= 1;
   data.users.forEach((user, i) => {
     user.memberNo ||= String(81000001 + i);
     user.levelId ??= user.role === 'escort' ? 'gold' : null;
@@ -59,7 +69,7 @@ export function migrateMembership(data) {
     data.customers.push({ id: `customer-${index + 1}`, customerNo: `U${String(100001 + index).padStart(6, '0')}`, username: name, phone: '', name, balanceCents: 0, active: true });
     knownCustomers.add(name);
   }
-  data.membershipVersion = 4;
+  data.membershipVersion = 5;
   return true;
 }
 

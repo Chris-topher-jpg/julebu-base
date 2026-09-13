@@ -5,11 +5,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
 import { createClubServer } from '../server.mjs';
+import { addFixtureGames } from './catalog-fixture.mjs';
 
 test('角色权限、数据归属、订单状态、金额与持久化', async t => {
   const folder = mkdtempSync(join(tmpdir(), 'club-role-test-'));
   const database = join(folder, 'club.sqlite');
   let instance = createClubServer({ database });
+  addFixtureGames(instance.store, ['王者荣耀', '无畏契约', '和平精英', '英雄联盟']);
   instance.server.listen(0, '127.0.0.1'); await once(instance.server, 'listening');
   let base = `http://127.0.0.1:${instance.server.address().port}`;
   const clients = {};

@@ -1,3 +1,5 @@
+import { catalogList } from './game-catalog.mjs';
+
 // Club reporting dates use UTC+08:00, independent of the server's local timezone.
 export const FOUR_HOURS = 4 * 60 * 60 * 1000;
 const DAY = 86400000;
@@ -88,5 +90,6 @@ export function ranking(data, query, at = Date.now(), details = false) {
   return { rows: all.slice((page-1)*pageSize,page*pageSize).map((r,i) => ({ ...r, rank: (page-1)*pageSize+i+1 })), total: all.length, page, pageSize, asOf: new Date(at).toISOString() };
 }
 export function analyticsOptions(data) {
-  return { games: [...new Set([...data.games.map(g => g.name), ...data.orders.map(o => o.game)])].sort(), tags: [...new Set(data.orders.flatMap(orderTags))].sort(), tagsByGame: Object.fromEntries([...new Set(data.orders.map(o => o.game))].map(game => [game, [...new Set(data.orders.filter(o=>o.game===game).flatMap(orderTags))].sort()])) };
+  const games = catalogList(data).map(game => game.name);
+  return { games, tags: [...new Set(data.orders.flatMap(orderTags))].sort(), tagsByGame: Object.fromEntries(games.map(game => [game, [...new Set(data.orders.filter(o=>o.game===game).flatMap(orderTags))].sort()])) };
 }

@@ -4,9 +4,11 @@ import { once } from 'node:events';
 import { ClubStore } from '../server/club.mjs';
 import { createClubServer } from '../server.mjs';
 import { lockEarnings } from '../server/membership.mjs';
+import { addFixtureGames } from './catalog-fixture.mjs';
 
 function fixture(t) {
   const store=new ClubStore(':memory:');t.after(()=>store.close());
+  addFixtureGames(store, ['王者荣耀', '英雄联盟', 'Apex']);
   const admin=store.read().users.find(u=>u.id==='admin');
   const create=(role='member',suffix=role)=>store.accountAction(admin,null,{username:`test_${suffix}`,password:'testing123',name:`测试${suffix}`,role,active:true,games:role==='escort'?['王者荣耀']:[],levelId:'gold'});
   const person=id=>store.read().users.find(u=>u.id===id);

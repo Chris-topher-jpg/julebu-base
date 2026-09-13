@@ -22,8 +22,13 @@ const profiles = [
   image: `/src/escort-${String(index + 1).padStart(2, '0')}.jpg`, reviews: [],
 }));
 
-export function findCompanionProfile(name) {
-  return profiles.find(profile => profile.name === name);
+export function companionProfiles(workspace = {}) {
+  const games = new Set((workspace?.catalogGames || workspace?.games || []).map(game => game.name));
+  return profiles.filter(profile => games.has(profile.game));
+}
+
+export function findCompanionProfile(name, workspace) {
+  return companionProfiles(workspace).find(profile => profile.name === name);
 }
 
 function savedSet(key) {
@@ -41,10 +46,11 @@ function saveChats(value) { try { localStorage.setItem('club.profile.chats', JSO
 const availability = profile => `<span class="pro-availability ${profile.online ? 'is-online' : ''}"><i></i>${profile.online ? '在线' : '离线'}</span>`;
 const price = profile => `<strong class="pro-price"><span>¥</span> ${profile.price.toFixed(0)}<small>/ 小时</small></strong>`;
 
-export function mountCompanions(container, { requestService, openChat, onlineOnly = false, compact = false } = {}) {
+export function mountCompanions(container, { workspace = {}, requestService, openChat, onlineOnly = false, compact = false } = {}) {
+  const availableProfiles = companionProfiles(workspace);
   const followed = savedSet('club.profile.follows');
   const blocked = savedSet('club.profile.blocks');
-  const games = [...new Set(profiles.map(profile => profile.game))];
+  const games = [...new Set((workspace?.catalogGames || workspace?.games || []).map(game => game.name))];
   const filters = { game: '', query: '', online: Boolean(onlineOnly), collection: 'all', sort: 'default' };
   container.className = `pro-directory${onlineOnly ? ' pro-directory-online-only' : ''}${compact ? ' pro-directory-compact' : ''}`;
   const heading = compact ? '' : `<div class="pro-directory-heading"><div><span class="pro-eyebrow">星河俱乐部</span><h2>大神陪玩</h2></div><span class="pro-showcase-label">展示档案</span></div>`;
@@ -56,7 +62,7 @@ export function mountCompanions(container, { requestService, openChat, onlineOnl
   </div>`;
 
   function draw() {
-    const list = profiles.filter(p => (!filters.game || p.game === filters.game) && (!filters.online || p.online) &&
+    const list = availableProfiles.filter(p => (!filters.game || p.game === filters.game) && (!filters.online || p.online) &&
       [p.name, p.game, ...p.tags].join(' ').toLowerCase().includes(filters.query.toLowerCase().trim()) &&
       (filters.collection === 'blocked' ? blocked.has(p.id) : !blocked.has(p.id) && (filters.collection !== 'following' || followed.has(p.id))));
     if (filters.sort === 'priceLow') list.sort((a, b) => a.price - b.price);
@@ -81,7 +87,7 @@ export function mountCompanions(container, { requestService, openChat, onlineOnl
       draw();
     }
     const opener = event.target.closest('[data-pro-open]');
-    if (opener) showProfile(profiles.find(p => p.id === opener.dataset.proOpen), opener.dataset.intent || 'profile', opener);
+    if (opener) showProfile(availableProfiles.find(p => p.id === opener.dataset.proOpen), opener.dataset.intent || 'profile', opener);
     if (event.target.closest('[data-pro-reset]')) {
       Object.assign(filters, { game: '', query: '', online: Boolean(onlineOnly), collection: 'all', sort: 'default' });
       if (container.querySelector('input[type=search]')) container.querySelector('input[type=search]').value = '';
@@ -189,13 +195,13 @@ export function mountCompanions(container, { requestService, openChat, onlineOnl
     dialog.setAttribute('aria-labelledby', 'proChatTitle');
     const chats = chatStore();
     let activeId = profile.id;
-    const contacts = profiles.filter(item => !blocked.has(item.id));
+    const contacts = availableProfiles.filter(item => !blocked.has(item.id));
     const ensureMessages = id => {
-      if (!Array.isArray(chats[id])) chats[id] = [{ id: `welcome-${id}`, from: 'them', text: `你好，我是${profiles.find(item => item.id === id)?.name || '陪玩'}。可以先告诉我想玩的游戏、区服和时间，我会尽快回复你。`, at: Date.now() }];
+      if (!Array.isArray(chats[id])) chats[id] = [{ id: `welcome-${id}`, from: 'them', text: `你好，我是${availableProfiles.find(item => item.id === id)?.name || '陪玩'}。可以先告诉我想玩的游戏、区服和时间，我会尽快回复你。`, at: Date.now() }];
       return chats[id];
     };
     const render = () => {
-      const active = profiles.find(item => item.id === activeId) || profile;
+      const active = availableProfiles.find(item => item.id === activeId) || profile;
       const messages = ensureMessages(active.id);
       dialog.innerHTML = `<div class="pro-chat-shell">
         <header class="pro-chat-head"><div><span class="pro-eyebrow">星河陪玩 · 在线咨询</span><h2 id="proChatTitle">和大神聊一聊</h2></div><button type="button" class="pro-icon-button pro-close" aria-label="关闭聊天">${icon('x', 22)}</button></header>
@@ -211,7 +217,7 @@ export function mountCompanions(container, { requestService, openChat, onlineOnl
       const target = event.target.closest('button'); if (!target) return;
       if (target.classList.contains('pro-close')) dialog.close();
       if (target.dataset.chatContact) { activeId = target.dataset.chatContact; render(); }
-      if (target.hasAttribute('data-chat-order')) { dialog.close(); requestService(profiles.find(item => item.id === activeId)); }
+      if (target.hasAttribute('data-chat-order')) { dialog.close(); requestService(availableProfiles.find(item => item.id === activeId)); }
     });
     dialog.addEventListener('submit', event => {
       if (!event.target.matches('.pro-chat-compose')) return;

@@ -4,7 +4,7 @@ import { membersMarkup, bindMembers } from './members.js';
 const names = { overview: '首页', orderManagement:'订单管理', conversations:'会话中心', financeManagement:'财务管理', clubConfig: '俱乐部配置', memberManagement: '成员管理', serviceManagement: '客服管理', examinerManagement: '考官管理', afterSales: '售后管理', userManagement:'用户管理' };
 const navIcons = { overview: 'grid', clubConfig: 'game', memberManagement: 'users', serviceManagement: 'headset', examinerManagement: 'headset', afterSales: 'receipt', financeManagement:'wallet', orderManagement:'receipt', userManagement:'users', conversations:'message' };
 const parent = { catalog: 'clubConfig', auditLog: 'clubConfig', topups: 'financeManagement', flows: 'financeManagement', settlements: 'financeManagement', accounts: 'memberManagement', escorts: 'memberManagement', clubMembers: 'memberManagement', clubEscorts: 'memberManagement', financeList:'financeManagement', commissionConfig:'financeManagement', orderList:'orderManagement', transferOrders:'orderManagement', dispatchOrders:'orderManagement', orders:'orderManagement', dispatch:'orderManagement' };
-const pageNames = { ...names, auditLog:'操作审计', clubMembers:'俱乐部成员管理', clubEscorts:'俱乐部陪玩管理', serviceManagement:'客服管理', financeList:'财务总览', commissionConfig:'抽佣配置', orderList:'订单列表', transferOrders:'转单列表', dispatchOrders:'派单列表', catalog:'游戏与商品', topups:'充值与退款审核', flows:'资金流水', settlements:'提现与结算', accounts:'账号与权限', escorts:'陪玩档案', conversations:'客户会话', orders:'订单记录', dispatch:'派单台', memberProfile:'个人中心', placeOrder:'开始点单', memberOrders:'我的点单', memberAfterSales:'售后记录', memberWallet:'我的钱包' };
+const pageNames = { ...names, auditLog:'操作审计', clubMembers:'俱乐部成员管理', clubEscorts:'俱乐部陪玩管理', serviceManagement:'客服管理', financeList:'财务总览', commissionConfig:'抽佣配置', orderList:'订单列表', transferOrders:'转单列表', dispatchOrders:'派单列表', catalog:'游戏与商品', topups:'充值与退款审核', flows:'资金流水', settlements:'提现与结算', accounts:'账号与权限', escorts:'陪玩档案', conversations:'客户会话', orders:'订单记录', dispatch:'派单台', memberProfile:'个人中心', placeOrder:'个人中心', memberOrders:'我的点单', memberAfterSales:'售后记录', memberWallet:'我的钱包' };
 const dtf = new Intl.DateTimeFormat('sv-SE', {timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
 const timestamp = value => dtf.format(new Date(value));
 const safeTimestamp = value => value && Number.isFinite(new Date(value).getTime()) ? timestamp(value) : '—';
@@ -12,6 +12,7 @@ const day = () => timestamp(Date.now()).slice(0,10);
 const number = value => Number(value || 0).toLocaleString('en-US');
 const yuan = value => (Number(value || 0)/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 const info = text => `<span class="owner-info" tabindex="0" role="note" aria-label="${e(text)}" data-tip="${e(text)}">?</span>`;
+const gamesOf = workspace => workspace.catalogGames || workspace.games || [];
 let context;
 let view = { day: day(), start: `${day().slice(0,7)}-01`, end: day(), summary: null, curve: null, ranks: {}, filters: {}, hiddenSeries: new Set(), collapsed:false, generation:0 };
 let refreshTimer;
@@ -91,7 +92,7 @@ function bindFinanceSearch() {
   input.oninput=()=>{const q=input.value.trim().toLowerCase();let count=0;document.querySelectorAll('[data-finance-row]').forEach(row=>{row.hidden=!row.dataset.financeRow.toLowerCase().includes(q);if(!row.hidden)count++;});document.querySelector('#financeEmpty').hidden=count>0;};
 }
 function commissionConfigPage(w) {
-  return `<section class="owner-panel"><div class="owner-section-head"><h2>抽佣配置</h2><span class="owner-update">按陪玩游戏设置分成，已派订单保持原比例</span></div><form id="commissionForm"><div class="owner-standard-table"><table><thead><tr><th>游戏</th><th>分类</th><th>状态</th><th>陪玩抽成比例（%）</th></tr></thead><tbody>${w.games.map(g=>`<tr><td>${e(g.name)}</td><td>${e(g.category||'—')}</td><td>${e(g.state||'')}</td><td><input type="number" name="${e(g.name)}" value="${(g.commissionBps??7000)/100}" min="0.01" max="100" step="0.01" required></td></tr>`).join('')}</tbody></table></div><button class="owner-primary" type="submit">保存抽佣配置</button><p class="owner-error" id="commissionError"></p></form></section>`;
+  return `<section class="owner-panel"><div class="owner-section-head"><h2>抽佣配置</h2><span class="owner-update">按陪玩游戏设置分成，已派订单保持原比例</span></div><form id="commissionForm"><div class="owner-standard-table"><table><thead><tr><th>游戏</th><th>分类</th><th>状态</th><th>陪玩抽成比例（%）</th></tr></thead><tbody>${gamesOf(w).map(g=>`<tr><td>${e(g.name)}</td><td>${e(g.category||'—')}</td><td>${e(g.state||'')}</td><td><input type="number" name="${e(g.name)}" value="${(g.commissionBps??7000)/100}" min="0.01" max="100" step="0.01" required></td></tr>`).join('')}</tbody></table></div><button class="owner-primary" type="submit">保存抽佣配置</button><p class="owner-error" id="commissionError"></p></form></section>`;
 }
 function staffPanel(w, role, title, scope) {
   const rows=w.staffGroups[role];
@@ -146,7 +147,7 @@ export function renderOwner(ctx) {
   const content = personal ? context.legacyContent() : (admin ? (page === 'overview' ? home(w) : groupContent(page,w)) : context.legacyContent());
   const navigation = admin ? ownerNavigation(active,page) : restrictedNavigation(w, page);
   const staffAction = !admin && w.user.role === 'escort' ? `<button class="owner-link" data-action="online">${w.user.online ? '在线接单中' : '离线接单'}</button>` : '';
-  document.querySelector('#app').innerHTML=`<div class="owner-shell ${view.collapsed?'is-collapsed':''}"><aside class="owner-sidebar"><div class="owner-brand"><span class="owner-brand-symbol">${icon('game',24)}</span><strong>${e(w.clubName)}</strong></div><nav aria-label="${admin?'最高负责人':'职责'}主导航">${navigation}</nav></aside><main class="owner-main"><header class="owner-topbar"><div><button class="owner-icon-button" id="collapseOwnerNav" aria-label="${view.collapsed?'展开':'收起'}侧边栏" aria-expanded="${!view.collapsed}"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 5h18M3 12h7M3 19h18m5-10-3 3 3 3"/></svg></button><span class="owner-breadcrumb">${title}</span></div><div class="owner-top-actions">${admin?'<button class="owner-link" id="metricRules">统计口径</button>':''}${staffAction}<span class="owner-user-avatar">${icon('users',20)}</span><span class="owner-username">${e(w.user.name)}</span><span class="owner-role">${e(w.user.roleLabel)}</span><button class="owner-icon-button" data-action="logout" aria-label="退出登录">退出</button></div></header><div class="owner-page-tabs"><span class="owner-page-tab"><i></i>${title}</span></div><div class="owner-content" id="ownerContent">${content}</div></main></div>`;
+  document.querySelector('#app').innerHTML=`<div class="owner-shell ${view.collapsed?'is-collapsed':''}"><aside class="owner-sidebar"><div class="owner-brand"><span class="owner-brand-symbol">${icon('game',24)}</span><strong>${e(w.clubName)}</strong></div><nav aria-label="${admin?'最高负责人':'职责'}主导航">${navigation}</nav></aside><main class="owner-main"><header class="owner-topbar"><div><button class="owner-icon-button" id="collapseOwnerNav" aria-label="${view.collapsed?'展开':'收起'}侧边栏" aria-expanded="${!view.collapsed}"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 5h18M3 12h7M3 19h18m5-10-3 3 3 3"/></svg></button><span class="owner-breadcrumb">${title}</span></div><div class="owner-top-actions"><button class="owner-icon-button owner-home-button" data-action="enterHome" aria-label="返回网站首页">返回网站首页</button>${admin?'<button class="owner-link" id="metricRules">统计口径</button>':''}${staffAction}<span class="owner-user-avatar">${icon('users',20)}</span><span class="owner-username">${e(w.user.name)}</span><span class="owner-role">${e(w.user.roleLabel)}</span><button class="owner-icon-button" data-action="logout" aria-label="退出登录">退出</button></div></header><div class="owner-page-tabs"><span class="owner-page-tab"><i></i>${title}</span></div><div class="owner-content" id="ownerContent">${content}</div></main></div>`;
   document.querySelector('#collapseOwnerNav').onclick=()=>{ view.collapsed=!view.collapsed; document.querySelector('.owner-shell').classList.toggle('is-collapsed',view.collapsed); document.querySelector('#collapseOwnerNav').setAttribute('aria-expanded',String(!view.collapsed)); };
   if(admin) document.querySelector('#metricRules').onclick=()=>ctx.dialog('经营数据统计口径', `<p>金额以人民币元展示，内部以整数分汇总。</p><p>完成金额、完成笔数：按完成时间统计当前已完成订单。下单人数：按下单时间对客户去重；历史账号缺少客户 ID 时使用老板称呼。</p><p>日期按北京时间 00:00 至次日 00:00 计算，结束日期包含当天。总数据每四小时更新，日经营数据每五分钟刷新。</p><p>排名只包含已完成订单。陪玩榜每位成员统计参与订单的全额，同一多人订单可出现在多位成员下，成员金额不能相加作为俱乐部 GMV，也不等于个人到手收益。</p><p>旧示例订单未记录完成时间时使用示例下单时间。真实订单缺少完成时间时不纳入日期统计。</p>`);
   document.querySelectorAll('[data-page]').forEach(btn=>btn.onclick=()=>ctx.navigate(btn.dataset.page));
@@ -163,7 +164,7 @@ export function renderOwner(ctx) {
   if(admin && page==='overview') bindDashboard();
   if(admin && page==='overview') bindExports();
   if(page==='auditLog') bindAudit();
-  if(page==='commissionConfig') document.querySelector('#commissionForm').onsubmit=async ev=>{ev.preventDefault();const form=ev.currentTarget;try{await ctx.api('/commissions',{games:w.games.map(g=>({name:g.name,commissionBps:Math.round(Number(form.elements[g.name].value)*100)}))});await ctx.refresh();ctx.toast('抽佣配置已保存');}catch(err){document.querySelector('#commissionError').textContent=err.message;}};
+  if(page==='commissionConfig') document.querySelector('#commissionForm').onsubmit=async ev=>{ev.preventDefault();const form=ev.currentTarget;try{await ctx.api('/commissions',{games:gamesOf(w).map(g=>({name:g.name,commissionBps:Math.round(Number(form.elements[g.name].value)*100)}))});await ctx.refresh();ctx.toast('抽佣配置已保存');}catch(err){document.querySelector('#commissionError').textContent=err.message;}};
 }
 const restrictedGroups = {
   service: [['overview','工作台'],['orders','订单管理'],['conversations','会话中心'],['dispatch','派单台']],
@@ -171,12 +172,16 @@ const restrictedGroups = {
   afterSales: [['overview','工作台'],['orders','订单管理'],['conversations','会话中心']],
   finance: [['overview','工作台'],['topups','充值审核'],['flows','资金流水'],['settlements','提现与结算']],
   escort: [['overview','工作台'],['availableOrders','接单大厅'],['myOrders','我的订单'],['myEarnings','我的收益']],
-  member: [['overview','返回首页'],['memberProfile','个人中心'],['placeOrder','开始点单'],['memberOrders','我的点单'],['memberAfterSales','售后记录'],['memberWallet','我的钱包']],
-  user: [['overview','返回首页'],['memberProfile','个人中心'],['placeOrder','开始点单'],['memberOrders','我的点单'],['memberAfterSales','售后记录'],['memberWallet','我的钱包']],
+  member: [['overview','返回首页'],['memberProfile','个人中心'],['memberOrders','我的点单'],['memberAfterSales','售后记录'],['memberWallet','我的钱包']],
+  user: [['overview','返回首页'],['memberProfile','个人中心'],['memberOrders','我的点单'],['memberAfterSales','售后记录'],['memberWallet','我的钱包']],
 };
 function restrictedNavigation(w, page) {
   const items = (restrictedGroups[w.user.role] || [['overview','工作台']]).filter(([target]) => w.role.pages.includes(target));
-  return items.map(([target, label]) => `<button class="owner-nav-item ${page===target?'active':''}" data-page="${target}" aria-label="${label}" ${page===target?'aria-current="page"':''}>${icon(target==='overview'?'grid':target==='memberProfile'?'users':target==='availableOrders'?'game':target==='myEarnings'?'wallet':target==='memberWallet'?'wallet':target==='conversations'?'users':target==='dispatch'?'trend':target==='topups'?'wallet':target==='flows'?'trend':target==='settlements'?'wallet':target==='examinerCandidates'?'users':target==='memberAfterSales'?'headset':'receipt',17)}<span>${label}</span></button>`).join('');
+  return items.map(([target, label]) => {
+    const isPublicHome = target === 'overview' && ['member', 'user'].includes(w.user.role);
+    const action = isPublicHome ? 'data-action="enterHome"' : `data-page="${target}"`;
+    return `<button class="owner-nav-item ${page===target?'active':''}" ${action} aria-label="${label}" ${page===target?'aria-current="page"':''}>${icon(target==='overview'?'grid':target==='memberProfile'?'users':target==='availableOrders'?'game':target==='myEarnings'?'wallet':target==='memberWallet'?'wallet':target==='conversations'?'users':target==='dispatch'?'trend':target==='topups'?'wallet':target==='flows'?'trend':target==='settlements'?'wallet':target==='examinerCandidates'?'users':target==='memberAfterSales'?'headset':'receipt',17)}<span>${label}</span></button>`;
+  }).join('');
 }
 export function leaveOwner() { clearTimeout(refreshTimer); view.generation++; }
 async function request(section, values={}) { return context.api(`/analytics/${section}?${new URLSearchParams(values)}`); }
@@ -195,8 +200,9 @@ function populateSelects(kind) {
   const initialized=form.elements.game.dataset.loaded==='true';
   const chosenGame=initialized ? form.elements.game.value : view.filters[kind].game;
   const chosenTag=initialized ? form.elements.tag.value : view.filters[kind].tag;
-  const options=view.summary.options;
-  form.elements.game.innerHTML='<option value="">全部游戏</option>'+options.games.map(g=>`<option value="${e(g)}">${e(g)}</option>`).join(''); form.elements.game.value=chosenGame;
+  const games=gamesOf(context.state.workspace).map(game=>game.name);
+  form.elements.game.innerHTML='<option value="">全部游戏</option>'+games.map(g=>`<option value="${e(g)}">${e(g)}</option>`).join(''); form.elements.game.value=games.includes(chosenGame)?chosenGame:'';
+  if (!games.includes(view.filters[kind].game)) view.filters[kind].game='';
   form.elements.game.dataset.loaded='true'; fillTags(form,chosenTag);
 }
 function fillTags(form,selected='') {

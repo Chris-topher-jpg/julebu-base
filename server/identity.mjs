@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { priceOf } from './membership.mjs';
+import { catalogList, catalogNames, visibleProducts } from './game-catalog.mjs';
 
 export const isClubMember = user => Boolean(user && user.role !== 'user');
 
@@ -41,6 +43,8 @@ export function migrateIdentity(data) {
 }
 
 export function personalData(data, user, roles) {
+  const games = catalogList(data);
+  const names = catalogNames(data);
   const customer = data.customers.find(c => c.id === user.customerId);
   const belongs = item => Boolean(customer && item.customerId === customer.id);
   const orders = data.orders.filter(belongs).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(o => ({
@@ -69,12 +73,17 @@ export function personalData(data, user, roles) {
       id: l.id, account: l.account, deltaCents: l.deltaCents, afterCents: l.afterCents,
       label: l.label, source: l.source, at: l.at,
     })),
-    // Personal workspace needs the same catalog data as the management
-    // workspace so the client can render the order form after switching
-    // from the public home to "开始点单". Keep the payload read-only and
-    // scoped to the public catalog/member roster.
-    games: data.games,
-    products: data.products,
-    members: data.users.filter(candidate => candidate.role === 'escort' && candidate.active && !candidate.escortFrozen).map(candidate => ({ id: candidate.id, name: candidate.name, games: candidate.games || [], online: candidate.online, levelId: candidate.levelId })),
+    // Customer order forms use the same current level prices as checkout.
+    // Expose catalog metadata and eligibility levels without staff shares.
+    levels: data.levels.map(({ id, name, rank }) => ({ id, name, rank, priceCents: priceOf(data, id) })),
+    gameLevelConfigs: Object.fromEntries(Object.entries(data.gameLevelConfigs || {}).filter(([game]) => names.has(game)).map(([game, config]) => [game, {
+      levels: (config.levels || []).filter(item => data.levels.some(level => level.id === item.id)).map(({ id, priceCents }) => ({
+        id, name: data.levels.find(level => level.id === id).name, rank: data.levels.find(level => level.id === id).rank, priceCents,
+      })),
+    }])),
+    games,
+    catalogGames: games,
+    products: visibleProducts(data),
+    members: data.users.filter(candidate => candidate.role === 'escort' && candidate.active && !candidate.escortFrozen).map(candidate => ({ id: candidate.id, name: candidate.name, games: (candidate.games || []).filter(game => names.has(game)), online: candidate.online, levelId: candidate.levelId })),
   };
 }

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { extname, resolve } from 'node:path';
 import { ClubStore, can, requireThat } from './server/club.mjs';
 import { catalogAction } from './server/catalog.mjs';
+import { catalogList } from './server/game-catalog.mjs';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 export function createClubServer({ database = resolve(root, 'data/club.sqlite') } = {}) {
@@ -49,10 +50,19 @@ export function createClubServer({ database = resolve(root, 'data/club.sqlite') 
           res.setHeader('Set-Cookie', 'club_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
           return json({ ok: true });
         }
+        if (url.pathname === '/api/public/catalog' && req.method === 'GET') {
+          const data = store.read();
+          const games = catalogList(data).map(({ name, category, state, min, max }) => ({ name, category, state, min, max }));
+          return json({ games, catalogGames: games, revision: data.revision });
+        }
         const user = store.session(token);
         requireThat(user, '登录已失效，请重新登录', 401);
         if (req.method === 'GET') {
           if (url.pathname === '/api/me') return json(store.personal(user));
+          if (url.pathname === '/api/sync') {
+            return json(store.sync(user, url.searchParams.get('since') ?? 0, url.searchParams.get('context') ?? 'management'));
+          }
+          if (url.pathname === '/api/notifications') return json(store.notifications(user));
           if (url.pathname === '/api/workspace') return json(store.workspace(user));
           if (url.pathname === '/api/audit') return json(store.auditList(user, Object.fromEntries(url.searchParams)));
           const analyticsExport = url.pathname === '/api/analytics/export';
@@ -74,6 +84,7 @@ export function createClubServer({ database = resolve(root, 'data/club.sqlite') 
           const workspace = store.workspace(user);
           return json(['assessments', 'assessment-records', 'examinations'].includes(resource) ? (workspace.assessments || []) : workspace[resource]);
         }
+        if (url.pathname === '/api/notifications/read') return json(store.readNotifications(user, body));
         const catalog = url.pathname.match(/^\/api\/catalog\/(games|products)$/);
         if (catalog) return json(catalogAction(store, user, catalog[1], body));
         if (url.pathname === '/api/orders') return json(store.createOrder(user, body), 201);
@@ -99,6 +110,7 @@ export function createClubServer({ database = resolve(root, 'data/club.sqlite') 
         const assessment = url.pathname.match(/^\/api\/(?:assessments|examinations|assessment-records)\/([^/]+)$/);
         if (assessment) return json(store.updateAssessment(user, assessment[1], body));
         if (url.pathname === '/api/levels') return json(store.configureLevels(user, body));
+        if (url.pathname === '/api/level-prices' || url.pathname === '/api/catalog/prices') return json(store.configureLevelPrices(user, body));
         if (url.pathname === '/api/commissions') return json(store.configureCommissions(user, body));
         if (url.pathname === '/api/members/skills') return json(store.bindSkills(user, body));
         const member = url.pathname.match(/^\/api\/members\/([^/]+)\/([^/]+)$/);

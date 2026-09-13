@@ -8,7 +8,7 @@ import { createClubServer } from '../server.mjs';
 const at = Date.parse('2026-09-11T18:00:00+08:00');
 const person = (id,name=id) => ({userId:id,name});
 const order = (id,overrides={}) => ({id,boss:'老板甲',customerId:'customer-a',game:'王者荣耀',product:'排位赛',tags:['上分'],amountCents:10000,status:'已完成',createdAt:'2026-09-10T23:30:00+08:00',completedAt:'2026-09-11T00:00:00+08:00',participants:[person('one','米粒')],...overrides});
-const fixtures = {games:[{name:'王者荣耀'},{name:'和平精英'}],orders:[
+const fixtures = {games:[{name:'王者荣耀'},{name:'和平精英'}],catalogGames:[{name:'王者荣耀'},{name:'和平精英'}],orders:[
   order('o1'),
   order('o2',{amountCents:2550,createdAt:'2026-09-11T01:00:00+08:00',completedAt:'2026-09-11T02:00:00+08:00',participants:[person('one','米粒'),person('two','阿九'),person('one','米粒')]}),
   order('o3',{amountCents:8000,boss:'老板乙',customerId:'customer-b',game:'和平精英',tags:['娱乐'],createdAt:'2026-09-10T15:00:00+08:00',completedAt:'2026-09-10T16:00:00+08:00',participants:[person('two','阿九')]}),

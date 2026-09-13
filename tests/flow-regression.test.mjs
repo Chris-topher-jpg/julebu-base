@@ -3,9 +3,11 @@ import assert from 'node:assert/strict';
 import { ClubStore } from '../server/club.mjs';
 import { catalogAction } from '../server/catalog.mjs';
 import { hasOpenOrders, profileConflicts } from '../server/membership.mjs';
+import { addFixtureGames } from './catalog-fixture.mjs';
 
 function fixture(t){
   const store=new ClubStore(':memory:');t.after(()=>store.close());
+  addFixtureGames(store, ['王者荣耀']);
   const user=id=>store.read().users.find(u=>u.id===id);
   const customer=user('demo-user'),escort=user('demo-escort'),admin=user('admin');
   const create=(buyer=customer)=>store.createOrder(buyer,{context:'personal',boss:buyer.name,productId:'product-1',hours:1,pay:'在线支付',requirement:'完成约定服务后提供说明',levelId:'gold'});
