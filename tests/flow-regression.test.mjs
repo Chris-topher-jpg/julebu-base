@@ -4,10 +4,12 @@ import { ClubStore } from '../server/club.mjs';
 import { catalogAction } from '../server/catalog.mjs';
 import { hasOpenOrders, profileConflicts } from '../server/membership.mjs';
 import { addFixtureGames } from './catalog-fixture.mjs';
+import { verifyFixtureUsers } from './real-name-fixture.mjs';
 
 function fixture(t){
   const store=new ClubStore(':memory:');t.after(()=>store.close());
   addFixtureGames(store, ['王者荣耀']);
+  verifyFixtureUsers(store, ['demo-user', 'demo-escort']);
   const user=id=>store.read().users.find(u=>u.id===id);
   const customer=user('demo-user'),escort=user('demo-escort'),admin=user('admin');
   const create=(buyer=customer)=>store.createOrder(buyer,{context:'personal',boss:buyer.name,productId:'product-1',hours:1,pay:'在线支付',requirement:'完成约定服务后提供说明',levelId:'gold'});
@@ -50,7 +52,7 @@ test('部分退款恢复待验收并只结算剩余金额，提现待打款仍�
 });
 
 test('普通成员及工作人员个人能力仅处理本人，消息未读独立且内部备注不外泄',t=>{
-  const {store,user,admin}=fixture(t);const member=user('member-demo'),service=user('service');
+  const {store,user,admin}=fixture(t);const member=store.accountAction(admin,null,{username:'unread_member',password:'testing123',name:'未读测试成员',role:'member',active:true,games:[]}),service=user('service');
   assert.ok(store.workspace(member).role.pages.includes('memberWallet'));
   const chat=store.conversationCreate(member,{context:'personal',escortName:'俱乐部客服',message:'咨询服务'});
   assert.equal(store.workspace(admin).conversations.find(c=>c.id===chat.id).unread,1);

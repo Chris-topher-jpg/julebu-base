@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import { ClubStore } from '../server/club.mjs';
 import { catalogAction } from '../server/catalog.mjs';
 import { createClubServer } from '../server.mjs';
+import { analyticsOptions, ranking } from '../server/analytics.mjs';
 
 test('all workspaces use club games and reject legacy game choices', t => {
   const store = new ClubStore(':memory:');
@@ -45,23 +46,65 @@ test('analytics Tag options stay synchronized with special-order catalog', t => 
   const store = new ClubStore(':memory:');
   t.after(() => store.close());
   const admin = { id: 'admin' };
-  const expected = store.read().products.map(product => product.name).sort((a, b) => a.localeCompare(b, 'zh-CN'));
   const options = store.analytics(admin, 'summary').options;
-  assert.deepEqual(options.tags, [...new Set([...expected, '娱乐陪玩'])].sort((a, b) => a.localeCompare(b, 'zh-CN')));
+  assert.deepEqual(options.tags, ['1陪1/1陪2', '2陪1']);
   assert.deepEqual(options.tagsByGame['三角洲行动'], ['1陪1/1陪2', '2陪1']);
-  assert.ok(options.tags.includes('双排陪玩'), '暂停服务仍应作为可查询 Tag 展示');
+  assert.equal(options.tags.includes('娱乐陪玩'), false);
+  assert.equal(options.tags.includes('双排陪玩'), false);
 
+  store.transaction(admin, 'account:manage', '准备历史标签', data => {
+    data.orders[0].tags = ['夜间陪玩', '夜间上分', '历史标签'];
+  });
+  const originalOrders = store.read().orders;
   const created = catalogAction(store, admin, 'products', {
     action: 'save', name: '夜间陪玩', game: '三角洲行动', state: '启用', unit: '小时', priceCents: 8800, note: '夜间时段服务',
   });
   assert.ok(store.analytics(admin, 'summary').options.tags.includes('夜间陪玩'));
 
-  const renamed = catalogAction(store, admin, 'products', {
+  let renamed = catalogAction(store, admin, 'products', {
     action: 'save', ...created, id: created.id, version: created.version, name: '夜间上分', game: created.game, state: created.state, unit: created.unit, priceCents: created.priceCents, note: created.note,
   });
   const renamedOptions = store.analytics(admin, 'summary').options;
   assert.ok(renamedOptions.tags.includes('夜间上分'));
   assert.ok(!renamedOptions.tags.includes('夜间陪玩'));
+  assert.ok(!renamedOptions.tags.includes('历史标签'));
+  renamed = catalogAction(store, admin, 'products', { action: 'state', id: renamed.id, version: renamed.version, state: '暂停' });
+  assert.ok(store.analytics(admin, 'summary').options.tags.includes('夜间上分'), '暂停服务仍在特殊订单模块中');
+
+  const revision = store.read().revision;
+  catalogAction(store, admin, 'products', { action: 'delete', id: renamed.id, version: renamed.version });
+  const deletedOptions = store.analytics(admin, 'summary').options;
+  assert.ok(!deletedOptions.tags.includes('夜间上分'));
+  assert.deepEqual(deletedOptions.tagsByGame['三角洲行动'], ['1陪1/1陪2', '2陪1']);
+  const synced = store.sync(admin, revision);
+  assert.equal(synced.changed, true);
+  assert.deepEqual(analyticsOptions(synced.workspace), deletedOptions);
+  assert.deepEqual(store.read().orders, originalOrders);
+});
+
+test('Tag 按已配置游戏去重，空配置不回填历史标签，改名后仍能查询原订单', () => {
+  const data = {
+    catalogGames: [{ name: '游戏甲' }, { name: '游戏乙' }],
+    products: [
+      { id: 'p1', game: '游戏甲', name: '当前服务', state: '启用' },
+      { id: 'p2', game: '游戏乙', name: '当前服务', state: '暂停' },
+      { id: 'p3', game: '已移除游戏', name: '旧游戏服务', state: '启用' },
+    ],
+    orders: [{ id: 'order1', productId: 'p1', product: '旧名称', tags: ['旧名称', '历史标签'], game: '游戏甲', status: '已完成', amountCents: 10000, completedAt: '2026-09-11T12:00:00+08:00', participants: [], boss: '测试用户' }],
+  };
+  const originalOrders = structuredClone(data.orders);
+  assert.deepEqual(analyticsOptions(data), {
+    games: ['游戏甲', '游戏乙'], tags: ['当前服务'], tagsByGame: { 游戏甲: ['当前服务'], 游戏乙: ['当前服务'] },
+  });
+  const report = ranking(data, { kind: 'orders', start: '2026-09-11', end: '2026-09-11', tag: '当前服务' }, Date.parse('2026-09-12'));
+  assert.equal(report.total, 1);
+  assert.equal(report.rows[0].amountCents, 10000);
+  data.products = data.products.filter(product => product.id !== 'p1');
+  assert.deepEqual(analyticsOptions(data).tagsByGame.游戏甲, []);
+  assert.deepEqual(analyticsOptions(data).tags, ['当前服务']);
+  data.products = [];
+  assert.deepEqual(analyticsOptions(data).tags, []);
+  assert.deepEqual(data.orders, originalOrders);
 });
 
 test('public catalog is anonymous, current and contains no staff data', async t => {

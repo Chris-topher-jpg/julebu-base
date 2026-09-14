@@ -4,11 +4,13 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ClubStore } from '../server/club.mjs';
+import { verifyFixtureUsers } from './real-name-fixture.mjs';
 
 function fixture(t, database = ':memory:') {
   const store = new ClubStore(database);
   t.after(() => store.close());
   const user = id => store.read().users.find(user => user.id === id);
+  verifyFixtureUsers(store, ['demo-user', 'demo-escort', 'escort', 'xiaoman']);
   const buyer = user('demo-user'), staff = user('service'), admin = user('admin');
   store.transaction(admin, 'account:manage', '准备订单候选测试', data => {
     for (const id of ['demo-escort', 'escort', 'xiaoman']) Object.assign(data.users.find(user => user.id === id), { games: ['三角洲行动'], active: true, online: true, levelId: 'star', escortFrozen: false });
@@ -128,6 +130,7 @@ test('候选名单与报名来源在数据库重启后保留', t => {
   const path = join(folder, 'club.sqlite');
   t.after(() => rmSync(folder, { recursive: true, force: true }));
   let store = new ClubStore(path);
+  verifyFixtureUsers(store, ['demo-user', 'demo-escort']);
   const buyer = store.read().users.find(item => item.id === 'demo-user');
   const worker = store.read().users.find(item => item.id === 'demo-escort');
   try {

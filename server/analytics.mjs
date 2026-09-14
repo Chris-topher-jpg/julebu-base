@@ -1,4 +1,5 @@
-import { catalogList } from './game-catalog.mjs';
+import { catalogList, visibleProducts } from './game-catalog.mjs';
+import { catalogTags } from '../src/catalog-tags.js';
 
 // Club reporting dates use UTC+08:00, independent of the server's local timezone.
 export const FOUR_HOURS = 4 * 60 * 60 * 1000;
@@ -100,16 +101,8 @@ export function ranking(data, query, at = Date.now(), details = false) {
 }
 export function analyticsOptions(data) {
   const games = catalogList(data).map(game => game.name);
-  const orders = data.orders || [];
-  const products = (data.products || []).filter(product => typeof product.name === 'string' && product.name.trim());
-  // Current special-order names are the source of the Tag catalogue. Keep
-  // legacy order tags available for historical reports whose records predate
-  // the catalog sync (new orders should use the selected service name).
-  const tags = [...new Set([...products.map(product => product.name.trim()), ...orders.flatMap(orderTags)])].sort((a, b) => a.localeCompare(b, 'zh-CN'));
-  const tagsByGame = Object.fromEntries(games.map(game => {
-    const current = products.filter(product => product.game === game).map(product => product.name.trim());
-    const legacy = orders.filter(order => order.game === game).flatMap(orderTags);
-    return [game, [...new Set([...current, ...legacy])].sort((a, b) => a.localeCompare(b, 'zh-CN'))];
-  }));
+  const products = visibleProducts(data);
+  const tags = catalogTags(products);
+  const tagsByGame = Object.fromEntries(games.map(game => [game, catalogTags(products, game)]));
   return { games, tags, tagsByGame };
 }

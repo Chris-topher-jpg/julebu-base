@@ -7,6 +7,8 @@ import { levelOf, priceOf } from './server/membership.mjs';
 import { catalogAction } from './server/catalog.mjs';
 import { catalogList } from './server/game-catalog.mjs';
 import { personalContext } from './server/flow.mjs';
+import { isRealNameVerified } from './server/real-name.mjs';
+import { SmsLoginChallenges, loginPhoneForUser, normalizePhone } from './server/sms-login.mjs';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 const jsonLimit = 24000;
@@ -57,6 +59,11 @@ export function createClubServer({ database, production = process.env.NODE_ENV =
   if (production && (!database || database === ':memory:')) throw new Error('正式环境必须通过 CLUB_DATABASE 指定独立且持久化的数据库路径');
   const store = new ClubStore(database || resolve(root, 'data/club.sqlite'), { production, bootstrapAdmin });
   const attempts = new Map();
+  const smsChallenges = new SmsLoginChallenges({ production });
+  const findPhoneAccount = phone => {
+    const users = store.read().users.filter(candidate => loginPhoneForUser(candidate) === normalizePhone(phone));
+    return users.length === 1 && users[0].active ? users[0] : null;
+  };
   const cookieFlags = `HttpOnly; SameSite=Strict; Path=/${origin?.protocol === 'https:' ? '; Secure' : ''}`;
   const server = createServer(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
@@ -89,6 +96,22 @@ export function createClubServer({ database, production = process.env.NODE_ENV =
           body = await readJson(req, url.pathname === '/api/profile' ? 120000 : jsonLimit);
         }
         const token = (req.headers.cookie || '').split(';').map(s => s.trim()).find(s => s.startsWith('club_session='))?.slice(13) || '';
+        if (['/api/login/code', '/api/login/phone'].includes(url.pathname) && req.method === 'POST') {
+          const loopbackHost = ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
+          const loopbackPeer = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+          requireThat(!production && store.read().deploymentMode !== 'production' && loopbackHost && loopbackPeer, '短信服务暂未配置，请使用账号密码登录', 503);
+        }
+        if (url.pathname === '/api/login/code' && req.method === 'POST') {
+          return json(smsChallenges.issue(body.phone, findPhoneAccount));
+        }
+        if (url.pathname === '/api/login/phone' && req.method === 'POST') {
+          const user = smsChallenges.verify(body, findPhoneAccount);
+          const result = store.loginUser(user.id, normalizePhone(body.phone));
+          store.logout(token);
+          res.setHeader('Set-Cookie', `club_session=${result.token}; ${cookieFlags}; Max-Age=28800`);
+          const personal = store.personal(result.user);
+          return json({ user: personal.user, membership: personal.membership });
+        }
         if (['/api/login', '/api/register'].includes(url.pathname) && req.method === 'POST') {
           const accountName = typeof body.username === 'string' ? body.username.trim() : '';
           requireThat(accountName.length > 0 && accountName.length <= 128, '请输入有效的登录账号');
@@ -129,7 +152,7 @@ export function createClubServer({ database, production = process.env.NODE_ENV =
           const games = catalogList(data).map(({ name, category, state, min, max }) => ({ name, category, state, min, max }));
           const names = new Set(games.map(game => game.name));
           const members = data.users
-            .filter(user => user.role === 'escort' && user.active && !user.escortFrozen)
+            .filter(user => user.role === 'escort' && user.active && !user.escortFrozen && isRealNameVerified(user))
             .flatMap(user => (user.games || []).filter(game => names.has(game)).map(game => {
               const level = levelOf(data, user.levelId);
               const gamePrice = data.gameLevelConfigs?.[game]?.levels?.find(item => item.id === user.levelId)?.priceCents;
@@ -152,6 +175,14 @@ export function createClubServer({ database, production = process.env.NODE_ENV =
         const user = store.session(token);
         requireThat(user, '登录已失效，请重新登录', 401);
         if (req.method === 'GET') {
+          if (url.pathname === '/api/real-name') return json(store.realNameStatus(user));
+          if (url.pathname === '/api/real-name/requests') {
+            const userId = url.searchParams.get('userId');
+            if (userId) return json({ items: [store.realNameRequest(user, userId)].filter(Boolean) });
+            return json(store.realNameRequests(user));
+          }
+          const realNameDetail = url.pathname.match(/^\/api\/real-name\/requests\/([^/]+)$/);
+          if (realNameDetail) return json(store.realNameRequest(user, decodeURIComponent(realNameDetail[1])));
           if (url.pathname === '/api/me') return json(store.personal(user));
           if (url.pathname === '/api/sync') {
             return json(store.sync(user, url.searchParams.get('since') ?? 0, url.searchParams.get('context') ?? 'management'));
@@ -179,6 +210,9 @@ export function createClubServer({ database, production = process.env.NODE_ENV =
           return json(['assessments', 'assessment-records', 'examinations'].includes(resource) ? (workspace.assessments || []) : workspace[resource]);
         }
         if (url.pathname === '/api/notifications/read') return json(store.readNotifications(user, body));
+        if (url.pathname === '/api/real-name') return json(store.submitRealName(user, body), 202);
+        const realNameReview = url.pathname.match(/^\/api\/real-name\/requests\/([^/]+)$/);
+        if (realNameReview) return json(store.reviewRealName(user, decodeURIComponent(realNameReview[1]), body));
         const catalog = url.pathname.match(/^\/api\/catalog\/(games|products)$/);
         if (catalog) return json(catalogAction(store, user, catalog[1], body));
         const orderResponse = order => personalContext(user, body) ? store.personal(user).orders.find(item => item.id === order.id) : order;
@@ -226,7 +260,8 @@ export function createClubServer({ database, production = process.env.NODE_ENV =
       res.end(req.method === 'HEAD' ? undefined : contents);
     } catch (error) {
       if (!error.status && error.code !== 'ENOENT') console.error(error);
-      json({ error: error.status ? error.message : error.code === 'ENOENT' ? '文件不存在' : '服务暂时出错，请稍后重试' }, error.status || (error.code === 'ENOENT' ? 404 : 500));
+      if (Number.isFinite(error.retryAfter)) res.setHeader('Retry-After', String(error.retryAfter));
+      json({ error: error.status ? error.message : error.code === 'ENOENT' ? '文件不存在' : '服务暂时出错，请稍后重试', ...(Number.isFinite(error.retryAfter) ? { retryAfter: error.retryAfter } : {}) }, error.status || (error.code === 'ENOENT' ? 404 : 500));
     }
   });
   server.requestTimeout = 15000;

@@ -1,14 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ClubStore } from '../server/club.mjs';
+import { verifyFixtureUsers } from './real-name-fixture.mjs';
 
 function fixture(t) {
   const store = new ClubStore(':memory:');
   t.after(() => store.close());
   const user = id => store.read().users.find(candidate => candidate.id === id);
+  verifyFixtureUsers(store, ['demo-user', 'user-demo', 'service']);
   const customer = user('demo-user');
   const admin = user('admin');
   const service = user('service');
+  const afterSales = user('afterSales');
   const createOrder = (buyer = customer) => store.createOrder(buyer, {
     context: 'personal', productId: store.personal(buyer).products.find(product => product.game === '三角洲行动').id,
     boss: buyer.name, hours: 1, pay: '在线支付', requirement: '售后会话回归测试',
@@ -16,11 +19,11 @@ function fixture(t) {
   const contact = order => store.conversationCreate(customer, { context: 'personal', type: 'support', ...(order ? { orderId: order.id } : {}) });
   const chat = id => store.read().conversations.find(candidate => candidate.id === id);
   const notifications = id => store.read().notifications.filter(item => item.kind === 'conversation' && item.entityId === id);
-  return { store, user, customer, admin, service, createOrder, contact, chat, notifications };
+  return { store, user, customer, admin, service, afterSales, createOrder, contact, chat, notifications };
 }
 
-test('订单售后关联本人订单并通知在线客服，同一订单重复点击只建立一次会话', t => {
-  const { store, customer, service, createOrder, contact, chat, notifications } = fixture(t);
+test('订单售后关联本人订单并通知售后，同一订单重复点击只建立一次会话', t => {
+  const { store, customer, afterSales, service, createOrder, contact, chat, notifications } = fixture(t);
   const order = createOrder();
   const opened = contact(order);
   assert.equal(opened.orderId, order.id);
@@ -30,13 +33,15 @@ test('订单售后关联本人订单并通知在线客服，同一订单重复�
   assert.equal(opened.messages.length, 1);
   assert.match(opened.messages[0].text, new RegExp(order.id));
   const firstNotifications = notifications(opened.id);
-  assert.ok(firstNotifications.some(item => item.recipientId === service.id && item.mode === 'management' && item.orderId === order.id));
+  assert.ok(firstNotifications.some(item => item.recipientId === afterSales.id && item.mode === 'management' && item.orderId === order.id));
+  assert.equal(firstNotifications.some(item => item.recipientId === service.id), false);
   for (let i = 0; i < 3; i++) assert.equal(contact(order).id, opened.id);
   assert.equal(chat(opened.id).messages.length, 1);
   assert.equal(chat(opened.id).staffUnread, 1);
   assert.equal(notifications(opened.id).length, firstNotifications.length);
   assert.equal(store.personal(customer).conversations.find(item => item.id === opened.id).orderId, order.id);
-  assert.equal(store.workspace(service).conversations.find(item => item.id === opened.id).peer.customerId, customer.customerId);
+  assert.equal(store.workspace(afterSales).conversations.find(item => item.id === opened.id).peer.customerId, customer.customerId);
+  assert.equal(store.workspace(service).conversations.some(item => item.id === opened.id), false);
 });
 
 test('非订单售后、每笔订单售后和陪玩咨询分别建立会话', t => {
@@ -53,12 +58,12 @@ test('非订单售后、每笔订单售后和陪玩咨询分别建立会话', t 
   assert.equal(contact().messages.length, 1);
 });
 
-test('关闭售后后再次联系重开原会话，重置响应期限且只通知客服一次', t => {
-  const { store, customer, service, createOrder, contact, chat, notifications } = fixture(t);
+test('关闭售后后再次联系重开原会话，重置响应期限且只通知售后一次', t => {
+  const { store, customer, afterSales, createOrder, contact, chat, notifications } = fixture(t);
   const order = createOrder();
   const opened = contact(order);
-  store.conversationMessage(service, opened.id, { message: '已核实订单情况' });
-  store.conversationAction(service, opened.id, { state: '已结束', note: '仅供内部使用的核验备注' });
+  store.conversationMessage(afterSales, opened.id, { message: '已核实订单情况' });
+  store.conversationAction(afterSales, opened.id, { state: '已结束', note: '仅供内部使用的核验备注' });
   const before = notifications(opened.id).length;
   const reopened = contact(order);
   assert.equal(reopened.id, opened.id);
@@ -68,7 +73,7 @@ test('关闭售后后再次联系重开原会话，重置响应期限且只通�
   assert.ok(Date.parse(chat(opened.id).slaDueAt) > Date.now());
   assert.equal(reopened.notes, undefined);
   assert.ok(notifications(opened.id).length > before);
-  assert.ok(notifications(opened.id).some(item => item.recipientId === service.id && item.mode === 'management'));
+  assert.ok(notifications(opened.id).some(item => item.recipientId === afterSales.id && item.mode === 'management'));
   const reopenedNotificationCount = notifications(opened.id).length;
   contact(order);
   assert.equal(chat(opened.id).messages.length, 3);
@@ -106,17 +111,20 @@ test('不同用户售后隔离，工作人员从个人入口仅能选择自己�
   assert.equal(store.personal(service).conversations.some(chat => chat.id === personalSupport.id), true);
   assert.equal(store.personal(customer).conversations.some(chat => chat.id === personalSupport.id), false);
   const serviceNotifications = store.notifications(service).items;
-  assert.ok(serviceNotifications.some(item => item.entityId === personalSupport.id && item.mode === 'management'));
+  assert.equal(serviceNotifications.some(item => item.entityId === personalSupport.id && item.mode === 'management'), false);
+  store.conversationMessage(user('afterSales'), personalSupport.id, { message: '已收到你的个人售后问题' });
+  assert.ok(store.notifications(service).items.some(item => item.entityId === personalSupport.id && item.mode === 'personal'));
 });
 
-test('原俱乐部客服咨询兼容新售后入口，历史订单会话可以继续处理', t => {
+test('历史客服咨询与新售后入口分离，历史订单售后可以继续处理', t => {
   const { store, customer, admin, createOrder, contact } = fixture(t);
   const order = createOrder();
   store.transaction(admin, 'account:manage', '准备历史客服会话', data => {
     data.conversations.unshift({ id: 'legacy-general-support', customerId: customer.customerId, userId: customer.id, escortId: 'showcase-old-support', escortName: '俱乐部客服', state: '处理中', messages: [{ text: '原咨询内容', author: customer.name }], notes: [] });
     data.conversations.unshift({ id: 'legacy-order-support', customerId: customer.customerId, orderId: order.id, state: '已结束', messages: [{ text: '原订单咨询', author: customer.name }], notes: ['内部信息'] });
   });
-  assert.equal(contact().id, 'legacy-general-support');
+  assert.notEqual(contact().id, 'legacy-general-support');
+  assert.equal(store.conversationCreate(customer, { escortName: '俱乐部客服' }).id, 'legacy-general-support');
   assert.equal(store.conversationCreate(customer, { escortName: '俱乐部客服', message: '重复点击' }).messages.length, 1);
   const reopened = contact(order);
   assert.equal(reopened.id, 'legacy-order-support');

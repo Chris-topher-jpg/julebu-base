@@ -1,12 +1,13 @@
 import { meetsLevel, levelOf } from './membership.mjs';
 import { catalogNames } from './game-catalog.mjs';
+import { isRealNameVerified } from './real-name.mjs';
 
 // Older self-service orders also require the buyer's final choice.
 export const buyerSelectionRequired = order => order.selectionRequired ?? order.pay === '在线支付';
 export const recruitmentOpen = order => order.status === '待接单' && !order.participants.length;
 
 export function matchesOrder(data, order, user) {
-  return Boolean(user?.active && user.role === 'escort' && !user.escortFrozen
+  return Boolean(user?.active && user.role === 'escort' && !user.escortFrozen && isRealNameVerified(user)
     && !(order.excludedEscortIds || []).includes(user.id)
     && (!order.preferredEscortId || order.preferredEscortId === user.id)
     && user.games?.includes(order.game) && meetsLevel(data, user, order)

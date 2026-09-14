@@ -5,11 +5,12 @@ const gamesOf = workspace => workspace.catalogGames || workspace.games || [];
 const availableProducts = workspace => (workspace.products || []).filter(product => product.state === '启用' && gamesOf(workspace).some(game => game.name === product.game && game.state === '上架'));
 const escortCountOf = product => Number(product?.escortCount) === 2 || product?.name === '2陪1' ? 2 : 1;
 
-export function openOrderPicker({ workspace, productId, api, onSuccess, onClose }) {
+export function openOrderPicker({ workspace, productId, preferredEscort, api, onSuccess, onClose }) {
   document.querySelector('#actionDialog')?.remove();
   let catalog = workspace;
-  let products = availableProducts(catalog);
-  const levels = () => [...(catalog.levels || [])].sort((a, b) => b.rank - a.rank);
+  const matchingProducts = () => availableProducts(catalog).filter(item => !preferredEscort || item.game === preferredEscort.game && escortCountOf(item) === 1 && Number(gamesOf(catalog).find(game => game.name === item.game)?.min || 1) === 1);
+  let products = matchingProducts();
+  const levels = () => [...(catalog.levels || [])].filter(item => !preferredEscort || item.id === preferredEscort.levelId).sort((a, b) => b.rank - a.rank);
   const unitPrice = (chosenProduct, chosenLevel) => {
     const gamePrice = catalog.gameLevelConfigs?.[chosenProduct?.game]?.levels?.find(item => item.id === chosenLevel?.id)?.priceCents;
     const base = Number.isSafeInteger(gamePrice) ? gamePrice : chosenProduct?.game === '三角洲行动' ? chosenLevel?.priceCents : chosenProduct?.priceCents;
@@ -50,6 +51,10 @@ export function openOrderPicker({ workspace, productId, api, onSuccess, onClose 
   const form = modal.querySelector('form');
   const $ = selector => modal.querySelector(selector);
   const error = message => { $('.so-error').textContent = message; };
+  if (preferredEscort) {
+    $('#selfOrderTitle').textContent = `指定陪玩 · ${preferredEscort.name}`;
+    $('.so-section-heading').insertAdjacentHTML('afterend', `<p class="so-notice">指定 ${e(preferredEscort.name)}（${e(preferredEscort.number)}） · ${e(preferredEscort.game)} · ${e(preferredEscort.level)}。此单仅邀请该成员；请先沟通服务时间，对方确认后开始服务。</p>`);
+  }
   const total = () => Math.round(unitPrice(product(), level()) * Number(form.elements.hours.value));
   const close = () => { if (!pending) modal.close(); };
   modal.addEventListener('close', () => { modal.remove(); onClose?.(); });
@@ -79,7 +84,8 @@ export function openOrderPicker({ workspace, productId, api, onSuccess, onClose 
     });
   }
   function refreshCatalog(fresh) {
-    catalog = fresh; products = availableProducts(catalog);
+    catalog = fresh; products = matchingProducts();
+    if (preferredEscort && !(catalog.members || []).some(member => member.id === preferredEscort.escortId && member.active !== false && !member.escortFrozen && (member.game === preferredEscort.game || member.games?.includes(preferredEscort.game)) && member.levelId === preferredEscort.levelId)) throw new Error('该陪玩当前无法接受此服务或等级已变更，请关闭后重新选择。');
     let invalid = false;
     if (!product() || product().game !== selection.game) {
       const next = products.find(item => item.game === selection.game) || products[0];
@@ -110,7 +116,7 @@ export function openOrderPicker({ workspace, productId, api, onSuccess, onClose 
     if (pending) form.querySelectorAll('button, input, select, textarea').forEach(control => { control.disabled = true; });
   }
   function confirmation() {
-    const fields = [['游戏', selection.game], ['订单类型', '陪玩单'], ['陪玩等级', level()?.name], ['服务类型', product()?.name], ['下单时长', `${form.elements.hours.value} 小时`], ['服务单价', `${money(unitPrice(product(), level()))} / 小时`], ['游戏区服', form.elements.region.value], ['陪玩安排', '客服邀请 / 打手报名，由我最终选择'], ['备注', form.elements.requirement.value.trim() || '无特殊要求']];
+    const fields = [['游戏', selection.game], ['订单类型', preferredEscort ? '指定陪玩' : '陪玩单'], ...(preferredEscort ? [['指定成员', `${preferredEscort.name}（${preferredEscort.number}）`]] : []), ['陪玩等级', level()?.name], ['服务类型', product()?.name], ['下单时长', `${form.elements.hours.value} 小时`], ['服务单价', `${money(unitPrice(product(), level()))} / 小时`], ['游戏区服', form.elements.region.value], ['陪玩安排', preferredEscort ? '仅邀请指定成员，由我最终确认；服务时间需与对方沟通' : '客服邀请 / 打手报名，由我最终选择'], ['备注', form.elements.requirement.value.trim() || '无特殊要求']];
     $('.so-confirm-card').innerHTML = `<dl>${fields.map(([label, value]) => `<div><dt>${e(label)}</dt><dd>${e(value)}</dd></div>`).join('')}</dl>`;
   }
   function showStep(value) {
@@ -138,7 +144,7 @@ export function openOrderPicker({ workspace, productId, api, onSuccess, onClose 
     if (!Number.isSafeInteger(total()) || total() <= 0) { error('当前服务暂未定价，请重新选择。'); return; }
     if (step === 1) { showStep(2); return; }
     // Keep the legacy quick-order payload defaults while the optional controls are hidden.
-    const submitted = { ...Object.fromEntries(new FormData(form)), productId: selection.productId, levelId: selection.levelId, region: form.elements.region.value.trim(), requirement: form.elements.requirement.value.trim() || '按约定完成陪玩服务', orderMode: 'quick', preferredEscortId: '', appointmentAt: '', voice: '游戏内语音' };
+    const submitted = { ...Object.fromEntries(new FormData(form)), productId: selection.productId, levelId: selection.levelId, region: form.elements.region.value.trim(), requirement: form.elements.requirement.value.trim() || '按约定完成陪玩服务', orderMode: preferredEscort ? 'designated' : 'quick', preferredEscortId: preferredEscort?.escortId || '', appointmentAt: '', voice: '游戏内语音' };
     const reviewedPrice = unitPrice(product(), level());
     const purchaseSignature = JSON.stringify({ ...submitted, expectedUnitPriceCents: reviewedPrice, boss: catalog.user.name });
     const disabledBefore = new Map([...form.querySelectorAll('button, input, select, textarea')].map(control => [control, control.disabled]));

@@ -2,9 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { createClubServer } from '../server.mjs';
+import { verifyFixtureUsers } from './real-name-fixture.mjs';
 
 test('个人充值申请按本人归属、审核幂等入账并隔离通知同步', async t => {
   const instance = createClubServer({ database: ':memory:' });
+  verifyFixtureUsers(instance.store, ['demo-user']);
   instance.server.listen(0, '127.0.0.1');
   await once(instance.server, 'listening');
   const base = `http://127.0.0.1:${instance.server.address().port}`;

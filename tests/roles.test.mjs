@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { ClubStore } from '../server/club.mjs';
 import { createClubServer } from '../server.mjs';
 import { addFixtureGames } from './catalog-fixture.mjs';
+import { verifyFixtureUsers, userById, createVerifiedFixtureEscort } from './real-name-fixture.mjs';
 
 test('身份切换同步三份名单、撤销旧会话，并在重启后保留', t => {
   const folder = mkdtempSync(join(tmpdir(), 'club-staff-test-'));
@@ -84,7 +85,7 @@ test('负责人陪玩押金使用实际账户金额，与陪玩本人钱包一�
   const store = new ClubStore(':memory:'); t.after(() => store.close());
   addFixtureGames(store, ['王者荣耀']);
   const admin = store.read().users.find(u => u.id === 'admin');
-  const added = store.accountAction(admin, null, { username:'deposit_zero', password:'testing123', name:'押金测试', role:'escort', active:true, games:['王者荣耀'] });
+  const added = createVerifiedFixtureEscort(store, admin, { username:'deposit_zero', password:'testing123', name:'押金测试', role:'escort', active:true, games:['王者荣耀'] });
   store.transaction(admin, 'account:manage', '测试押金读取', data => { data.users.find(u => u.id === 'escort').depositCents = 123456; });
   const w = store.workspace(admin);
   assert.equal(w.members.find(u => u.id === 'escort').depositCents, 123456);
@@ -100,14 +101,17 @@ test('抽佣配置按游戏技能生效，等级只负责接单门槛且已派�
   const store = new ClubStore(':memory:'); t.after(() => store.close());
   addFixtureGames(store, ['王者荣耀']);
   const admin = store.read().users.find(u => u.id === 'admin');
+  verifyFixtureUsers(store, ['demo-user', 'escort']);
   const escort = store.read().users.find(u => u.id === 'escort');
   const game = store.read().games.find(g => g.name === escort.games[0]);
   store.configureCommissions(admin, { games: store.read().catalogGames.map(g => ({ name: g.name, commissionBps: g.name === game.name ? 6100 : 7200 })) });
   const first = store.workspace(escort);
   assert.equal(first.user.commissionByGame[game.name], 6100);
-  const order = store.createOrder(admin, { boss:'抽佣测试老板', productId:'product-1', hours:1, requirement:'测试游戏抽佣', pay:'线下已收款', levelId:'gold' });
+  const order = store.createOrder(admin, { boss:userById(store,'demo-user').name, customerId:userById(store,'demo-user').customerId, productId:'product-1', hours:1, requirement:'测试游戏抽佣', pay:'线下已收款', levelId:'gold' });
   store.setOnline(escort, { online: true });
-  const accepted = store.orderAction(escort, order.id, 'accept', { version: order.version });
+  const applied = store.orderAction(escort, order.id, 'apply', { version: order.version });
+  const selected = store.orderAction(userById(store,'demo-user'), order.id, 'selectApplicant', { version: applied.version, memberIds: [escort.id] });
+  const accepted = store.orderAction(escort, order.id, 'accept', { version: selected.version });
   assert.equal(accepted.participants[0].baseShareBps, 6100);
   store.configureCommissions(admin, { games: store.read().catalogGames.map(g => ({ name: g.name, commissionBps: g.name === game.name ? 6200 : 7200 })) });
   assert.equal(store.read().orders.find(o => o.id === order.id).participants[0].shareBps, 6100);
@@ -142,6 +146,7 @@ test('用户按 ID 入会不创建登录账号，并在用户管理同步职责'
     let user = store.workspace(admin).users.find(u => u.customerNo === 'U100001');
     assert.equal(user.joinedClub, true);
     assert.equal(user.memberRoleLabel, '普通成员');
+    verifyFixtureUsers(store, [added.id]);
     const member = store.read().users.find(u => u.id === added.id);
     store.membershipAction(admin, added.id, 'escort', { memberVersion: member.memberVersion, games: ['王者荣耀'], levelId: 'gold', depositCents: 100000 });
     user = store.workspace(admin).users.find(u => u.customerNo === 'U100001');
@@ -173,6 +178,7 @@ test('提现审核通过后必须登记打款流水号，统计导出返回 CSV'
   const base = `http://127.0.0.1:${server.address().port}`;
   const login = await fetch(base + '/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base }, body: JSON.stringify({ username: 'admin', password: '123456' }) });
   const cookie = login.headers.get('set-cookie').split(';')[0];
+  verifyFixtureUsers(store, ['escort']);
   const escort = store.read().users.find(u => u.id === 'escort');
   store.transaction(store.read().users.find(u => u.id === 'admin'), 'account:manage', '准备提现导出测试', data => { data.users.find(u => u.id === escort.id).balanceCents = 10000; });
   const request = await store.withdrawal(escort, { amount: '10' });

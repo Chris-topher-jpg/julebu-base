@@ -32,9 +32,26 @@ export function icon(name, size = 18) {
 }
 
 
+export function authFormMarkup() {
+  return `<button class="auth-close" type="button" data-action="closeLogin" aria-label="关闭登录弹窗">×</button>
+  <div class="auth-dialog-head"><div class="login-logo">${icon('game', 21)}</div><strong>星河游戏俱乐部</strong></div>
+  <h2 id="authTitle">欢迎回来</h2><p class="login-subtitle" id="authDescription">登录后下单，查看订单和售后</p>
+  <label id="authUsernameField">手机号 / 账号<input id="loginUsername" autocomplete="username" placeholder="请输入手机号或账号" required minlength="3" maxlength="30"></label>
+  <label id="authNameField" hidden>昵称<input id="registerName" autocomplete="nickname" placeholder="怎么称呼你" maxlength="30" disabled></label>
+  <label id="passwordField">密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入密码" required maxlength="128"></label>
+  <label id="authPhoneField" hidden>手机号<input id="loginPhone" type="tel" inputmode="tel" autocomplete="tel" placeholder="请输入已绑定的手机号" pattern="1[3-9][0-9]{9}" maxlength="11" disabled></label>
+  <div id="codeField" hidden><label for="loginCode">手机验证码</label><div class="auth-code-row"><input id="loginCode" inputmode="numeric" autocomplete="one-time-code" placeholder="请输入 6 位验证码" pattern="[0-9]{6}" maxlength="6" disabled><button id="authSendCode" class="auth-send-code" type="button" disabled>获取验证码</button></div></div>
+  <p class="auth-demo-code" id="authDemoCode" role="status" hidden></p>
+  <button class="login-submit" type="submit" id="authSubmit">登录</button>
+  <button class="auth-switch auth-login-method" type="button" id="authPhoneToggle">手机验证码登录</button>
+  <p class="login-error" id="loginError" role="alert"></p>
+  <button class="auth-switch" type="button" id="authModeToggle">还没有账号？立即注册</button>
+  <p class="auth-tip" id="authPhoneTip" hidden>仅支持已绑定手机号的账号；新用户请先注册账号。</p>`;
+}
+
 export function loginMarkup(workspace = {}) {
   const games = workspace?.catalogGames || workspace?.games || [];
   return `<div class="public-home"><header class="public-nav"><div class="public-brand"><span class="brand-mark">C</span><strong>星河游戏俱乐部</strong><small>陪玩服务平台</small></div><nav><a href="#/public/overview">首页</a><a href="#/public/companions">大神陪玩</a><a href="#/public/guarantees">服务保障</a></nav><div class="public-nav-actions"><button class="public-header-message" type="button" data-action="headerMessages" aria-label="消息与售后">${icon('message', 20)}<span class="public-header-dot" hidden></span></button><button class="public-account-trigger" type="button" data-action="headerAccount" aria-expanded="false"><span class="public-account-avatar">登</span><span class="public-account-label">个人</span>${icon('chevron', 14)}</button><a class="register-link" href="#login" data-action="openLogin">注册</a><a class="nav-login-link" href="#login" data-action="openLogin">登录</a><div class="public-account-menu" hidden></div></div></header>
   <main><section class="public-hero" id="games"><div class="hero-banner"><div class="banner-track"><article><span class="banner-kicker">星河游戏俱乐部</span><strong>找个靠谱的陪玩<br><em>一起赢下每一局</em></strong><p>专业陪玩 · 实时接单 · 安心交易</p></article><article><span class="banner-kicker">轻松组队</span><strong>选好游戏<br><em>开启专属陪玩</em></strong><p>查看服务价格，按需选择陪玩时长</p></article><article><span class="banner-kicker">热门推荐</span><strong>${escapeHtml(games[0]?.name || '游戏陪玩')}<br><em>专属陪玩</em></strong><p>在线打手随时响应，快速匹配</p></article></div><div class="banner-dots"><i class="active"></i><i></i><i></i></div></div><aside class="hero-login" id="login"><div class="login-card-head"><div class="login-logo">${icon('game', 21)}</div><div><strong>星河游戏俱乐部</strong><small>登录后查看个人买卖数据</small></div></div><h2>登录后解锁完整服务</h2><p class="login-subtitle">登录后下单，查看订单和售后</p><button class="login-submit hero-login-trigger" type="button" data-action="openLogin">登录 / 注册 ${icon('arrow', 16)}</button></aside></section><section class="public-content" id="members"></section></main>
-  <footer class="public-footer" id="rules"><span>© 星河游戏俱乐部</span><span>服务保障 · 交易须知 · 联系客服</span></footer><dialog class="auth-dialog" id="authDialog"><form id="loginForm" method="dialog"><button class="auth-close" type="button" data-action="closeLogin" aria-label="关闭登录弹窗">×</button><div class="auth-dialog-head"><div class="login-logo">${icon('game', 21)}</div><div><strong>登录 / 注册</strong><small>手机号登录，快速开始陪玩</small></div></div><h2 id="authTitle">手机号登录</h2><p class="login-subtitle">登录后下单，查看订单和售后</p><label>手机号<input id="loginUsername" autocomplete="tel" inputmode="tel" placeholder="请输入手机号" required></label><label id="passwordField">密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入密码" required></label><label id="codeField" hidden>手机验证码<input id="loginCode" inputmode="numeric" placeholder="请输入 6 位验证码" maxlength="6"></label><button class="login-submit" type="submit" id="authSubmit">登录 / 注册 ${icon('arrow', 16)}</button><p class="login-error" id="loginError"></p><button class="auth-switch" type="button" id="authModeToggle">验证码登录</button><p class="auth-tip">未注册手机号登录后将自动创建账号</p></form></dialog></div>`;
+  <footer class="public-footer" id="rules"><span>© 星河游戏俱乐部</span><span>服务保障 · 交易须知 · 联系客服</span></footer><dialog class="auth-dialog" id="authDialog"><form id="loginForm" method="dialog">${authFormMarkup()}</form></dialog></div>`;
 }

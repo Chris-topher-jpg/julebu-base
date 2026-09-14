@@ -6,12 +6,14 @@ import { join } from 'node:path';
 import { once } from 'node:events';
 import { createClubServer } from '../server.mjs';
 import { addFixtureGames } from './catalog-fixture.mjs';
+import { verifyFixtureUsers, userById } from './real-name-fixture.mjs';
 
 test('角色权限、数据归属、订单状态、金额与持久化', async t => {
   const folder = mkdtempSync(join(tmpdir(), 'club-role-test-'));
   const database = join(folder, 'club.sqlite');
   let instance = createClubServer({ database });
   addFixtureGames(instance.store, ['王者荣耀', '无畏契约', '和平精英', '英雄联盟']);
+  verifyFixtureUsers(instance.store, ['demo-user', 'escort']);
   instance.server.listen(0, '127.0.0.1'); await once(instance.server, 'listening');
   let base = `http://127.0.0.1:${instance.server.address().port}`;
   const clients = {};
@@ -35,17 +37,19 @@ test('角色权限、数据归属、订单状态、金额与持久化', async t 
     for (const who of ['admin','service','escort']) { const result = await login(who); assert.match(result.headers.get('set-cookie'), /HttpOnly; SameSite=Strict/); }
     assert.equal((await call('escort','/api/accounts')).status,403);
     assert.equal((await call('service','/api/topups')).status,403);
-    assert.equal((await call('escort','/api/conversations')).status,403);
+    const companionChats = await call('escort','/api/conversations');
+    assert.equal(companionChats.status,200);
+    assert.ok(companionChats.body.every(chat=>chat.escortId==='escort'));
     assert.equal((await call('service','/api/accounts', {role:'admin'})).status,403);
     assert.equal((await call('escort','/api/online',{online:true},{Origin:'http://evil.example'})).status,403);
     for (const path of ['/server/seed.mjs','/server/club.mjs','/data/club.sqlite','/server.mjs']) assert.equal((await call('anon',path)).status,404);
   });
   await t.test('打手数据只包含本人订单与收益，客服不返回财务数据', async () => {
     const w = await workspace('escort');
-    assert.deepEqual(w.role.pages,['overview','availableOrders','myOrders','myEarnings']);
+    assert.deepEqual(w.role.pages,['overview','availableOrders','myOrders','myEarnings','conversations']);
     assert.ok(w.orders.every(o => o.participants.some(p => p.userId === 'escort')));
     assert.ok(w.availableOrders.every(o => w.user.games.includes(o.game)));
-    assert.equal(w.accounts,undefined); assert.equal(w.topups,undefined); assert.equal(w.conversations,undefined);
+    assert.equal(w.accounts,undefined); assert.equal(w.topups,undefined); assert.ok(w.conversations.every(chat=>chat.escortId==='escort'));
     assert.equal(w.orders[0].participants.find(p => p.userId !== 'escort').shareBps,undefined);
     const service = await workspace('service'); assert.equal(service.ledger,undefined); assert.equal(service.withdrawals,undefined);
     assert.equal(JSON.stringify(service).includes('passwordHash'),false);
@@ -75,18 +79,23 @@ test('角色权限、数据归属、订单状态、金额与持久化', async t 
   });
   let createdId;
   await t.test('新建订单由服务端定价、余额校验、维护中商品拦截', async () => {
-    const body = {boss:'测试老板', productId:'product-1', hours:2, requirement:'游戏开麦陪玩测试', pay:'线下已收款', amountCents:1};
+    const body = {boss:userById(instance.store,'demo-user').name, customerId:userById(instance.store,'demo-user').customerId, productId:'product-1', hours:2, requirement:'游戏开麦陪玩测试', pay:'线下已收款', amountCents:1};
     assert.equal((await call('escort','/api/orders',body)).status,403);
     assert.equal((await call('service','/api/orders',{...body,hours:-1})).status,400);
     assert.equal((await call('service','/api/orders',{...body,productId:'product-4'})).status,400);
+    const buyer=userById(instance.store,'demo-user');
+    const balance=instance.store.personal(buyer).wallet.balanceCents;
+    instance.store.transaction({id:'admin'},'account:manage','准备余额不足的客户',data=>{data.customers.find(item=>item.id===buyer.customerId).balanceCents=0;});
     assert.equal((await call('service','/api/orders',{...body,pay:'余额支付'})).status,400);
+    instance.store.transaction({id:'admin'},'account:manage','恢复客户测试余额',data=>{data.customers.find(item=>item.id===buyer.customerId).balanceCents=balance;});
     const result = await call('service','/api/orders',body); assert.equal(result.status,201); assert.equal(result.body.amountCents,13600); createdId=result.body.id;
     const pending = await order('service',createdId);
     const results = await Promise.all([call('escort',`/api/orders/${createdId}/accept`,{version:pending.version}),call('escort',`/api/orders/${createdId}/accept`,{version:pending.version})]);
     assert.deepEqual(results.map(r=>r.status).sort(),[200,409]);
   });
   await t.test('充值只入账一次、提现不能超额或重复申请、驳回返还', async () => {
-    const topupId = 'CZ20240618012';
+    const buyer=userById(instance.store,'demo-user');
+    const topupId = instance.store.createTopup(buyer,{amountCents:200000,requestId:'permissions-topup-01'}).id;
     assert.equal((await call('service',`/api/topups/${topupId}`,{action:'approve',reason:'已核验到账'})).status,403);
     assert.equal((await call('admin',`/api/topups/${topupId}`,{action:'approve',reason:'已核验到账',receiptReference:'QA-TOPUP-PERMISSIONS-001'})).status,200);
     assert.equal((await call('admin',`/api/topups/${topupId}`,{action:'approve',reason:'已核验到账'})).status,409);
@@ -103,6 +112,7 @@ test('角色权限、数据归属、订单状态、金额与持久化', async t 
   await t.test('创建成员、职责调整使旧会话失效、禁止管理员停用自己', async () => {
     const created = await call('admin','/api/accounts',{username:'new_staff',password:'testpass123',name:'测试客服',role:'service',active:true,games:[],shareBps:0});
     assert.equal(created.status,200); await login('new','new_staff','testpass123');
+    verifyFixtureUsers(instance.store, [created.body.id]);
     const update = await call('admin',`/api/accounts/${created.body.id}`,{name:'测试打手',role:'escort',active:true,games:['王者荣耀'],shareBps:6500}); assert.equal(update.status,200);
     assert.equal((await call('new','/api/workspace')).status,401);
     await login('new','new_staff','testpass123'); assert.equal((await workspace('new')).user.role,'escort');

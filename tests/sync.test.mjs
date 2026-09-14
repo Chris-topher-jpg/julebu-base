@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { ClubStore } from '../server/club.mjs';
 import { createClubServer } from '../server.mjs';
 import { addFixtureGames } from './catalog-fixture.mjs';
+import { verifyFixtureUsers, createVerifiedFixtureEscort } from './real-name-fixture.mjs';
 
 const purchase = buyer => ({
   context: 'personal', boss: buyer.name, productId: 'product-1', hours: 1,
@@ -18,6 +19,7 @@ function fixture(t) {
   const store = new ClubStore(':memory:');
   t.after(() => store.close());
   addFixtureGames(store, ['王者荣耀']);
+  verifyFixtureUsers(store, ['demo-user', 'demo-escort', 'demo-service']);
   const user = id => store.read().users.find(item => item.id === id);
   const create = (buyer = user('demo-user')) => store.createOrder(buyer, purchase(buyer));
   return { store, user, create };
@@ -31,6 +33,7 @@ async function httpFixture(t, persistent = false) {
   const start = async () => {
     instance = createClubServer({ database });
     addFixtureGames(instance.store, ['王者荣耀']);
+    verifyFixtureUsers(instance.store, ['demo-user', 'demo-escort', 'escort']);
     instance.server.listen(0, '127.0.0.1');
     await once(instance.server, 'listening');
     base = `http://127.0.0.1:${instance.server.address().port}`;
@@ -228,7 +231,7 @@ test('同一浏览器切换账号后，即使数据版本未变化也返回当�
 test('转单后旧打手仅保留移出提示，新打手与买家收到新进度且旧派单备注不外泄', t => {
   const { store, user, create } = fixture(t);
   const service = user('demo-service'), previousEscort = user('demo-escort'), buyer = user('demo-user');
-  const replacement = store.accountAction(user('admin'), null, { username: 'transfer_worker', password: 'testing123', name: '接替打手', role: 'escort', active: true, games: ['王者荣耀'], levelId: 'gold' });
+  const replacement = createVerifiedFixtureEscort(store, user('admin'), { username: 'transfer_worker', password: 'testing123', name: '接替打手', role: 'escort', active: true, games: ['王者荣耀'], levelId: 'gold' });
   store.setOnline(replacement, { online: true });
   let order = create();
   const update = (actor, action, input = {}) => { order = store.orderAction(actor, order.id, action, { version: order.version, ...input }); };
@@ -267,7 +270,7 @@ test('转单后旧打手仅保留移出提示，新打手与买家收到新进�
 test('打手主动退回订单后，重新派单及服务动态不再发送给原打手', t => {
   const { store, user, create } = fixture(t);
   const service = user('demo-service'), previousEscort = user('demo-escort');
-  const replacement = store.accountAction(user('admin'), null, { username: 'reassigned_worker', password: 'testing123', name: '重新派单打手', role: 'escort', active: true, games: ['王者荣耀'], levelId: 'gold' });
+  const replacement = createVerifiedFixtureEscort(store, user('admin'), { username: 'reassigned_worker', password: 'testing123', name: '重新派单打手', role: 'escort', active: true, games: ['王者荣耀'], levelId: 'gold' });
   store.setOnline(replacement, { online: true });
   let order = create();
   const update = (actor, action, input = {}) => { order = store.orderAction(actor, order.id, action, { version: order.version, ...input }); };
@@ -393,6 +396,7 @@ test('通知已读只影响当前账号，跨会话同步并在服务重启后�
 test('会话消息和财务处理同步给对应人员，内部备注不进入个人工作区', t => {
   const { store, user } = fixture(t);
   const customer = user('demo-user'), service = user('demo-service');
+  verifyFixtureUsers(store, ['escort']);
   const chat = store.conversationCreate(customer, { context: 'personal', escortName: '俱乐部客服', message: '想确认服务安排' });
   const staff = store.sync(service, 0, 'management');
   assert.ok(staff.notifications.items.some(item => item.kind === 'conversation' && item.entityId === chat.id));

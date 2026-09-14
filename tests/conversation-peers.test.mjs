@@ -20,7 +20,7 @@ test('客服与售后会话使用稳定身份资料，只有明确关联订单�
     ]) data.conversations.push({ boss: '林先生', state: '处理中', notes: [], messages: [], ...details });
   });
 
-  for (const id of ['admin', 'service', 'afterSales']) {
+  for (const id of ['admin', 'service']) {
     const workspace = store.workspace({ id });
     const chat = chatId => workspace.conversations.find(item => item.id === chatId);
     const fresh = chat(consultation.id);
@@ -37,20 +37,28 @@ test('客服与售后会话使用稳定身份资料，只有明确关联订单�
       customerId: '', userId: '', customerNo: '', name: '林先生', username: '', phone: '',
     });
     assert.equal(chat('chat-legacy-name').orderId, undefined);
-    assert.equal(chat('chat-order-only').orderId, linkedOrder.id);
-    assert.equal(chat('chat-order-only').peer.customerId, 'customer-3');
-    assert.equal(chat('chat-order-only').peer.phone, '136****0003');
+    if (id === 'admin') {
+      assert.equal(chat('chat-order-only').orderId, linkedOrder.id);
+      assert.equal(chat('chat-order-only').peer.customerId, 'customer-3');
+      assert.equal(chat('chat-order-only').peer.phone, '136****0003');
+    } else assert.equal(chat('chat-order-only'), undefined);
     for (const item of workspace.conversations) {
       assert.deepEqual(Object.keys(item.peer).sort(), ['customerId', 'customerNo', 'name', 'phone', 'userId', 'username']);
     }
-    if (id === 'afterSales') {
-      for (const key of ['customers', 'accounts', 'wallet', 'ledger']) assert.equal(workspace[key], undefined);
-    }
   }
+
+  const support = store.conversationCreate(namesake, { type: 'support' });
+  const workspace = store.workspace({ id: 'afterSales' });
+  assert.equal(workspace.conversations.some(item => item.id === consultation.id), false);
+  const linked = workspace.conversations.find(item => item.id === 'chat-order-only');
+  assert.equal(linked.orderId, linkedOrder.id);
+  assert.equal(linked.peer.customerId, 'customer-3');
+  assert.equal(linked.peer.phone, '136****0003');
+  for (const key of ['customers', 'accounts', 'wallet', 'ledger']) assert.equal(workspace[key], undefined);
 
   const sent = store.conversationMessage({ id: 'service', role: 'service' }, consultation.id, { message: '你好，请问想了解哪项服务？' });
   assert.equal(sent.peer.customerId, namesake.customerId);
-  const followed = store.conversationAction({ id: 'afterSales' }, consultation.id, { note: '已解答咨询', state: '处理中' });
+  const followed = store.conversationAction({ id: 'afterSales' }, support.id, { note: '已解答售后问题', state: '处理中' });
   assert.deepEqual(followed.peer, sent.peer);
   assert.equal(store.conversationMessage(namesake, consultation.id, { message: '谢谢' }).peer, undefined);
   assert.equal(store.personal(namesake).conversations.find(item => item.id === consultation.id).peer, undefined);

@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { createClubServer } from '../server.mjs';
+import { verifyFixtureUsers } from './real-name-fixture.mjs';
 
 async function fixture(t) {
   const { server, store } = createClubServer({ database: ':memory:' });
@@ -38,6 +39,7 @@ async function fixture(t) {
 
 test('每种角色登录自动在线，可手动切换状态，退出后离线并同步个人状态', async t => {
   const { call, login, me, person, store } = await fixture(t);
+  verifyFixtureUsers(store, ['escort'], { onlineEscorts: false });
   assert.equal((await call('anonymous', '/online', { online: true })).status, 401);
   for (const username of ['user', 'member', 'admin', 'service', 'finance', 'examiner', 'afterSales', 'escort']) {
     await t.test(username, async () => {

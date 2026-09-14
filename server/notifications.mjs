@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { matchesOrder, recruitmentOpen } from './order-matching.mjs';
+import { conversationType, canManageConversation } from './conversations.mjs';
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const index = items => new Map((items || []).map(item => [item.id, item]));
@@ -65,8 +66,12 @@ export function recordNotifications(data, before, actor) {
     const addedMessages = (chat.messages || []).slice(previous?.messages?.length || 0);
     if (!addedMessages.length && (!previous || chat.state === previous.state)) continue;
     const details = { kind: 'conversation', entityId: chat.id, ...(chat.orderId ? { orderId: chat.orderId } : {}), title: addedMessages.length ? '收到新的会话消息' : '会话处理状态已更新', body: addedMessages.length ? '有新的消息待查看，请进入会话继续沟通。' : `会话当前状态：${chat.state}` };
-    if (actorMode === 'personal') staff(['admin', 'service', 'afterSales'], { ...details, page: 'conversations' });
-    else customer(chat.customerId, { ...details, page: 'memberAfterSales' });
+    if (actorMode === 'personal' || actor.role === 'escort') staff(['admin', conversationType(chat) === 'support' ? 'afterSales' : 'service'], { ...details, page: 'conversations' });
+    if (conversationType(chat) === 'consultation' && chat.escortId && actor.id !== chat.escortId) {
+      const escort = data.users.find(user => user.id === chat.escortId && user.active && user.role === 'escort');
+      if (escort) push(escort.id, { ...details, mode: 'management', page: 'conversations' });
+    }
+    if (actorMode !== 'personal') customer(chat.customerId, { ...details, page: 'memberAfterSales' });
   }
 
   const oldWithdrawals = index(before.withdrawals);
@@ -130,7 +135,7 @@ export function notificationFeed(data, user, roles) {
     if (item.kind === 'conversation') {
       const chat = data.conversations.find(chat => chat.id === item.entityId);
       if (!chat) return false;
-      return item.mode === 'personal' ? Boolean(user.customerId && chat.customerId === user.customerId) : ['admin', 'service', 'afterSales'].includes(user.role);
+      return item.mode === 'personal' ? Boolean(user.customerId && chat.customerId === user.customerId) : canManageConversation(user, chat);
     }
     if (item.kind === 'withdrawal') {
       const withdrawal = data.withdrawals.find(withdrawal => withdrawal.id === item.entityId);

@@ -3,11 +3,13 @@ import assert from 'node:assert/strict';
 import { ClubStore } from '../server/club.mjs';
 import { walletPayment } from '../server/flow.mjs';
 import { addFixtureGames } from './catalog-fixture.mjs';
+import { verifyFixtureUsers } from './real-name-fixture.mjs';
 
 function fixture(t) {
   const store = new ClubStore(':memory:');
   t.after(() => store.close());
   addFixtureGames(store, ['王者荣耀']);
+  verifyFixtureUsers(store, ['demo-user', 'demo-escort', 'user-demo']);
   const user = id => store.read().users.find(item => item.id === id);
   const admin = user('admin'), buyer = user('demo-user'), escort = user('demo-escort'), finance = user('finance'), afterSales = user('afterSales');
   const update = (actor, order, action, input = {}) => store.orderAction(actor, order.id, action, { version: store.read().orders.find(item => item.id === order.id).version, ...input });

@@ -20,7 +20,7 @@ export function verifyFixtureUser(store, user, options = {}) {
     idNumber: options.idNumber || defaultId,
   });
   const reviewed = store.reviewRealName(
-    { id: 'admin' },
+    { id: options.reviewerId || 'admin' },
     submitted.requestId,
     { action: 'approve', version: submitted.version, documentsChecked: true, reviewNote: options.reviewNote || '测试身份核验通过' },
   );
@@ -31,4 +31,19 @@ export function userById(store, id) {
   const user = store.read().users.find(item => item.id === id);
   if (!user) throw new Error(`Missing fixture user: ${id}`);
   return user;
+}
+
+// Each business fixture opts in the exact accounts whose flows need verification.
+export function verifyFixtureUsers(store, ids, { onlineEscorts = true } = {}) {
+  for (const id of ids) {
+    const user = userById(store, id);
+    if (user.realNameVerification?.status !== 'verified') verifyFixtureUser(store, user);
+    if (onlineEscorts && user.role === 'escort') store.setOnline(user, { online: true });
+  }
+}
+
+export function createVerifiedFixtureEscort(store, admin, input) {
+  const member = store.accountAction(admin, null, { ...input, role: 'member', games: [] });
+  verifyFixtureUser(store, member);
+  return store.accountAction(admin, member.id, { ...input, role: 'escort', memberVersion: userById(store, member.id).memberVersion });
 }

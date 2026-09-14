@@ -5,20 +5,23 @@ import { ClubStore } from '../server/club.mjs';
 import { createClubServer } from '../server.mjs';
 import { lockEarnings } from '../server/membership.mjs';
 import { addFixtureGames } from './catalog-fixture.mjs';
+import { verifyFixtureUser, verifyFixtureUsers, userById, createVerifiedFixtureEscort } from './real-name-fixture.mjs';
 
 function fixture(t) {
   const store=new ClubStore(':memory:');t.after(()=>store.close());
   addFixtureGames(store, ['王者荣耀', '英雄联盟', 'Apex']);
+  verifyFixtureUsers(store, ['demo-user']);
   const admin=store.read().users.find(u=>u.id==='admin');
-  const create=(role='member',suffix=role)=>store.accountAction(admin,null,{username:`test_${suffix}`,password:'testing123',name:`测试${suffix}`,role,active:true,games:role==='escort'?['王者荣耀']:[],levelId:'gold'});
+  const create=(role='member',suffix=role)=>{ const input={username:`test_${suffix}`,password:'testing123',name:`测试${suffix}`,role,active:true,games:role==='escort'?['王者荣耀']:[],levelId:'gold'}; return role==='escort'?createVerifiedFixtureEscort(store,admin,input):store.accountAction(admin,null,input); };
   const person=id=>store.read().users.find(u=>u.id===id);
   const change=(u,action,body)=>store.membershipAction(admin,u.id,action,{...body,memberVersion:person(u.id).memberVersion});
-  const order=(levelId='gold')=>store.createOrder(admin,{boss:'测试老板',productId:'product-1',hours:2,requirement:'开麦游戏服务',pay:'线下已收款',levelId});
-  return {store,admin,create,person,change,order};
+  const order=(levelId='gold')=>store.createOrder(admin,{boss:userById(store,'demo-user').name,customerId:userById(store,'demo-user').customerId,productId:'product-1',hours:2,requirement:'开麦游戏服务',pay:'线下已收款',levelId});
+  const accept=(member,order)=>{ const applied=store.orderAction(member,order.id,'apply',{version:order.version}); const selected=store.orderAction(person('demo-user'),order.id,'selectApplicant',{version:applied.version,memberIds:[member.id]}); return store.orderAction(member,order.id,'accept',{version:selected.version}); };
+  return {store,admin,create,person,change,order,accept};
 }
 test('成员与陪玩共用身份记录，设置角色撤销会话且即时改变权限',t=>{
   const {store,admin,create,person,change}=fixture(t);
-  const u=create();const token=store.login(u.username,'testing123').token;
+  const u=create(); verifyFixtureUser(store, userById(store, u.id)); const token=store.login(u.username,'testing123').token;
   assert.ok(store.session(token));
   change(u,'role',{role:'finance'});assert.equal(store.session(token),undefined);
   assert.deepEqual(store.workspace(person(u.id)).role.pages,['overview','topups','flows','settlements']);
@@ -31,13 +34,14 @@ test('成员与陪玩共用身份记录，设置角色撤销会话且即时改�
   assert.equal(w.members.find(m=>m.id===u.id).shareBps,8000);assert.equal(w.members.find(m=>m.id===u.id).levelName,'魔王');
   assert.throws(()=>change(u,'role',{role:'admin'}),/先在陪玩管理/);
   change(u,'remove',{});assert.ok(!store.workspace(admin).members.some(m=>m.id===u.id));assert.ok(store.workspace(admin).accounts.some(m=>m.id===u.id));
+  verifyFixtureUser(store, admin, { reviewerId: 'demo-admin' });
   assert.throws(()=>change(admin,'escort',{levelId:'gold'}),/自己的/);
   assert.throws(()=>change(admin,'role',{role:'finance'}),/自己的/);
   assert.throws(()=>change(u,'role',{role:'manager'}),/有效的管理角色/);
   assert.ok(!store.workspace(admin).roleOptions.some(r=>r.id==='manager'));
 });
 test('高等级可以接低等级单，低等级在大厅、派单、直接接单均受阻；新单锁定等级分成',t=>{
-  const {store,admin,create,person,change,order}=fixture(t);
+  const {store,admin,create,person,change,order,accept}=fixture(t);
   const low=create('escort','low'),high=create('escort','high');change(high,'profile',{games:['王者荣耀'],levelId:'demon'});
   store.setOnline(low,{online:true});store.setOnline(high,{online:true});
   const premium=order('demon'),basic=order('gold');
@@ -45,12 +49,12 @@ test('高等级可以接低等级单，低等级在大厅、派单、直接接�
   assert.ok(store.workspace(person(high.id)).availableOrders.some(o=>o.id===basic.id));
   assert.throws(()=>store.orderAction(low,premium.id,'accept',{version:premium.version}),/等级/);
   assert.throws(()=>store.orderAction(admin,premium.id,'dispatch',{version:premium.version,memberIds:[low.id]}),/等级/);
-  const accepted=store.orderAction(high,basic.id,'accept',{version:basic.version});assert.equal(accepted.participants[0].shareBps,8000);
+  const accepted=accept(high,basic);assert.equal(accepted.participants[0].shareBps,8000);
   change(high,'profile',{games:['王者荣耀'],levelId:'star'});
   assert.equal(store.read().orders.find(o=>o.id===basic.id).participants[0].shareBps,8000);
   const levels=store.read().levels.map(l=>({...l,shareBps:l.shareBps-100}));store.configureLevels(admin,{revision:store.read().revision,levels});
   assert.equal(person(high.id).shareBps,8400);assert.equal(store.read().orders.find(o=>o.id===basic.id).participants[0].shareBps,8000);
-  const acceptedPremium=store.orderAction(high,premium.id,'accept',{version:premium.version});assert.equal(acceptedPremium.participants[0].shareBps,8400);
+  const acceptedPremium=accept(high,premium);assert.equal(acceptedPremium.participants[0].shareBps,8400);
   assert.throws(()=>change(high,'profile',{games:['王者荣耀'],levelId:'gold'}),e=>e.status===409);
   assert.throws(()=>change(high,'profile',{games:['三角洲行动'],levelId:'star'}),e=>e.status===409);
   assert.throws(()=>order('fake'),/有效的订单等级/);
@@ -60,6 +64,8 @@ test('多人分成总和不超额、每人按等级分摊，冻结后禁止新�
   const a=create('escort','a'),b=create('escort','b');change(a,'profile',{games:['王者荣耀'],levelId:'demon'});
   store.setOnline(a,{online:true});store.setOnline(b,{online:true});
   let o=order();o=store.orderAction(admin,o.id,'dispatch',{version:o.version,memberIds:[a.id,b.id]});
+  store.orderAction(person('demo-user'),o.id,'selectApplicant',{version:o.version,memberIds:[a.id,b.id]});
+  o=store.read().orders.find(item=>item.id===o.id);
   assert.deepEqual(o.participants.map(p=>p.shareBps),[4000,3500]);
   o=store.orderAction(a,o.id,'accept',{version:o.version});o=store.orderAction(b,o.id,'accept',{version:o.version});
   change(a,'freeze',{frozen:true});assert.throws(()=>store.orderAction(a,o.id,'start',{version:o.version}),/暂不能开始/);

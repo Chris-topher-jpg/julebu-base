@@ -53,7 +53,7 @@ const settlements = [
 const conversations = [
   { boss: '林先生', last: '今晚还可以加一位陪玩吗？', time: '10:31', unread: 2, channel: '微信', state: '待回复' },
   { boss: '周致远', last: '想约无畏契约三小时，能安排吗？', time: '10:18', unread: 1, channel: '站内信', state: '待回复' },
-  { boss: '沈嘉禾', last: '昨天的订单可以申请部分退款吗', time: '09:52', unread: 0, channel: '微信', state: '处理中' },
+  { boss: '沈嘉禾', type: 'support', last: '昨天的订单可以申请部分退款吗', time: '09:52', unread: 0, channel: '微信', state: '处理中' },
   { boss: '陈思齐', last: '已收到，谢谢安排', time: '昨天 21:06', unread: 0, channel: '站内信', state: '已结束' },
 ];
 

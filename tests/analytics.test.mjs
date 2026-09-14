@@ -55,7 +55,8 @@ test('游戏与 Tag 同时筛选、多人订单不重复同人、订单级下钻
   const bosses=ranking(fixtures,{...query,kind:'buyers'},at);assert.equal(bosses.rows[0].orderCount,2);assert.equal(bosses.total,2);
   const orders=ranking(fixtures,{...query,kind:'orders'},at);assert.equal(orders.rows[0].key,'o1');assert.equal(orders.total,3);
   assert.deepEqual(ranking(fixtures,{...query,kind:'orders',key:'o2'},at,true).orders.map(o=>o.id),['o2']);
-  assert.deepEqual(analyticsOptions(fixtures).tagsByGame['和平精英'],['娱乐']);
+  assert.deepEqual(analyticsOptions(fixtures).tagsByGame['和平精英'],[]);
+  assert.deepEqual(analyticsOptions(fixtures).tags,[]);
 });
 test('拒绝无效日期、颠倒区间、过长区间、无效榜单与分页',()=>{
   for(const dates of [['2026-02-30','2026-03-01'],['2026-09-12','2026-09-11'],['2025-01-01','2026-09-11'],['x','2026-09-11']]) assert.throws(()=>dateRange(...dates),e=>e.status===400);

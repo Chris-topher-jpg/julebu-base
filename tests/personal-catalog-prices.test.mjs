@@ -2,10 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ClubStore } from '../server/club.mjs';
 import { addFixtureGames } from './catalog-fixture.mjs';
+import { verifyFixtureUsers } from './real-name-fixture.mjs';
 
 test('管理员改价后个人目录使用实时等级价，下单金额与余额实扣一致且不暴露分成', t => {
   const store = new ClubStore(':memory:');
   t.after(() => store.close());
+  verifyFixtureUsers(store, ['demo-user']);
   const data = store.read();
   const admin = data.users.find(user => user.id === 'admin');
   const customer = data.users.find(user => user.id === 'demo-user');
@@ -56,6 +58,7 @@ test('个人下单按游戏配置报价并保留其他商品定价', t => {
   const store = new ClubStore(':memory:');
   t.after(() => store.close());
   addFixtureGames(store, ['王者荣耀', '无畏契约']);
+  verifyFixtureUsers(store, ['demo-user']);
   const data = store.read();
   const admin = data.users.find(user => user.id === 'admin');
   const buyer = data.users.find(user => user.id === 'demo-user');

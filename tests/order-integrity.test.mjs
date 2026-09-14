@@ -6,11 +6,13 @@ import { join } from 'node:path';
 import { once } from 'node:events';
 import { ClubStore } from '../server/club.mjs';
 import { createClubServer } from '../server.mjs';
+import { verifyFixtureUsers, userById } from './real-name-fixture.mjs';
 
 function fixture(t) {
   const store = new ClubStore(':memory:');
   t.after(() => store.close());
   const user = id => store.read().users.find(item => item.id === id);
+  verifyFixtureUsers(store, ['demo-user', 'demo-escort']);
   const buyer = user('demo-user'), worker = user('demo-escort'), staff = user('service'), admin = user('admin');
   store.transaction(admin, 'account:manage', '准备订单完整性测试', data => {
     Object.assign(data.users.find(item => item.id === worker.id), { games: ['三角洲行动'], active: true, online: true, levelId: 'star' });
@@ -38,8 +40,10 @@ test('双人商品不能指定唯一打手，拒绝不可能履约的订单且�
 
 test('退单打手不能通过旧式直接接单或客服派单绕过排除名单', t => {
   const { store, worker, staff, input, act, raw } = fixture(t);
-  const order = store.createOrder(staff, input({ context: 'management', boss: '线下订单买家', pay: '线下已收款' }));
-  assert.equal(order.selectionRequired, false);
+  const order = store.createOrder(staff, input({ context: 'management', customerId: userById(store, 'demo-user').customerId, boss: userById(store, 'demo-user').name, pay: '线下已收款', selectionRequired: false }));
+  assert.equal(order.selectionRequired, true, '当前订单必须由买家选人，客户端不得关闭');
+  store.transaction({ id: 'admin' }, 'account:manage', '准备历史直接接单订单', data => { data.orders.find(item => item.id === order.id).selectionRequired = false; });
+  assert.equal(raw(order).selectionRequired, false);
   act(worker, order, 'accept');
   act(worker, order, 'reject', { reason: '无法按预约安排提供服务' });
   assert.throws(() => act(worker, order, 'accept'), { status: 400 });
@@ -85,6 +89,7 @@ test('下单请求在数据库重启后仍去重，并按操作账号隔离', t 
   t.after(() => rmSync(folder, { recursive: true, force: true }));
   const path = join(folder, 'club.sqlite');
   let store = new ClubStore(path);
+  verifyFixtureUsers(store, ['demo-user', 'user-demo']);
   try {
     const buyer = store.read().users.find(item => item.id === 'demo-user');
     const body = { boss: buyer.name, productId: store.read().products.find(item => item.name === '1陪1/1陪2').id, hours: 1, pay: '在线支付', requirement: '重启后继续查询本次下单结果', requestId: 'persistent-order-1' };
@@ -107,6 +112,7 @@ test('个人 HTTP 下单、重试与验收响应仅返回买家可见字段', as
   await once(instance.server, 'listening');
   t.after(() => new Promise(resolve => instance.server.close(resolve)));
   const { store } = instance;
+  verifyFixtureUsers(store, ['demo-user', 'demo-escort']);
   const base = `http://127.0.0.1:${instance.server.address().port}`;
   const buyer = store.read().users.find(item => item.id === 'demo-user');
   const worker = store.read().users.find(item => item.id === 'demo-escort');

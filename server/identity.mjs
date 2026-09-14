@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { priceOf } from './membership.mjs';
 import { catalogList, catalogNames, visibleProducts } from './game-catalog.mjs';
 import { applicationViews, buyerSelectionRequired } from './order-matching.mjs';
+import { conversationType } from './conversations.mjs';
+import { realNameVerification, isRealNameVerified } from './real-name.mjs';
 
 export const isClubMember = user => Boolean(user && user.role !== 'user');
 
@@ -62,7 +64,7 @@ export function personalData(data, user, roles) {
   return {
     mode: 'personal', clubName: '星河游戏俱乐部', revision: data.revision, role: roles.user,
     user: { id: user.id, memberNo: user.memberNo, username: user.username, name: user.name,
-      role: 'user', roleLabel: '用户', tone: 'blue', phone: customer?.phone || '', online: Boolean(user.online), avatar: user.avatar || '', bio: user.bio || '', profileTags: Array.isArray(user.profileTags) ? user.profileTags : [] },
+      role: 'user', roleLabel: '用户', tone: 'blue', phone: customer?.phone || '', online: Boolean(user.online), avatar: user.avatar || '', bio: user.bio || '', profileTags: Array.isArray(user.profileTags) ? user.profileTags : [], realNameVerification: realNameVerification(user) },
     membership: isClubMember(user) ? { role: user.role, label: roles[user.role].label, active: user.active } : null,
     wallet: { balanceCents: customer?.balanceCents || 0, topups: data.topups.filter(belongs).map(item => ({ id: item.id, amountCents: item.amountCents, before: item.before, after: item.after, state: item.state, proof: item.proof, note: item.note || '', paymentChannel: item.paymentChannel || '', receiptReference: item.receiptReference || '', requestedAt: item.requestedAt, reviewedAt: item.reviewedAt })) }, orders,
     refunds: data.refunds.filter(r => orderIds.has(r.orderId)).map(r => ({
@@ -72,7 +74,7 @@ export function personalData(data, user, roles) {
     })),
     ...(user.role === 'user' || user.role === 'member' ? { topups: data.topups.filter(belongs).map(item => ({ id: item.id, customerId: item.customerId, amountCents: item.amountCents, before: item.before, after: item.after, state: item.state, proof: item.proof, note: item.note || '', paymentChannel: item.paymentChannel || '', receiptReference: item.receiptReference || '', requestedAt: item.requestedAt, reviewedAt: item.reviewedAt })) } : {}),
     conversations: data.conversations.filter(c => c.orderId ? orderIds.has(c.orderId) : belongs(c)).map(c => ({
-      id: c.id, orderId:c.orderId||null, channel: c.channel, state: c.state, last: c.last, updatedAt: c.updatedAt, createdAt: c.createdAt, escortId: c.escortId || null, escortName: c.escortName || '', unread: c.customerUnread || 0,
+      id: c.id, type: conversationType(c), orderId:c.orderId||null, channel: c.channel, state: c.state, last: c.last, updatedAt: c.updatedAt, createdAt: c.createdAt, escortId: c.escortId || null, escortName: c.escortName || '', unread: c.customerUnread || 0,
       messages: (c.messages || []).map(m => ({ text: m.text, author: m.author, authorId: m.authorId || null, at: m.at })),
     })),
     ledger: data.ledger.filter(l => !l.userId && belongs(l)).map(l => ({
@@ -91,6 +93,6 @@ export function personalData(data, user, roles) {
     games,
     catalogGames: games,
     products: visibleProducts(data),
-    members: data.users.filter(candidate => candidate.role === 'escort' && candidate.active && !candidate.escortFrozen).map(candidate => ({ id: candidate.id, name: candidate.name, games: (candidate.games || []).filter(game => names.has(game)), online: candidate.online, levelId: candidate.levelId })),
+    members: data.users.filter(candidate => candidate.role === 'escort' && candidate.active && !candidate.escortFrozen && isRealNameVerified(candidate)).map(candidate => ({ id: candidate.id, memberNo: candidate.memberNo || candidate.id, name: candidate.name, games: (candidate.games || []).filter(game => names.has(game)), online: candidate.online, levelId: candidate.levelId, avatar: candidate.avatar || '', bio: candidate.bio || '', profileTags: Array.isArray(candidate.profileTags) ? candidate.profileTags : [] })),
   };
 }
