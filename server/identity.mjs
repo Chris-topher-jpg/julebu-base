@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { priceOf } from './membership.mjs';
 import { catalogList, catalogNames, visibleProducts } from './game-catalog.mjs';
+import { applicationViews, buyerSelectionRequired } from './order-matching.mjs';
 
 export const isClubMember = user => Boolean(user && user.role !== 'user');
 
@@ -52,26 +53,32 @@ export function personalData(data, user, roles) {
     amountCents: o.amountCents, refundedCents: o.refundedCents || 0, pay: o.pay, status: o.status,
     requirement: o.requirement, createdAt: o.createdAt, levelName: o.levelName, paymentStatus: o.paymentStatus || '已支付', orderMode: o.orderMode || 'quick', preferredEscortId: o.preferredEscortId || null, region: o.region || '', voice: o.voice || '', appointmentAt: o.appointmentAt || null,
     participants: o.participants.map(p => ({ name: p.name, evidence:p.evidence||'', accepted: p.accepted, finished: p.finished })),
+    selectionRequired: buyerSelectionRequired(o), participantMin: o.participantMin ?? data.games.find(g => g.name === o.game)?.min ?? 1,
+    participantMax: o.participantMax ?? data.games.find(g => g.name === o.game)?.max ?? 1,
+    applications: applicationViews(data, o),
     history: o.history.map(h => ({ action: h.action, at: h.at })),
   }));
   const orderIds = new Set(orders.map(o => o.id));
   return {
     mode: 'personal', clubName: '星河游戏俱乐部', revision: data.revision, role: roles.user,
     user: { id: user.id, memberNo: user.memberNo, username: user.username, name: user.name,
-      role: 'user', roleLabel: '用户', tone: 'blue', phone: customer?.phone || '' },
+      role: 'user', roleLabel: '用户', tone: 'blue', phone: customer?.phone || '', online: Boolean(user.online), avatar: user.avatar || '', bio: user.bio || '', profileTags: Array.isArray(user.profileTags) ? user.profileTags : [] },
     membership: isClubMember(user) ? { role: user.role, label: roles[user.role].label, active: user.active } : null,
-    wallet: { balanceCents: customer?.balanceCents || 0 }, orders,
+    wallet: { balanceCents: customer?.balanceCents || 0, topups: data.topups.filter(belongs).map(item => ({ id: item.id, amountCents: item.amountCents, before: item.before, after: item.after, state: item.state, proof: item.proof, note: item.note || '', paymentChannel: item.paymentChannel || '', receiptReference: item.receiptReference || '', requestedAt: item.requestedAt, reviewedAt: item.reviewedAt })) }, orders,
     refunds: data.refunds.filter(r => orderIds.has(r.orderId)).map(r => ({
       id: r.id, orderId: r.orderId, amountCents: r.amountCents, reason: r.reason,
       status: r.status, requestedAt: r.requestedAt, approvedAt: r.approvedAt, channel: r.channel,
+      reviewNote: r.reviewNote || '', paidAt: r.paidAt || null, payoutRef: r.payoutRef || '',
     })),
+    ...(user.role === 'user' || user.role === 'member' ? { topups: data.topups.filter(belongs).map(item => ({ id: item.id, customerId: item.customerId, amountCents: item.amountCents, before: item.before, after: item.after, state: item.state, proof: item.proof, note: item.note || '', paymentChannel: item.paymentChannel || '', receiptReference: item.receiptReference || '', requestedAt: item.requestedAt, reviewedAt: item.reviewedAt })) } : {}),
     conversations: data.conversations.filter(c => c.orderId ? orderIds.has(c.orderId) : belongs(c)).map(c => ({
       id: c.id, orderId:c.orderId||null, channel: c.channel, state: c.state, last: c.last, updatedAt: c.updatedAt, createdAt: c.createdAt, escortId: c.escortId || null, escortName: c.escortName || '', unread: c.customerUnread || 0,
       messages: (c.messages || []).map(m => ({ text: m.text, author: m.author, authorId: m.authorId || null, at: m.at })),
     })),
     ledger: data.ledger.filter(l => !l.userId && belongs(l)).map(l => ({
       id: l.id, account: l.account, deltaCents: l.deltaCents, afterCents: l.afterCents,
-      label: l.label, source: l.source, at: l.at,
+      label: l.label, source: l.source, at: l.at, externalAmountCents: l.externalAmountCents,
+      payoutRef: l.payoutRef || '', receiptReference: l.receiptReference || '',
     })),
     // Customer order forms use the same current level prices as checkout.
     // Expose catalog metadata and eligibility levels without staff shares.

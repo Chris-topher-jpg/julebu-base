@@ -12,7 +12,7 @@ function fixture(t){
   const customer=user('demo-user'),escort=user('demo-escort'),admin=user('admin');
   const create=(buyer=customer)=>store.createOrder(buyer,{context:'personal',boss:buyer.name,productId:'product-1',hours:1,pay:'在线支付',requirement:'完成约定服务后提供说明',levelId:'gold'});
   const update=(actor,order,action,input={})=>store.orderAction(actor,order.id,action,{version:store.read().orders.find(o=>o.id===order.id).version,...input});
-  const finish=order=>{update(escort,order,'accept');update(escort,order,'start');update(escort,order,'finish',{evidence:'已完成一小时约定服务'});};
+  const finish=order=>{update(escort,order,'apply');update(customer,order,'selectApplicant',{memberIds:[escort.id]});update(escort,order,'accept');update(escort,order,'start');update(escort,order,'finish',{evidence:'已完成一小时约定服务'});};
   return {store,user,customer,escort,admin,create,update,finish};
 }
 
@@ -118,6 +118,7 @@ test('服务前全额退款返还余额并阻止继续接单',t=>{
 test('服务前退款审核暂停履约，驳回或部分退款后恢复原阶段',t=>{
   const {store,customer,escort,admin,create,update}=fixture(t),order=create();
   update(admin,order,'dispatch',{memberIds:[escort.id]});
+  update(customer,order,'selectApplicant',{memberIds:[escort.id]});
   const request=()=>store.createRefund(customer,{context:'personal',orderId:order.id,amountCents:1700,reason:'调整服务安排'});
   let refund=request();
   assert.equal(hasOpenOrders(store.read(),escort.id),true);

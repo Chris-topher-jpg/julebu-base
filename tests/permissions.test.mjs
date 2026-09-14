@@ -88,7 +88,7 @@ test('角色权限、数据归属、订单状态、金额与持久化', async t 
   await t.test('充值只入账一次、提现不能超额或重复申请、驳回返还', async () => {
     const topupId = 'CZ20240618012';
     assert.equal((await call('service',`/api/topups/${topupId}`,{action:'approve',reason:'已核验到账'})).status,403);
-    assert.equal((await call('admin',`/api/topups/${topupId}`,{action:'approve',reason:'已核验到账'})).status,200);
+    assert.equal((await call('admin',`/api/topups/${topupId}`,{action:'approve',reason:'已核验到账',receiptReference:'QA-TOPUP-PERMISSIONS-001'})).status,200);
     assert.equal((await call('admin',`/api/topups/${topupId}`,{action:'approve',reason:'已核验到账'})).status,409);
     const before = (await workspace('escort')).wallet.balanceCents;
     assert.equal((await call('escort','/api/withdrawals',{amount:'9999999999'})).status,400);

@@ -24,6 +24,29 @@ const profiles = [
 
 export function companionProfiles(workspace = {}) {
   const games = new Set((workspace?.catalogGames || workspace?.games || []).map(game => game.name));
+  if (Array.isArray(workspace?.members)) {
+    return workspace.members
+      .filter(member => member?.active !== false && !member.escortFrozen && games.has(member.game))
+      .map((member, index) => {
+        const priceCents = Number(member.priceCents);
+        return {
+          id: `${member.id || member.memberNo}-${member.game}`,
+          number: String(member.memberNo || member.id || ''),
+          name: member.name || '俱乐部陪玩',
+          game: member.game,
+          level: member.levelName || member.level || '金牌',
+          service: '技术陪玩',
+          price: Number.isFinite(priceCents) && priceCents > 0 ? priceCents / 100 : 0,
+          orders: Number(member.orders) || 0,
+          rating: Number(member.rating) || 100,
+          online: Boolean(member.online),
+          tags: [...(Array.isArray(member.profileTags) ? member.profileTags : []), member.online ? '在线接单' : '支持预约', '俱乐部成员'].slice(0, 8),
+          bio: member.bio || `${member.game} 俱乐部成员，服务前可沟通区服、时长与陪玩要求。`,
+          image: member.avatar || `/src/escort-${String((index % 14) + 1).padStart(2, '0')}.jpg`,
+          reviews: [],
+        };
+      });
+  }
   return profiles.filter(profile => games.has(profile.game));
 }
 

@@ -50,6 +50,7 @@
 .account-page .account-user-button > span:last-child { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .account-page .account-mini-avatar { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: #eeecff; color: #7b70d8; font-size: 13px; }
 .account-page .account-mini-avatar svg { width: 17px; height: 17px; }
+.account-page .account-mini-avatar img, .account-page .account-avatar img, .personal-center .pc-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
 .account-page .account-logout { padding: 0 0 0 18px; border: 0; border-left: 1px solid #e9ecf3; background: none; color: #9199aa; font-size: 12px; }
 .account-page .account-logout:hover { color: var(--pc-accent); }
 .account-page .account-main { width: calc(100% - 64px); max-width: 1240px; margin: 0 auto; padding: 33px 0 58px; }
@@ -198,7 +199,14 @@
 .account-page .stat-foot { color: #9ba4b6; font-size: 11px; line-height: 1.8; }
 .account-page .personal-balance { display: flex; flex-direction: column; align-items: flex-start; gap: 9px; padding: 26px 28px; margin-bottom: 23px; background: linear-gradient(115deg, #f2f1ff, #fafaff); border: 1px solid #e5e4f7; border-radius: 12px; }
 .account-page .personal-balance > span { color: #8b90af; font-size: 13px; }
-.account-page .personal-balance > strong { max-width: 100%; color: #5552bd; font-size: 33px; font-weight: 600; line-height: 1.4; letter-spacing: -.7px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.account-page .personal-balance-row { display: flex; align-items: center; gap: 16px; width: 100%; flex-wrap: wrap; }
+.account-page .personal-balance-row > strong { max-width: 100%; color: #5552bd; font-size: 33px; font-weight: 600; line-height: 1.4; letter-spacing: -.7px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.account-page .personal-balance-row .primary-action { margin-left: auto; }
+.personal-topup-list { display: grid; gap: 10px; }
+.personal-topup-list > article { padding: 14px; background: #f8f8fc; border-radius: 8px; color: #596075; font-size: 12px; min-width: 0; }
+.personal-topup-list article > div { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.personal-topup-list p { margin: 8px 0 0; color: #858da2; overflow-wrap: anywhere; }
+.personal-topup-list .topup-rejection { color: #bd4b50; }
 .account-page .account-page-tools { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }
 .account-page .account-page-tools:empty { display: none; }
 .account-page .text-btn { color: var(--pc-accent); font-size: 12px; }
@@ -360,7 +368,7 @@
   .personal-center .pc-service-card > div { padding-top: 13px; }
   .account-page .panel { padding: 19px 16px; }
   .account-page .personal-balance { gap: 8px; padding: 23px 22px; margin-bottom: 19px; }
-  .account-page .personal-balance > strong { font-size: 29px; }
+  .account-page .personal-balance-row > strong { font-size: 29px; }
   .account-page .account-page-tools { gap: 8px; margin-bottom: 16px; }
   .account-page .stats { gap: 11px; }
   .account-page .stat-card { padding: 17px; }

@@ -3,8 +3,10 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { extname, resolve } from 'node:path';
 import { ClubStore, can, requireThat } from './server/club.mjs';
+import { levelOf, priceOf } from './server/membership.mjs';
 import { catalogAction } from './server/catalog.mjs';
 import { catalogList } from './server/game-catalog.mjs';
+import { personalContext } from './server/flow.mjs';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 const jsonLimit = 24000;
@@ -23,13 +25,13 @@ function configuredOrigin(value, production) {
   return url;
 }
 
-async function readJson(req) {
+async function readJson(req, limit = jsonLimit) {
   requireThat(req.headers['content-type']?.split(';')[0].trim().toLowerCase() === 'application/json', '需要 JSON 请求', 415);
   const chunks = [];
   let size = 0;
   for await (const chunk of req.iterator({ destroyOnReturn: false })) {
     size += chunk.length;
-    if (size > jsonLimit) {
+    if (size > limit) {
       req.resume();
       requireThat(false, '请求过大', 413);
     }
@@ -84,7 +86,7 @@ export function createClubServer({ database, production = process.env.NODE_ENV =
           requireThat(req.method === 'POST', '请求方法不支持', 405);
           requireThat(!req.headers.origin || req.headers.origin === (origin ? origin.origin : url.origin), '请求来源不被允许', 403);
           requireThat(req.headers['sec-fetch-site'] !== 'cross-site', '请求来源不被允许', 403);
-          body = await readJson(req);
+          body = await readJson(req, url.pathname === '/api/profile' ? 120000 : jsonLimit);
         }
         const token = (req.headers.cookie || '').split(';').map(s => s.trim()).find(s => s.startsWith('club_session='))?.slice(13) || '';
         if (['/api/login', '/api/register'].includes(url.pathname) && req.method === 'POST') {
@@ -92,7 +94,9 @@ export function createClubServer({ database, production = process.env.NODE_ENV =
           requireThat(accountName.length > 0 && accountName.length <= 128, '请输入有效的登录账号');
           // A local HTTPS reverse proxy shares one socket IP for every visitor.
           // Account limits stay independent; the proxy also needs IP rate limits.
-          const key = production ? `account:${accountName.toLowerCase()}` : req.socket.remoteAddress;
+          // Phone login removes embedded whitespace, so its failure budget must
+          // use the same normalization; otherwise every spelling gets 10 tries.
+          const key = production ? `account:${accountName.replace(/\s+/g, '').toLowerCase()}` : req.socket.remoteAddress;
           const currentTime = Date.now();
           for (const [address, attempt] of attempts) if (attempt.until <= currentTime) attempts.delete(address);
           const limit = attempts.get(key);
@@ -113,10 +117,37 @@ export function createClubServer({ database, production = process.env.NODE_ENV =
           res.setHeader('Set-Cookie', `club_session=; ${cookieFlags}; Max-Age=0`);
           return json({ ok: true });
         }
+        if (url.pathname === '/api/health' && req.method === 'GET') {
+          // A running HTTP listener alone does not mean the database is usable.
+          // Expose only readiness, never records, account names or file paths.
+          let ready = false;
+          try { ready = Boolean(store.db.prepare('SELECT id FROM club WHERE id=1').get()); } catch {}
+          return json({ ok: ready }, ready ? 200 : 503);
+        }
         if (url.pathname === '/api/public/catalog' && req.method === 'GET') {
           const data = store.read();
           const games = catalogList(data).map(({ name, category, state, min, max }) => ({ name, category, state, min, max }));
-          return json({ games, catalogGames: games, revision: data.revision });
+          const names = new Set(games.map(game => game.name));
+          const members = data.users
+            .filter(user => user.role === 'escort' && user.active && !user.escortFrozen)
+            .flatMap(user => (user.games || []).filter(game => names.has(game)).map(game => {
+              const level = levelOf(data, user.levelId);
+              const gamePrice = data.gameLevelConfigs?.[game]?.levels?.find(item => item.id === user.levelId)?.priceCents;
+              return {
+                id: user.id,
+                memberNo: user.memberNo || user.id,
+                name: user.name,
+                game,
+                levelId: user.levelId || '',
+                levelName: level?.name || '',
+                priceCents: Number.isSafeInteger(gamePrice) ? gamePrice : priceOf(data, user.levelId),
+                online: Boolean(user.online),
+                avatar: user.avatar || '',
+                bio: user.bio || '',
+                profileTags: Array.isArray(user.profileTags) ? user.profileTags : [],
+              };
+            }));
+          return json({ games, catalogGames: games, members, revision: data.revision });
         }
         const user = store.session(token);
         requireThat(user, '登录已失效，请重新登录', 401);
@@ -150,23 +181,26 @@ export function createClubServer({ database, production = process.env.NODE_ENV =
         if (url.pathname === '/api/notifications/read') return json(store.readNotifications(user, body));
         const catalog = url.pathname.match(/^\/api\/catalog\/(games|products)$/);
         if (catalog) return json(catalogAction(store, user, catalog[1], body));
-        if (url.pathname === '/api/orders') return json(store.createOrder(user, body), 201);
+        const orderResponse = order => personalContext(user, body) ? store.personal(user).orders.find(item => item.id === order.id) : order;
+        if (url.pathname === '/api/orders') return json(orderResponse(store.createOrder(user, body)), 201);
         if (url.pathname === '/api/refunds') return json(store.createRefund(user, body), 201);
         if (url.pathname === '/api/conversations') return json(store.conversationCreate(user, body), 201);
         const refund = url.pathname.match(/^\/api\/refunds\/([^/]+)$/);
         if (refund) return json(store.reviewRefund(user, refund[1], body));
         const orderAction = url.pathname.match(/^\/api\/orders\/([^/]+)\/([^/]+)$/);
-        if (orderAction) return json(store.orderAction(user, orderAction[1], orderAction[2], body));
+        if (orderAction) return json(orderResponse(store.orderAction(user, orderAction[1], orderAction[2], body)));
         const chat = url.pathname.match(/^\/api\/conversations\/([^/]+)$/);
         if (chat) return json(store.conversationAction(user, chat[1], body));
         const chatMessage = url.pathname.match(/^\/api\/conversations\/([^/]+)\/messages$/);
         if (chatMessage) return json(store.conversationMessage(user, chatMessage[1], body));
         if (url.pathname === '/api/withdrawals') return json(store.withdrawal(user, body), 201);
+        if (url.pathname === '/api/topups') return json(store.createTopup(user, body), 201);
         const withdrawal = url.pathname.match(/^\/api\/withdrawals\/([^/]+)$/);
         if (withdrawal) return json(store.reviewWithdrawal(user, withdrawal[1], body));
         const topup = url.pathname.match(/^\/api\/topups\/([^/]+)$/);
         if (topup) return json(store.topupAction(user, topup[1], body));
         if (url.pathname === '/api/online') return json(store.setOnline(user, body));
+        if (url.pathname === '/api/profile') return json(store.updateProfile(user, body));
         const examiner = url.pathname.match(/^\/api\/examiners\/([^/]+)$/);
         if (examiner) return json(store.examinerAction(user, examiner[1], body));
         if (url.pathname === '/api/assessments' || url.pathname === '/api/examinations') return json(store.createAssessment(user, body), 201);
@@ -198,15 +232,37 @@ export function createClubServer({ database, production = process.env.NODE_ENV =
   server.requestTimeout = 15000;
   server.headersTimeout = 10000;
   server.keepAliveTimeout = 5000;
-  store.totalSnapshot();
+  try { store.totalSnapshot(); } catch (error) { store.close(); throw error; }
   const statisticsTimer = setInterval(() => { try { store.totalSnapshot(); } catch (error) { console.error('统计快照更新失败', error); } }, 60000);
   statisticsTimer.unref();
-  server.on('close', () => { clearInterval(statisticsTimer); store.close(); });
-  return { server, store };
+  server.once('close', () => { clearInterval(statisticsTimer); store.close(); });
+  let closing;
+  const close = ({ timeoutMs = 15000 } = {}) => {
+    if (!closing) closing = new Promise((resolveClose, rejectClose) => {
+      const timer = setTimeout(() => server.closeAllConnections(), timeoutMs);
+      timer.unref();
+      server.close(error => {
+        clearTimeout(timer);
+        if (error && error.code !== 'ERR_SERVER_NOT_RUNNING') rejectClose(error);
+        else resolveClose();
+      });
+    });
+    return closing;
+  };
+  return { server, store, close };
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const { server } = createClubServer({ database: process.env.CLUB_DATABASE || undefined });
   const port = Number(process.env.PORT || 4173);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT 必须为 1–65535 的整数');
+  const { server, close } = createClubServer({ database: process.env.CLUB_DATABASE || undefined });
+  const shutdown = () => close().catch(error => { console.error('关闭服务失败', error.message); process.exitCode = 1; });
+  process.once('SIGINT', shutdown);
+  process.once('SIGTERM', shutdown);
+  server.once('error', error => {
+    console.error('服务启动失败', error.message);
+    process.exitCode = 1;
+    void shutdown();
+  });
   server.listen(port, '127.0.0.1', () => console.log(`星河俱乐部 http://127.0.0.1:${port}/`));
 }
 

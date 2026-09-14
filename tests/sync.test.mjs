@@ -93,6 +93,9 @@ test('多账号同步下单、客服派单、打手履约、验收和收益，�
     order = result.body;
   };
   await update('service', 'dispatch', { memberIds: [escort.id] });
+  assert.equal(order.status, '待接单');
+  assert.equal(order.participants.length, 0);
+  await update('buyer', 'selectApplicant', { memberIds: [escort.id] });
   const assigned = await sync('escort', escortBefore.revision);
   assert.equal(assigned.workspace.orders.find(item => item.id === order.id).status, '待确认');
   assert.equal(orderNotice(assigned.notifications, order.id)?.page, 'myOrders');
@@ -136,6 +139,37 @@ test('多账号同步下单、客服派单、打手履约、验收和收益，�
   }
 });
 
+test('匹配打手可以报名，老板查看报名名单并选择最终打手', async t => {
+  const { call, login, sync } = await httpFixture(t);
+  const buyer = await login('buyer', 'demo_user');
+  await login('service', 'demo_service');
+  const escort = await login('escort', 'demo_escort');
+  await login('otherEscort', 'escort', '123456');
+  const created = await call('buyer', '/orders', purchase(buyer));
+  assert.equal(created.status, 201);
+  let order = created.body;
+  let escortWorkspace = await sync('escort', 0);
+  assert.ok(escortWorkspace.workspace.availableOrders.some(item => item.id === order.id));
+  const application = await call('escort', `/orders/${order.id}/apply`, { version: order.version });
+  assert.equal(application.status, 200, JSON.stringify(application.body));
+  order = application.body;
+  assert.equal(order.status, '待接单');
+  assert.equal(order.participants.length, 0);
+  assert.equal(order.applications.length, 1);
+  const ownerWorkspace = await sync('buyer', 0, 'personal');
+  const ownerOrder = ownerWorkspace.workspace.orders.find(item => item.id === order.id);
+  assert.equal(ownerOrder.applications[0].name, '测试陪玩');
+  escortWorkspace = await sync('otherEscort', 0);
+  assert.ok(escortWorkspace.workspace.availableOrders.some(item => item.id === order.id));
+  const selected = await call('buyer', `/orders/${order.id}/selectApplicant`, { version: order.version, userId: escort.id });
+  assert.equal(selected.status, 200, JSON.stringify(selected.body));
+  assert.equal(selected.body.status, '待确认');
+  assert.deepEqual(selected.body.participants.map(item => item.name), ['测试陪玩']);
+  assert.equal(selected.body.participants[0].shareBps, undefined);
+  const hiddenFromOthers = await sync('otherEscort', 0);
+  assert.equal(hiddenFromOthers.workspace.availableOrders.some(item => item.id === order.id), false);
+});
+
 test('同步游标无变化时省略工作区，未来游标可以恢复，并拒绝无效参数', t => {
   const { store, user, create } = fixture(t);
   const service = user('demo-service');
@@ -166,6 +200,10 @@ test('同一浏览器切换账号后，即使数据版本未变化也返回当�
   const { call, login, sync } = await httpFixture(t);
   const buyer = await login('buyer', 'demo_user');
   const service = await login('sharedBrowser', 'demo_service');
+  // Keep both identities online so replacing this browser's session does not
+  // change presence or the shared revision; identity must still be returned.
+  await login('serviceBackup', 'demo_service');
+  await login('userBackup', 'user', '123456');
   const created = await call('buyer', '/orders', purchase(buyer));
   assert.equal(created.status, 201);
   const staff = await sync('sharedBrowser', 0, 'personal');
@@ -195,9 +233,12 @@ test('转单后旧打手仅保留移出提示，新打手与买家收到新进�
   let order = create();
   const update = (actor, action, input = {}) => { order = store.orderAction(actor, order.id, action, { version: order.version, ...input }); };
   update(service, 'dispatch', { memberIds: [previousEscort.id] });
+  update(buyer, 'selectApplicant', { memberIds: [previousEscort.id] });
   const oldAssignment = orderNotice(store.notifications(previousEscort), order.id);
   assert.equal(oldAssignment.title, '你收到一笔新派单');
   update(service, 'transfer', { memberIds: [replacement.id], reason: '内部排班信息，仅管理人员查看' });
+  assert.equal(order.status, '待接单');
+  update(buyer, 'selectApplicant', { memberIds: [replacement.id] });
   const transferred = store.sync(previousEscort, 0, 'management');
   assert.equal(transferred.workspace.orders.some(item => item.id === order.id), false);
   const removed = transferred.notifications.items.filter(item => item.orderId === order.id);
@@ -231,12 +272,14 @@ test('打手主动退回订单后，重新派单及服务动态不再发送给�
   let order = create();
   const update = (actor, action, input = {}) => { order = store.orderAction(actor, order.id, action, { version: order.version, ...input }); };
   update(service, 'dispatch', { memberIds: [previousEscort.id] });
+  update(user('demo-user'), 'selectApplicant', { memberIds: [previousEscort.id] });
   assert.ok(orderNotice(store.notifications(previousEscort), order.id));
   update(previousEscort, 'reject', { reason: '个人安排冲突，请重新安排' });
   assert.equal(order.status, '待接单');
   assert.equal(orderNotice(store.notifications(previousEscort), order.id), undefined);
   assert.ok(orderNotice(store.notifications(service), order.id));
   update(service, 'dispatch', { memberIds: [replacement.id] });
+  update(user('demo-user'), 'selectApplicant', { memberIds: [replacement.id] });
   update(replacement, 'accept');
   update(replacement, 'start');
   const former = store.sync(previousEscort, 0, 'management');

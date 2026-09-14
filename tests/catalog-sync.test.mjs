@@ -41,6 +41,29 @@ test('all workspaces use club games and reject legacy game choices', t => {
   assert.deepEqual(store.read().orders, originalOrders);
 });
 
+test('analytics Tag options stay synchronized with special-order catalog', t => {
+  const store = new ClubStore(':memory:');
+  t.after(() => store.close());
+  const admin = { id: 'admin' };
+  const expected = store.read().products.map(product => product.name).sort((a, b) => a.localeCompare(b, 'zh-CN'));
+  const options = store.analytics(admin, 'summary').options;
+  assert.deepEqual(options.tags, [...new Set([...expected, '娱乐陪玩'])].sort((a, b) => a.localeCompare(b, 'zh-CN')));
+  assert.deepEqual(options.tagsByGame['三角洲行动'], ['1陪1/1陪2', '2陪1']);
+  assert.ok(options.tags.includes('双排陪玩'), '暂停服务仍应作为可查询 Tag 展示');
+
+  const created = catalogAction(store, admin, 'products', {
+    action: 'save', name: '夜间陪玩', game: '三角洲行动', state: '启用', unit: '小时', priceCents: 8800, note: '夜间时段服务',
+  });
+  assert.ok(store.analytics(admin, 'summary').options.tags.includes('夜间陪玩'));
+
+  const renamed = catalogAction(store, admin, 'products', {
+    action: 'save', ...created, id: created.id, version: created.version, name: '夜间上分', game: created.game, state: created.state, unit: created.unit, priceCents: created.priceCents, note: created.note,
+  });
+  const renamedOptions = store.analytics(admin, 'summary').options;
+  assert.ok(renamedOptions.tags.includes('夜间上分'));
+  assert.ok(!renamedOptions.tags.includes('夜间陪玩'));
+});
+
 test('public catalog is anonymous, current and contains no staff data', async t => {
   const { server, store } = createClubServer({ database: ':memory:' });
   server.listen(0, '127.0.0.1');
@@ -54,6 +77,9 @@ test('public catalog is anonymous, current and contains no staff data', async t 
   const initial = await read();
   assert.deepEqual(initial.games.map(game => game.name), ['三角洲行动']);
   assert.equal(initial.users, undefined);
+  assert.ok(Array.isArray(initial.members));
+  assert.ok(initial.members.every(member => member.game === '三角洲行动'));
+  assert.ok(initial.members.every(member => !('balanceCents' in member) && !('phone' in member)));
   assert.ok(initial.games.every(game => !('commissionBps' in game)));
   catalogAction(store, { id: 'admin' }, 'games', { action: 'save', name: '123', category: 'FPS', min: 1, max: 1, state: '上架' });
   assert.deepEqual((await read()).games.map(game => game.name), ['三角洲行动', '123']);

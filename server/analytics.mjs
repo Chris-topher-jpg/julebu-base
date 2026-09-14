@@ -33,7 +33,16 @@ function uniqueOrders(orders) { return [...new Map(orders.map(o => [o.id, o])).v
 function filteredOrders(data, query) {
   const game = query.game || ''; const tag = query.tag || '';
   valid(typeof game === 'string' && game.length <= 60 && typeof tag === 'string' && tag.length <= 60, '筛选条件无效');
-  return uniqueOrders(data.orders).filter(o => (!game || o.game === game) && (!tag || orderTags(o).includes(tag)));
+  const products = new Map((data.products || []).map(product => [product.id, product]));
+  const hasTag = order => {
+    if (!tag) return true;
+    // Tags in the ranking filter are synchronized with current special-order
+    // names. Resolve productId so a renamed service still matches historical
+    // orders while retaining the order's original display snapshot.
+    const product = order.productId ? products.get(order.productId) : undefined;
+    return orderTags(order).includes(tag) || product?.name === tag || (!order.productId && order.product === tag);
+  };
+  return uniqueOrders(data.orders).filter(o => (!game || o.game === game) && hasTag(o));
 }
 export function metrics(data, range = { from: -Infinity, to: Infinity }, at = Date.now()) {
   const orders = uniqueOrders(data.orders);
@@ -91,5 +100,16 @@ export function ranking(data, query, at = Date.now(), details = false) {
 }
 export function analyticsOptions(data) {
   const games = catalogList(data).map(game => game.name);
-  return { games, tags: [...new Set(data.orders.flatMap(orderTags))].sort(), tagsByGame: Object.fromEntries(games.map(game => [game, [...new Set(data.orders.filter(o=>o.game===game).flatMap(orderTags))].sort()])) };
+  const orders = data.orders || [];
+  const products = (data.products || []).filter(product => typeof product.name === 'string' && product.name.trim());
+  // Current special-order names are the source of the Tag catalogue. Keep
+  // legacy order tags available for historical reports whose records predate
+  // the catalog sync (new orders should use the selected service name).
+  const tags = [...new Set([...products.map(product => product.name.trim()), ...orders.flatMap(orderTags)])].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+  const tagsByGame = Object.fromEntries(games.map(game => {
+    const current = products.filter(product => product.game === game).map(product => product.name.trim());
+    const legacy = orders.filter(order => order.game === game).flatMap(orderTags);
+    return [game, [...new Set([...current, ...legacy])].sort((a, b) => a.localeCompare(b, 'zh-CN'))];
+  }));
+  return { games, tags, tagsByGame };
 }

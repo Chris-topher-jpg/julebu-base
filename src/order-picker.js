@@ -3,6 +3,7 @@ import { escapeHtml as e, icon } from './ui.js';
 const money = value => `¥ ${(Number(value || 0) / 100).toFixed(2)}`;
 const gamesOf = workspace => workspace.catalogGames || workspace.games || [];
 const availableProducts = workspace => (workspace.products || []).filter(product => product.state === '启用' && gamesOf(workspace).some(game => game.name === product.game && game.state === '上架'));
+const escortCountOf = product => Number(product?.escortCount) === 2 || product?.name === '2陪1' ? 2 : 1;
 
 export function openOrderPicker({ workspace, productId, api, onSuccess, onClose }) {
   document.querySelector('#actionDialog')?.remove();
@@ -11,11 +12,12 @@ export function openOrderPicker({ workspace, productId, api, onSuccess, onClose 
   const levels = () => [...(catalog.levels || [])].sort((a, b) => b.rank - a.rank);
   const unitPrice = (chosenProduct, chosenLevel) => {
     const gamePrice = catalog.gameLevelConfigs?.[chosenProduct?.game]?.levels?.find(item => item.id === chosenLevel?.id)?.priceCents;
-    return Number.isSafeInteger(gamePrice) ? gamePrice : chosenProduct?.game === '三角洲行动' ? chosenLevel?.priceCents : chosenProduct?.priceCents;
+    const base = Number.isSafeInteger(gamePrice) ? gamePrice : chosenProduct?.game === '三角洲行动' ? chosenLevel?.priceCents : chosenProduct?.priceCents;
+    return Number.isSafeInteger(base) ? base * (chosenProduct?.game === '三角洲行动' ? escortCountOf(chosenProduct) : 1) : base;
   };
   const initial = products.find(product => product.id === productId) || products[0];
   const selection = { game: initial?.game || '', productId: initial?.id || '', levelId: levels().at(-1)?.id || '', confirmed: false };
-  let step = 1, pending = false;
+  let step = 1, pending = false, purchaseAttempt = null;
   const product = () => products.find(item => item.id === selection.productId);
   const level = () => levels().find(item => item.id === selection.levelId);
   const modal = document.createElement('dialog');
@@ -24,7 +26,7 @@ export function openOrderPicker({ workspace, productId, api, onSuccess, onClose 
   modal.innerHTML = `<form class="so-form">
     <header class="so-header"><div><h2 id="selfOrderTitle">自助下单</h2><button type="button" class="so-notice-button" aria-expanded="false" aria-controls="soNotice">下单须知 ${icon('arrow', 13)}</button></div><button type="button" class="so-close" aria-label="关闭下单窗口">×</button></header>
     <div class="so-body">
-      <div id="soNotice" class="so-notice" hidden><strong>陪玩单下单须知</strong><p>按小时计价，最少 0.5 小时。确认游戏、等级、时长和区服后使用余额支付；支付成功后由客服安排陪玩。服务完成后可在“我的点单”确认验收，有问题可申请售后。</p></div>
+      <div id="soNotice" class="so-notice" hidden><strong>陪玩单下单须知</strong><p>按小时计价，最少 0.5 小时。确认游戏、等级、时长和区服后使用余额支付；支付成功后客服会邀请打手，符合条件的打手也可报名，由你在“我的点单”最终选择。服务完成后可在“我的点单”确认验收，有问题可申请售后。</p></div>
       <ol class="so-steps" aria-label="下单步骤"><li data-so-step="1" aria-current="step"><b>01</b><span>选择您的需求</span></li><li data-so-step="2"><b>02</b><span>确认陪玩订单</span></li></ol>
       <section class="so-selection">
         <h3 class="so-section-heading"><b>1</b>选择您的需求 <span>陪玩单</span></h3>
@@ -38,7 +40,6 @@ export function openOrderPicker({ workspace, productId, api, onSuccess, onClose 
         <div class="so-field"><label for="soHours">下单时长 <em>*</em></label><div class="so-duration"><div class="so-stepper"><button type="button" data-so-hours="-0.5" aria-label="减少半小时">−</button><input id="soHours" name="hours" type="number" value="1" min="0.5" max="24" step="0.5" required aria-label="服务时长（小时）"><button type="button" data-so-hours="0.5" aria-label="增加半小时">+</button></div><span>小时</span><small>0.5 小时起，每次增加半小时</small></div></div>
         <div class="so-field"><label for="soRegion">游戏区服 <em>*</em></label><input id="soRegion" name="region" required maxlength="80" placeholder="请输入区服、游戏 ID 等信息"></div>
         <div class="so-field so-remark"><label for="soRequirement">备注</label><textarea id="soRequirement" name="requirement" rows="2" maxlength="300" placeholder="填写位置偏好、开麦要求、段位等（选填）"></textarea></div>
-        <details class="so-more"><summary>指定陪玩与预约（可选） ${icon('chevron', 13)}</summary><div class="so-more-fields"><label>安排方式<select name="orderMode"><option value="quick">由客服安排</option><option value="designated">指定陪玩</option></select></label><label class="so-preferred" hidden>选择指定陪玩<select name="preferredEscortId" disabled><option value="">请选择陪玩</option></select></label><label>预约时间<input name="appointmentAt" type="datetime-local"></label><label>语音方式<select name="voice"><option>游戏内语音</option><option>微信语音</option><option>不开语音</option></select></label></div><p class="so-muted">不填预约时间表示尽快安排；预约时间按北京时间填写。</p></details>
       </section>
       <section class="so-confirmation" hidden><h3 class="so-section-heading"><b>2</b>确认陪玩订单</h3><div class="so-confirm-card"></div><p class="so-payment-note">确认支付后将从账户余额扣款，订单进度可在“我的点单”查看。</p></section>
       <p class="so-error" role="alert"></p>
@@ -105,21 +106,11 @@ export function openOrderPicker({ workspace, productId, api, onSuccess, onClose 
     $('#soBalance').textContent = `可用余额 ${money(catalog.wallet?.balanceCents)}`;
     $('.so-submit').disabled = pending || !products.length || !levels().length;
     modal.querySelectorAll('[data-so-hours]').forEach(button => button.disabled = button.dataset.soHours.startsWith('-') ? hours <= .5 : hours >= 24);
-    const mode = form.elements.orderMode, preferred = form.elements.preferredEscortId;
-    const single = (gamesOf(catalog).find(game => game.name === chosen?.game)?.min || 1) <= 1;
-    mode.querySelector('[value="designated"]').disabled = !single;
-    if (!single) mode.value = 'quick';
-    const previous = preferred.value;
-    const members = (catalog.members || []).filter(member => member.games?.includes(chosen?.game) && (levels().find(item => item.id === member.levelId)?.rank || 0) >= (chosenLevel?.rank || Infinity));
-    preferred.innerHTML = '<option value="">请选择陪玩</option>' + members.map(member => `<option value="${e(member.id)}">${e(member.name)} · ${member.online ? '在线' : '离线（需预约）'}</option>`).join('');
-    if (members.some(member => member.id === previous)) preferred.value = previous;
-    preferred.disabled = mode.value !== 'designated'; preferred.required = !preferred.disabled;
-    $('.so-preferred').hidden = preferred.disabled;
     if (selection.confirmed && Number.isFinite(amount) && amount > Number(catalog.wallet?.balanceCents || 0)) $('#soBalance').textContent += ` · 还差 ${money(amount - Number(catalog.wallet?.balanceCents || 0))}`;
     if (pending) form.querySelectorAll('button, input, select, textarea').forEach(control => { control.disabled = true; });
   }
   function confirmation() {
-    const fields = [['游戏', selection.game], ['订单类型', '陪玩单'], ['陪玩等级', level()?.name], ['服务类型', product()?.name], ['下单时长', `${form.elements.hours.value} 小时`], ['服务单价', `${money(unitPrice(product(), level()))} / 小时`], ['游戏区服', form.elements.region.value], ['陪玩安排', form.elements.orderMode.value === 'designated' ? form.elements.preferredEscortId.selectedOptions[0]?.textContent : '由客服安排'], ['预约时间', form.elements.appointmentAt.value.replace('T', ' ') || '尽快安排'], ['语音方式', form.elements.voice.value], ['备注', form.elements.requirement.value.trim() || '无特殊要求']];
+    const fields = [['游戏', selection.game], ['订单类型', '陪玩单'], ['陪玩等级', level()?.name], ['服务类型', product()?.name], ['下单时长', `${form.elements.hours.value} 小时`], ['服务单价', `${money(unitPrice(product(), level()))} / 小时`], ['游戏区服', form.elements.region.value], ['陪玩安排', '客服邀请 / 打手报名，由我最终选择'], ['备注', form.elements.requirement.value.trim() || '无特殊要求']];
     $('.so-confirm-card').innerHTML = `<dl>${fields.map(([label, value]) => `<div><dt>${e(label)}</dt><dd>${e(value)}</dd></div>`).join('')}</dl>`;
   }
   function showStep(value) {
@@ -143,26 +134,37 @@ export function openOrderPicker({ workspace, productId, api, onSuccess, onClose 
     if (pending) return;
     if (!selection.confirmed) { showStep(1); setCascader(true); error('请先选择陪玩等级和服务类型。'); $('.so-service-trigger').focus(); return; }
     form.elements.region.setCustomValidity(form.elements.region.value.trim() ? '' : '请填写游戏区服或游戏 ID。');
-    if (!form.checkValidity()) { showStep(1); if ([...$('.so-more').querySelectorAll('input, select')].some(control => !control.validity.valid)) $('.so-more').open = true; form.reportValidity(); return; }
+    if (!form.checkValidity()) { showStep(1); form.reportValidity(); return; }
     if (!Number.isSafeInteger(total()) || total() <= 0) { error('当前服务暂未定价，请重新选择。'); return; }
     if (step === 1) { showStep(2); return; }
-    const submitted = { ...Object.fromEntries(new FormData(form)), productId: selection.productId, levelId: selection.levelId, region: form.elements.region.value.trim(), requirement: form.elements.requirement.value.trim() || '按约定完成陪玩服务' };
+    // Keep the legacy quick-order payload defaults while the optional controls are hidden.
+    const submitted = { ...Object.fromEntries(new FormData(form)), productId: selection.productId, levelId: selection.levelId, region: form.elements.region.value.trim(), requirement: form.elements.requirement.value.trim() || '按约定完成陪玩服务', orderMode: 'quick', preferredEscortId: '', appointmentAt: '', voice: '游戏内语音' };
     const reviewedPrice = unitPrice(product(), level());
+    const purchaseSignature = JSON.stringify({ ...submitted, expectedUnitPriceCents: reviewedPrice, boss: catalog.user.name });
     const disabledBefore = new Map([...form.querySelectorAll('button, input, select, textarea')].map(control => [control, control.disabled]));
     pending = true;
     disabledBefore.forEach((disabled, control) => { control.disabled = true; });
     $('.so-submit').textContent = '正在提交…'; error('');
     let created;
     try {
-      const invalid = refreshCatalog(await api('/me'));
-      if (invalid) { showStep(1); setCascader(true); throw new Error('所选服务或等级已调整，请重新选择。'); }
-      const latestPrice = unitPrice(product(), level());
-      if (!Number.isSafeInteger(latestPrice) || latestPrice <= 0) { selection.confirmed = false; showStep(1); setCascader(true); throw new Error('当前服务暂未定价，请重新选择。'); }
-      if (submitted.orderMode === 'designated' && (form.elements.orderMode.value !== 'designated' || form.elements.preferredEscortId.value !== submitted.preferredEscortId)) { showStep(1); $('.so-more').open = true; throw new Error('指定陪玩当前无法提供所选服务，请重新选择陪玩或安排方式。'); }
-      if (reviewedPrice !== latestPrice) { confirmation(); throw new Error('服务价格已更新，请核对最新金额后再次确认。'); }
-      if (Math.round(latestPrice * Number(submitted.hours)) > Number(catalog.wallet?.balanceCents || 0)) throw new Error('余额不足，请联系客服充值后再下单。');
-      created = await api('/orders', { ...submitted, expectedUnitPriceCents: latestPrice, boss: catalog.user.name, pay: '在线支付', context: 'personal' });
-    } catch (failure) { error(failure.message || '下单失败，请重试。'); }
+      // If the previous response was lost, retrieve the same purchase before
+      // checking a balance or catalog that may already reflect its payment.
+      if (purchaseAttempt?.signature === purchaseSignature) {
+        created = await api('/orders', purchaseAttempt.payload);
+      } else {
+        const invalid = refreshCatalog(await api('/me'));
+        if (invalid) { showStep(1); setCascader(true); throw new Error('所选服务或等级已调整，请重新选择。'); }
+        const latestPrice = unitPrice(product(), level());
+        if (!Number.isSafeInteger(latestPrice) || latestPrice <= 0) { selection.confirmed = false; showStep(1); setCascader(true); throw new Error('当前服务暂未定价，请重新选择。'); }
+        if (reviewedPrice !== latestPrice) { confirmation(); throw new Error('服务价格已更新，请核对最新金额后再次确认。'); }
+        if (Math.round(latestPrice * Number(submitted.hours)) > Number(catalog.wallet?.balanceCents || 0)) throw new Error('余额不足，请联系客服充值后再下单。');
+        purchaseAttempt = { signature: purchaseSignature, payload: { ...submitted, expectedUnitPriceCents: latestPrice, boss: catalog.user.name, pay: '在线支付', context: 'personal', requestId: crypto.randomUUID() } };
+        created = await api('/orders', purchaseAttempt.payload);
+      }
+    } catch (failure) {
+      if (failure.status && failure.status < 500) purchaseAttempt = null;
+      error(failure.message || '下单失败，请重试。');
+    }
     finally {
       pending = false; disabledBefore.forEach((disabled, control) => { control.disabled = disabled; });
       $('.so-submit').innerHTML = step === 1 ? `下一步，确认订单 ${icon('arrow', 15)}` : '余额支付并下单'; renderGames(); renderChoices(); update();

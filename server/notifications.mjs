@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { matchesOrder, recruitmentOpen } from './order-matching.mjs';
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const index = items => new Map((items || []).map(item => [item.id, item]));
@@ -28,10 +29,22 @@ export function recordNotifications(data, before, actor) {
     const currentMembers = new Set(order.participants.map(item => item.userId));
     const oldMembers = new Set((previous?.participants || []).map(item => item.userId));
     const historyAction = order.history?.at(-1)?.action || '订单更新';
-    const title = !previous ? '收到新订单，请安排打手' : historyAction === '转单' ? '订单已转派' : historyAction === '客服派单' ? '订单已派单' : historyAction === '提交完单' ? '打手已提交完单' : historyAction === '验收通过并入账' ? '订单已验收完成' : `订单${order.status}`;
+    const title = !previous ? '收到新订单，请安排打手' : historyAction === '打手报名' ? '有打手报名，请查看候选名单' : historyAction === '客服推荐打手' ? '客服已推荐打手，请选择' : historyAction === '老板选择打手' ? '老板已选定打手' : historyAction === '转单待老板选择' ? '订单需重新选择打手' : historyAction === '转单' ? '订单已转派' : historyAction === '客服派单' ? '订单已派单' : historyAction === '提交完单' ? '打手已提交完单' : historyAction === '验收通过并入账' ? '订单已验收完成' : `订单${order.status}`;
     const details = { kind: 'order', entityId: order.id, orderId: order.id, title, body: `订单 ${order.id} · ${order.status}` };
     staff(serviceRoles, { ...details, page: order.status === '待接单' ? 'dispatch' : 'orders' });
     customer(order.customerId, { ...details, title: !previous ? '订单已提交' : title, page: 'memberOrders' });
+    const oldApplicants = new Set((previous?.applications || []).map(item => item.userId));
+    for (const application of order.applications || []) if (recruitmentOpen(order) && application.source === 'service' && !oldApplicants.has(application.userId)) {
+      push(application.userId, { ...details, relation: 'available', mode: 'management', page: 'availableOrders', title: '客服邀请你参与订单', body: `订单 ${order.id}，你已进入候选名单，等待老板选择。` });
+    }
+    if (recruitmentOpen(order) && (!previous || !recruitmentOpen(previous))) {
+      data.users.filter(candidate => !oldMembers.has(candidate.id) && matchesOrder(data, order, candidate)).forEach(candidate => {
+        push(candidate.id, { ...details, relation: 'available', mode: 'management', page: 'availableOrders', title: '有新的匹配订单', body: `订单 ${order.id} · ${order.game}，符合条件即可报名。` });
+      });
+    }
+    if (historyAction === '老板选择打手') for (const userId of oldApplicants) if (!currentMembers.has(userId)) {
+      push(userId, { ...details, relation: 'notSelected', mode: 'management', page: 'availableOrders', title: '本次订单已结束招募', body: `订单 ${order.id} 已选择其他打手，可继续查看其他订单。` });
+    }
     for (const userId of currentMembers) {
       push(userId, { ...details, mode: 'management', page: 'myOrders', title: !oldMembers.has(userId) ? '你收到一笔新派单' : title });
     }
@@ -108,6 +121,8 @@ export function notificationFeed(data, user, roles) {
       if (item.mode === 'personal') return Boolean(user.customerId && order.customerId === user.customerId);
       if (user.role === 'escort') {
         const assigned = order.participants.some(participant => participant.userId === user.id);
+        if (item.relation === 'available') return recruitmentOpen(order) && matchesOrder(data, order, user);
+        if (item.relation === 'notSelected') return !assigned && !recruitmentOpen(order) && (order.applications || []).some(application => application.userId === user.id);
         return item.relation === 'removed' ? !assigned : assigned;
       }
       return ['admin', 'service', 'afterSales', 'finance'].includes(user.role);

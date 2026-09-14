@@ -9,17 +9,23 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { createClubServer } from '../server.mjs';
 import { clubDay } from '../server/analytics.mjs';
 
-async function fixture(t, options = {}) {
+async function fixture(t, options = {}, cleanup = () => {}) {
   const instance = createClubServer({ database: ':memory:', production: false, publicOrigin: '', ...options });
   instance.server.listen(0, '127.0.0.1');
   await once(instance.server, 'listening');
-  t.after(() => new Promise(resolve => instance.server.close(resolve)));
+  t.after(async () => { await instance.close(); cleanup(); });
   const base = `http://127.0.0.1:${instance.server.address().port}`;
   return { ...instance, base };
 }
 
 async function post(base, path, body, headers = {}) {
   return fetch(base + path, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base, ...headers }, body: JSON.stringify(body) });
+}
+
+// Node fetch pins Host to the URL, even when a different Host was supplied.
+// Exercise reverse-proxy traffic with node:http so the configured host is sent.
+async function proxyPost(base, path, body, headers = {}) {
+  return rawRequest(base, path, { 'Content-Type': 'application/json', ...headers }, [JSON.stringify(body)]);
 }
 
 function rawRequest(base, path, headers = {}, chunks = []) {
@@ -100,22 +106,71 @@ test('production startup requires an HTTPS origin and an explicit persistent dat
   assert.throws(() => createClubServer({ production: true, publicOrigin: 'https://club.example', database: ':memory:' }), /CLUB_DATABASE/);
 });
 
-test.skip('production uses the configured HTTPS host and secure cookies, with separate login failure budgets', async t => {
+test('production uses the configured HTTPS host and secure cookies, with separate login failure budgets', async t => {
   const folder = mkdtempSync(join(tmpdir(), 'club-http-production-'));
-  t.after(() => rmSync(folder, { recursive: true, force: true }));
   const origin = 'https://club.example';
-  const { base } = await fixture(t, { production: true, publicOrigin: origin, database: join(folder, 'production.sqlite'), bootstrapAdmin: { username: 'club_owner', password: 'OwnerPassword123!', name: '正式负责人' } });
+  const { base } = await fixture(t, { production: true, publicOrigin: origin, database: join(folder, 'production.sqlite'), bootstrapAdmin: { username: 'club_owner', password: 'OwnerPassword123!', name: '正式负责人' } }, () => rmSync(folder, { recursive: true, force: true }));
   const headers = { Host: 'club.example', Origin: origin };
   const home = await rawRequest(base, '/', { Host: 'club.example' });
   assert.equal(home.status, 200);
   assert.equal(home.headers['strict-transport-security'], 'max-age=31536000');
+  assert.equal((await rawRequest(base, '/', { Host: 'club.example:443' })).status, 200);
+  assert.equal((await rawRequest(base, '/', { Host: 'club.example:4173' })).status, 403);
   assert.equal((await rawRequest(base, '/', { Host: 'evil.example', 'X-Forwarded-Host': 'club.example' })).status, 403);
-  assert.equal((await post(base, '/api/login', { username: 'club_owner', password: 'OwnerPassword123!' }, { ...headers, Origin: 'http://club.example' })).status, 403);
-  for (let i = 0; i < 10; i++) assert.equal((await post(base, '/api/login', { username: 'unknown', password: 'wrong' }, headers)).status, 401);
-  assert.equal((await post(base, '/api/login', { username: 'unknown', password: 'wrong' }, headers)).status, 429);
-  const login = await post(base, '/api/login', { username: 'club_owner', password: 'OwnerPassword123!' }, headers);
+  assert.equal((await proxyPost(base, '/api/login', { username: 'club_owner', password: 'OwnerPassword123!' }, { ...headers, Origin: 'http://club.example' })).status, 403);
+  for (let i = 0; i < 10; i++) assert.equal((await proxyPost(base, '/api/login', { username: 'unknown', password: 'wrong' }, headers)).status, 401);
+  assert.equal((await proxyPost(base, '/api/login', { username: 'unknown', password: 'wrong' }, headers)).status, 429);
+  const login = await proxyPost(base, '/api/login', { username: 'club_owner', password: 'OwnerPassword123!' }, headers);
   assert.equal(login.status, 200);
-  assert.match(login.headers.get('set-cookie'), /HttpOnly; SameSite=Strict; Path=\/; Secure; Max-Age=28800/);
-  const logout = await post(base, '/api/logout', {}, headers);
-  assert.match(logout.headers.get('set-cookie'), /Secure; Max-Age=0/);
+  assert.match(login.headers['set-cookie'][0], /HttpOnly; SameSite=Strict; Path=\/; Secure; Max-Age=28800/);
+  const Cookie = login.headers['set-cookie'][0].split(';')[0];
+  assert.equal((await rawRequest(base, '/api/me', { ...headers, Cookie })).status, 200);
+  const logout = await proxyPost(base, '/api/logout', {}, { ...headers, Cookie });
+  assert.match(logout.headers['set-cookie'][0], /Secure; Max-Age=0/);
+  assert.equal((await rawRequest(base, '/api/me', { ...headers, Cookie })).status, 401);
+});
+
+test('phone login whitespace aliases share the same production failure budget', async t => {
+  const folder = mkdtempSync(join(tmpdir(), 'club-http-phone-'));
+  const { base, store } = await fixture(t, { production: true, publicOrigin: 'https://club.example', database: join(folder, 'production.sqlite'), bootstrapAdmin: { username: 'phone_owner', password: 'OwnerPassword123!' } }, () => rmSync(folder, { recursive: true, force: true }));
+  const data = store.read();
+  data.customers.find(customer => customer.id === data.users[0].customerId).phone = '13800138000';
+  store.db.prepare('UPDATE club SET data=? WHERE id=1').run(JSON.stringify(data));
+  const headers = { Host: 'club.example', Origin: 'https://club.example' };
+  assert.equal((await proxyPost(base, '/api/login', { username: '138 0013 8000', password: 'OwnerPassword123!' }, headers)).status, 200);
+  for (let i = 0; i < 10; i++) {
+    const username = `138${' '.repeat(i + 1)}00138000`;
+    assert.equal((await proxyPost(base, '/api/login', { username, password: 'wrong' }, headers)).status, 401);
+  }
+  const denied = await proxyPost(base, '/api/login', { username: '13800138000', password: 'wrong' }, headers);
+  assert.equal(denied.status, 429);
+  assert.ok(Number(denied.headers['retry-after']) > 0);
+});
+
+test('readiness checks the database without exposing private data', async t => {
+  const { base, store } = await fixture(t);
+  const healthy = await fetch(base + '/api/health');
+  assert.equal(healthy.status, 200);
+  assert.equal(healthy.headers.get('cache-control'), 'no-store');
+  assert.deepEqual(await healthy.json(), { ok: true });
+  store.db.exec('ALTER TABLE club RENAME TO temporarily_unavailable');
+  try {
+    const unavailable = await fetch(base + '/api/health');
+    assert.equal(unavailable.status, 503);
+    assert.deepEqual(await unavailable.json(), { ok: false });
+  } finally { store.db.exec('ALTER TABLE temporarily_unavailable RENAME TO club'); }
+});
+
+test('graceful shutdown finishes accepted mutations and closes the database once', async t => {
+  const { base, store, close, server } = await fixture(t);
+  const requestStarted = once(server, 'request');
+  const data = Buffer.from(JSON.stringify({ username: 'shutdown_customer', password: 'SafeTest123!' }));
+  const response = rawRequest(base, '/api/register', { 'Content-Type': 'application/json', Origin: base }, [data.subarray(0, 20), data.subarray(20)]);
+  await requestStarted;
+  const stopped = close();
+  assert.equal(close(), stopped);
+  assert.equal((await response).status, 201);
+  await stopped;
+  assert.equal(server.listening, false);
+  assert.throws(() => store.read(), /not open/);
 });

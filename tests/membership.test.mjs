@@ -63,7 +63,9 @@ test('多人分成总和不超额、每人按等级分摊，冻结后禁止新�
   assert.deepEqual(o.participants.map(p=>p.shareBps),[4000,3500]);
   o=store.orderAction(a,o.id,'accept',{version:o.version});o=store.orderAction(b,o.id,'accept',{version:o.version});
   change(a,'freeze',{frozen:true});assert.throws(()=>store.orderAction(a,o.id,'start',{version:o.version}),/暂不能开始/);
-  assert.deepEqual(store.workspace(person(a.id)).availableOrders,[]);assert.throws(()=>store.setOnline(a,{online:true}),/冻结/);
+  assert.equal(store.setOnline(a,{online:true}).online,true);
+  assert.deepEqual(store.workspace(person(a.id)).availableOrders,[]);
+  assert.equal(store.assignable(store.read(),o,person(a.id)),false);
   change(a,'freeze',{frozen:false});store.setOnline(a,{online:true});o=store.orderAction(a,o.id,'start',{version:o.version});
   change(a,'freeze',{frozen:true});o=store.orderAction(a,o.id,'finish',{version:o.version,evidence:'服务完成请客服验收'});assert.equal(o.participants[0].finished,true);
   assert.throws(()=>change(b,'remove',{}),/未完成订单/);
