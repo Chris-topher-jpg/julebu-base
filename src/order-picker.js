@@ -27,7 +27,7 @@ export function openOrderPicker({ workspace, productId, preferredEscort, api, on
   modal.innerHTML = `<form class="so-form">
     <header class="so-header"><div><h2 id="selfOrderTitle">自助下单</h2><button type="button" class="so-notice-button" aria-expanded="false" aria-controls="soNotice">下单须知 ${icon('arrow', 13)}</button></div><button type="button" class="so-close" aria-label="关闭下单窗口">×</button></header>
     <div class="so-body">
-      <div id="soNotice" class="so-notice" hidden><strong>陪玩单下单须知</strong><p>按小时计价，最少 0.5 小时。确认游戏、等级、时长和区服后使用余额支付；支付成功后客服会邀请打手，符合条件的打手也可报名，由你在“我的点单”最终选择。服务完成后可在“我的点单”确认验收，有问题可申请售后。</p></div>
+      <div id="soNotice" class="so-notice" hidden><strong>陪玩单下单须知</strong><p>按小时计价，最少 1 小时，每次增减 1 小时。确认游戏、等级、时长和区服后使用余额支付；支付成功后客服会邀请打手，符合条件的打手也可报名，由你在“我的点单”最终选择。服务完成后可在“我的点单”确认验收，有问题可申请售后。</p></div>
       <ol class="so-steps" aria-label="下单步骤"><li data-so-step="1" aria-current="step"><b>01</b><span>选择您的需求</span></li><li data-so-step="2"><b>02</b><span>确认陪玩订单</span></li></ol>
       <section class="so-selection">
         <h3 class="so-section-heading"><b>1</b>选择您的需求 <span>陪玩单</span></h3>
@@ -38,7 +38,7 @@ export function openOrderPicker({ workspace, productId, preferredEscort, api, on
           <section><h4>陪玩等级</h4><label class="so-search">${icon('search', 14)}<input type="search" aria-label="搜索陪玩等级" placeholder="搜索等级" data-so-search="level"></label><div class="so-options" data-so-options="level"></div><p class="so-search-empty" data-so-empty="level" hidden>没有匹配的等级</p></section>
           <section><h4>服务类型</h4><label class="so-search">${icon('search', 14)}<input type="search" aria-label="搜索服务类型" placeholder="搜索服务类型" data-so-search="product"></label><div class="so-options" data-so-options="product"></div><p class="so-search-empty" data-so-empty="product" hidden>没有匹配的服务</p></section>
         </div>
-        <div class="so-field"><label for="soHours">下单时长 <em>*</em></label><div class="so-duration"><div class="so-stepper"><button type="button" data-so-hours="-0.5" aria-label="减少半小时">−</button><input id="soHours" name="hours" type="number" value="1" min="0.5" max="24" step="0.5" required aria-label="服务时长（小时）"><button type="button" data-so-hours="0.5" aria-label="增加半小时">+</button></div><span>小时</span><small>0.5 小时起，每次增加半小时</small></div></div>
+        <div class="so-field"><label for="soHours">下单时长 <em>*</em></label><div class="so-duration"><div class="so-stepper"><button type="button" data-so-hours="-1" aria-label="减少一小时">−</button><input id="soHours" name="hours" type="number" value="1" min="1" max="24" step="1" required aria-label="服务时长（小时）"><button type="button" data-so-hours="1" aria-label="增加一小时">+</button></div><span>小时</span><small>1 小时起，每次增减 1 小时</small></div></div>
         <div class="so-field"><label for="soRegion">游戏区服 <em>*</em></label><input id="soRegion" name="region" required maxlength="80" placeholder="请输入区服、游戏 ID 等信息"></div>
         <div class="so-field so-remark"><label for="soRequirement">备注</label><textarea id="soRequirement" name="requirement" rows="2" maxlength="300" placeholder="填写位置偏好、开麦要求、段位等（选填）"></textarea></div>
       </section>
@@ -111,7 +111,7 @@ export function openOrderPicker({ workspace, productId, preferredEscort, api, on
     $('#soQuote').textContent = selection.confirmed && Number.isSafeInteger(amount) && amount > 0 ? money(amount) : '—';
     $('#soBalance').textContent = `可用余额 ${money(catalog.wallet?.balanceCents)}`;
     $('.so-submit').disabled = pending || !products.length || !levels().length;
-    modal.querySelectorAll('[data-so-hours]').forEach(button => button.disabled = button.dataset.soHours.startsWith('-') ? hours <= .5 : hours >= 24);
+    modal.querySelectorAll('[data-so-hours]').forEach(button => button.disabled = button.dataset.soHours.startsWith('-') ? hours <= 1 : hours >= 24);
     if (selection.confirmed && Number.isFinite(amount) && amount > Number(catalog.wallet?.balanceCents || 0)) $('#soBalance').textContent += ` · 还差 ${money(amount - Number(catalog.wallet?.balanceCents || 0))}`;
     if (pending) form.querySelectorAll('button, input, select, textarea').forEach(control => { control.disabled = true; });
   }
@@ -132,7 +132,7 @@ export function openOrderPicker({ workspace, productId, preferredEscort, api, on
   $('.so-service-trigger').onclick = () => setCascader($('#soCascader').hidden);
   modal.querySelectorAll('[data-so-search]').forEach(input => input.oninput = () => applySearch(input.dataset.soSearch));
   $('[data-so-type]').onclick = () => $('[data-so-search="level"]').focus();
-  modal.querySelectorAll('[data-so-hours]').forEach(button => button.onclick = () => { form.elements.hours.value = Math.min(24, Math.max(.5, Number(form.elements.hours.value || 1) + Number(button.dataset.soHours))); update(); });
+  modal.querySelectorAll('[data-so-hours]').forEach(button => button.onclick = () => { form.elements.hours.stepUp(Number(button.dataset.soHours)); update(); });
   form.addEventListener('input', event => { if (!event.target.matches('[data-so-search]')) { form.elements.region.setCustomValidity(''); update(); error(''); } });
   form.noValidate = true;
   form.onsubmit = async event => {

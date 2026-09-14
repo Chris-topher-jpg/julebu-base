@@ -43,10 +43,10 @@ test('管理员改价后个人目录使用实时等级价，下单金额与余�
     const before = store.personal(customer).wallet.balanceCents;
     const order = store.createOrder(customer, {
       context: 'personal', boss: customer.name, productId: product.id, levelId,
-      hours: 1.5, pay: '在线支付', requirement: '核验改价后的个人目录与实际扣款',
+      hours: 2, pay: '在线支付', requirement: '核验改价后的个人目录与实际扣款',
       expectedUnitPriceCents: level.priceCents,
     });
-    const quotedCents = Math.round(level.priceCents * 1.5);
+    const quotedCents = Math.round(level.priceCents * 2);
     assert.equal(order.unitPriceCents, level.priceCents);
     assert.equal(order.amountCents, quotedCents);
     assert.equal(before - store.personal(customer).wallet.balanceCents, quotedCents);
@@ -70,10 +70,10 @@ test('个人下单按游戏配置报价并保留其他商品定价', t => {
   assert.ok(catalog.gameLevelConfigs['王者荣耀'].levels.every(level => !('shareBps' in level)));
   const before = catalog.wallet.balanceCents;
   const order = store.createOrder(buyer, {
-    context: 'personal', boss: buyer.name, productId: 'product-1', levelId: 'gold', hours: 1.5,
+    context: 'personal', boss: buyer.name, productId: 'product-1', levelId: 'gold', hours: 2,
     pay: '在线支付', requirement: '核验分游戏价格', expectedUnitPriceCents: configuredPrice,
   });
-  assert.equal(order.amountCents, Math.round(7001 * 1.5));
+  assert.equal(order.amountCents, Math.round(7001 * 2));
   assert.equal(store.personal(buyer).wallet.balanceCents, before - order.amountCents);
   const other = catalog.products.find(product => product.id === 'product-2');
   const otherOrder = store.createOrder(buyer, {

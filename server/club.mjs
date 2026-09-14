@@ -578,7 +578,7 @@ export class ClubStore {
       const product = data.products.find(p => p.id === input.productId);
       requireThat(product?.state === '启用' && catalogList(data).find(g => g.name === product.game)?.state === '上架', '游戏维护中或商品不可售');
       const hours = Number(input.hours);
-      requireThat(Number.isFinite(hours) && hours >= .5 && hours <= 24 && Number.isInteger(hours * 2), '服务时长应为 0.5–24 小时，按半小时递增');
+      requireThat(Number.isInteger(hours) && hours >= 1 && hours <= 24, '服务时长应为 1–24 小时，按 1 小时递增');
       const boss = textInput(input.boss, '老板称呼', 30);
       requireThat(['余额支付', '在线支付', '线下已收款'].includes(input.pay), '请选择支付方式');
       const level = levelOf(data, input.levelId ?? 'gold');
