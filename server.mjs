@@ -175,6 +175,7 @@ export function createClubServer({ database, production = process.env.NODE_ENV =
         const user = store.session(token);
         requireThat(user, '登录已失效，请重新登录', 401);
         if (req.method === 'GET') {
+          if (url.pathname === '/api/admissions') return json(store.admissions(user));
           if (url.pathname === '/api/real-name') return json(store.realNameStatus(user));
           if (url.pathname === '/api/real-name/requests') {
             const userId = url.searchParams.get('userId');
@@ -210,6 +211,15 @@ export function createClubServer({ database, production = process.env.NODE_ENV =
           return json(['assessments', 'assessment-records', 'examinations'].includes(resource) ? (workspace.assessments || []) : workspace[resource]);
         }
         if (url.pathname === '/api/notifications/read') return json(store.readNotifications(user, body));
+        if (url.pathname === '/api/admissions/config') return json(store.admissionMutation(user, 'config', null, body));
+        if (url.pathname === '/api/admissions/orders') return json(store.admissionMutation(user, 'place', null, body), 201);
+        if (url.pathname === '/api/admissions/applications') return json(store.admissionMutation(user, 'apply', null, body), 201);
+        const admissionOrder = url.pathname.match(/^\/api\/admissions\/applications\/([^/]+)\/orders$/);
+        if (admissionOrder) return json(store.admissionMutation(user, 'order', decodeURIComponent(admissionOrder[1]), body), 201);
+        const admissionChat = url.pathname.match(/^\/api\/admissions\/conversations\/([^/]+)\/messages$/);
+        if (admissionChat) return json(store.admissionMutation(user, 'message', decodeURIComponent(admissionChat[1]), body));
+        const admissionActionRoute = url.pathname.match(/^\/api\/admissions\/(?:orders|applications)\/([^/]+)\/actions$/);
+        if (admissionActionRoute) return json(store.admissionMutation(user, 'action', decodeURIComponent(admissionActionRoute[1]), body));
         if (url.pathname === '/api/real-name') return json(store.submitRealName(user, body), 202);
         const realNameReview = url.pathname.match(/^\/api\/real-name\/requests\/([^/]+)$/);
         if (realNameReview) return json(store.reviewRealName(user, decodeURIComponent(realNameReview[1]), body));

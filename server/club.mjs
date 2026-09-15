@@ -5,13 +5,14 @@ import { dirname } from 'node:path';
 import * as seed from './seed.mjs';
 import { personalContext, walletPayment, serviceOccupiesMember, settleOrder, reverseRefundEarnings } from './flow.mjs';
 import { FOUR_HOURS, clubDay, metrics, dailyBusinessMetrics, dateRange, trend, ranking, analyticsOptions } from './analytics.mjs';
-import { defaultLevels, defaultLevelPrices, priceOf, levelOf, meetsLevel, rateOf, hasOpenOrders, profileConflicts, migrateMembership, memberRecord, lockEarnings } from './membership.mjs';
+import { MIN_WITHDRAWAL_DEPOSIT_CENTS, defaultLevels, defaultLevelPrices, priceOf, levelOf, meetsLevel, rateOf, hasOpenOrders, profileConflicts, migrateMembership, memberRecord, lockEarnings } from './membership.mjs';
 import { isClubMember, attachCustomer, migrateIdentity, personalData } from './identity.mjs';
 import { recordNotifications, notificationFeed } from './notifications.mjs';
 import { conversationType, canManageConversation, escortConversation, escortUnread } from './conversations.mjs';
 import { catalogList, catalogNames, visibleProducts } from './game-catalog.mjs';
 import { buyerSelectionRequired, recruitmentOpen, matchesOrder, escortOrderView } from './order-matching.mjs';
 import { realNameVerification, isRealNameVerified, requireRealName, migrateRealName, submitRealName, realNameRequests, reviewRealName } from './real-name.mjs';
+import { migrateAdmissions, admissionSnapshot, saveAdmissionConfig, openAdmission, placeAdmissionOrder, createAdmissionOrder, admissionAction, admissionMessage } from './admissions.mjs';
 
 export const roles = {
   user: { label: '用户', tone: 'blue', pages: ['overview', 'memberProfile', 'memberHome', 'placeOrder', 'memberOrders', 'memberAfterSales', 'memberWallet', 'realName'], permissions: ['profile:update', 'order:create', 'order:confirm', 'refund:create', 'conversation:create', 'topup:create'] },
@@ -24,6 +25,7 @@ export const roles = {
   escort: { label: '打手', tone: 'green', pages: ['overview', 'availableOrders', 'myOrders', 'myEarnings', 'conversations'], permissions: ['profile:update', 'order:accept', 'order:serve', 'withdrawal:create', 'conversation:manage'] },
 };
 roles.admin.pages.push('realNameReviews');
+for (const role of ['user', 'member', 'admin', 'examiner']) roles[role].pages.push('admissions');
 export function requireThat(condition, message, status = 400) {
   if (!condition) throw Object.assign(new Error(message), { status });
 }
@@ -247,6 +249,7 @@ export class ClubStore {
     }
     if (migrateIdentity(data)) this.db.prepare('UPDATE club SET data=? WHERE id=1').run(JSON.stringify(data));
     if (migrateRealName(data)) this.db.prepare('UPDATE club SET data=? WHERE id=1').run(JSON.stringify(data));
+    if (migrateAdmissions(data)) this.db.prepare('UPDATE club SET data=? WHERE id=1').run(JSON.stringify(data));
     this.db.exec('CREATE TABLE IF NOT EXISTS analytics_cache (key TEXT PRIMARY KEY, data TEXT NOT NULL)');
     this.db.exec('COMMIT');
     this.dummyHash = passwordHash(randomBytes(24).toString('hex'));
@@ -367,6 +370,20 @@ export class ClubStore {
     const actor = data.users.find(u => u.id === user.id && u.active);
     requireThat(actor, '账号已停用', 401);
     return personalData(data, actor, roles);
+  }
+  admissions(user) { return admissionSnapshot(this.read(), user); }
+  admissionMutation(user, operation, id, input = {}) {
+    // The domain re-resolves the actual actor and checks ownership for every
+    // action; a client-supplied personal context never elevates staff access.
+    return this.transaction(user, 'profile:update', `考核申请 · ${operation}`, (data, actor) => {
+      if (operation === 'config') return saveAdmissionConfig(data, actor, input);
+      if (operation === 'apply') return openAdmission(data, actor, input);
+      if (operation === 'place') return placeAdmissionOrder(data, actor, input);
+      if (operation === 'order') return createAdmissionOrder(data, actor, id, input);
+      if (operation === 'message') return admissionMessage(data, actor, id, input);
+      if (operation === 'action') return admissionAction(data, actor, id, input);
+      requireThat(false, '考核操作不存在', 404);
+    });
   }
   realNameStatus(user) {
     const actor = this.read().users.find(candidate => candidate.id === user.id && candidate.active);
@@ -518,7 +535,7 @@ export class ClubStore {
         const latest = records[0];
         return { id: u.id, memberNo: u.memberNo, name: u.name, active: u.active, role: u.role, games: (u.games || []).filter(game => names.has(game)), levelId: u.levelId, levelName: levelOf(data, u.levelId)?.name || '', latestAssessment: latest ? { id: latest.id, type: latest.type, status: latest.status, result: latest.result, score: latest.score, game: latest.game, updatedAt: latest.updatedAt } : null, assessmentCount: records.length };
       });
-      return { ...common, levels: data.levels.map(({ id, name, rank }) => ({ id, name, rank })), members, assessments: data.assessments, assessmentRecords: data.assessments, qualityChecks: data.assessments.filter(item => item.type === '质检'), entryAssessments: data.assessments.filter(item => item.type === '入店考核') };
+      return { ...common, admissionOrders: admissionSnapshot(data, user).orders, levels: data.levels.map(({ id, name, rank }) => ({ id, name, rank })), members, assessments: data.assessments, assessmentRecords: data.assessments, qualityChecks: data.assessments.filter(item => item.type === '质检'), entryAssessments: data.assessments.filter(item => item.type === '入店考核') };
     }
     if (user.role === 'afterSales') {
       const conversations = data.conversations.filter(chat => canManageConversation(user, chat)).map(chat => managementConversation(data, chat));
@@ -640,7 +657,7 @@ export class ClubStore {
       if (customer) order.customerId = customer.id;
       order.selectionRequired = actor.role === 'user' || Boolean(customer && data.users.some(account => account.customerId === customer.id));
       if (input.pay === '余额支付' || input.pay === '在线支付') {
-        requireThat(customer && customer.balanceCents >= total, '老板余额不足，请先审核充值或选择已收款');
+        requireThat(customer && customer.balanceCents >= total, '老板余额不足，请先充值');
         customer.balanceCents -= total;
         data.ledger.unshift({ id: randomUUID(), userId: null, customerId: customer.id, account: boss, deltaCents: -total, afterCents: customer.balanceCents, source: order.id, label: '订单消费', at: now(), by: actor.name });
       }
@@ -879,7 +896,7 @@ export class ClubStore {
   withdrawal(user, input) {
     return this.transaction(user, 'withdrawal:create', '申请提现', (data, actor) => {
       requireRealName(actor);
-      requireThat(actor.depositCents >= 100000, '押金不足，需达到 ¥1,000 后才可提现');
+      requireThat(actor.depositCents >= MIN_WITHDRAWAL_DEPOSIT_CENTS, '押金不足，需达到 ¥1,000 后才可提现');
       const value = String(input.amount);
       requireThat(/^\d+(\.\d{1,2})?$/.test(value), '请输入最多两位小数的金额');
       const total = Math.round(Number(value) * 100);
@@ -904,7 +921,7 @@ export class ClubStore {
       requireThat(Number.isSafeInteger(item.amountCents) && item.amountCents > 0 && Number.isSafeInteger(member.balanceCents), '提现金额或成员余额无效，请先核对账户', 409);
       if (input.action !== 'reject') {
         requireRealName(member);
-        requireThat(member.active && member.depositCents >= 100000, '成员已停用或押金不足，请先处理');
+        requireThat(member.active && member.depositCents >= MIN_WITHDRAWAL_DEPOSIT_CENTS, '成员已停用或押金不足，请先处理');
         requireThat(!data.refunds.some(refund => ['待审核', '待线下退款'].includes(refund.status) && data.orders.some(order => order.id === refund.orderId && (order.settledAt || data.ledger.some(entry => entry.source === order.id && entry.label === '订单分成')) && order.participants.some(participant => participant.userId === member.id))), '该成员有已结算订单正在售后，请先驳回提现释放余额并处理退款', 409);
       }
       if (input.action === 'approve') {

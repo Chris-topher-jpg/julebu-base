@@ -10,7 +10,7 @@ const displayTime = value => {
 const actionLabel = item => item.orderId || /order|assign/.test(String(item.kind || '')) ? '查看订单' : '查看详情';
 
 /** The caller owns authentication, transport, and navigation; this module only presents notifications. */
-export function createNotificationCenter({ openItem, markRead, onError } = {}) {
+export function createNotificationCenter({ openItem, markRead, openSupport, onError } = {}) {
   let root, items = [], unreadCount = 0, status = '正在连接', initialized = false;
   let panelOpen = false, busy = false, generation = 0, toast = null, errorText = '';
   const seen = new Set();
@@ -137,6 +137,7 @@ export function createNotificationCenter({ openItem, markRead, onError } = {}) {
     if (!button || !root?.contains(button) || button.disabled) return;
     if (button.hasAttribute('data-nc-toggle')) { panelOpen = !panelOpen; if (panelOpen) toast = null; render(); }
     else if (button.hasAttribute('data-nc-close')) { panelOpen = false; render(); }
+    else if (button.hasAttribute('data-nc-support')) void runAction(async () => { if (typeof openSupport !== 'function') throw new Error('客服服务暂时不可用，请稍后重试。'); await openSupport(); });
     else if (button.hasAttribute('data-nc-dismiss')) { toast = null; render(); }
     else if (button.hasAttribute('data-nc-clear-error')) { errorText = ''; render(); }
     else if (button.hasAttribute('data-nc-read-all')) void runAction(() => acknowledge(unreadIds()));
@@ -158,8 +159,11 @@ export function createNotificationCenter({ openItem, markRead, onError } = {}) {
     render();
   }
 
-  function mount() {
-    if (root?.isConnected) return root;
+  function mount(target) {
+    if (root?.isConnected) {
+      if (target && root.parentElement !== target) target.append(root);
+      return root;
+    }
     if (!root) {
       root = document.createElement('aside');
       root.className = 'notification-center';
@@ -167,11 +171,11 @@ export function createNotificationCenter({ openItem, markRead, onError } = {}) {
       root.innerHTML = `<div class="nc-error" role="alert" hidden><span class="nc-error-text"></span><button type="button" data-nc-clear-error aria-label="关闭错误提示">${icon('x', 16)}</button></div>
         <section class="nc-toast" aria-label="新通知" hidden><div class="nc-toast-head"><span class="nc-toast-symbol" aria-hidden="true">${icon('bell', 19)}</span><strong class="nc-toast-title"></strong><button type="button" class="nc-icon-button" data-nc-dismiss aria-label="关闭通知提醒">${icon('x', 17)}</button></div><p class="nc-toast-body"></p><div class="nc-toast-bottom"><span class="nc-toast-extra"></span><button type="button" class="nc-view" data-nc-toast-open>查看详情</button></div></section>
         <section class="nc-panel" id="syncNotificationPanel" aria-labelledby="syncNotificationTitle" hidden><header class="nc-panel-head"><div><h2 id="syncNotificationTitle">通知中心</h2><span class="nc-unread-summary"></span></div><button type="button" class="nc-icon-button" data-nc-close aria-label="关闭通知中心">${icon('x', 19)}</button></header><div class="nc-toolbar"><span><i aria-hidden="true"></i><span class="nc-panel-status"></span></span><button type="button" data-nc-read-all>本页全部已读</button></div><div class="nc-list-scroll"><ul class="nc-list" aria-label="最近通知"></ul><div class="nc-empty">${icon('bell', 27)}<strong>暂时没有通知</strong><p>订单和服务进展会在这里同步。</p></div></div><footer class="nc-panel-footer">最近 ${MAX_ITEMS} 条通知 · 仅展示与你相关的信息</footer></section>
-        <button type="button" class="nc-launcher" data-nc-toggle aria-controls="syncNotificationPanel" aria-expanded="false"><span class="nc-launcher-icon" aria-hidden="true">${icon('bell', 21)}<b class="nc-count" hidden></b></span><span class="nc-launcher-copy"><strong>通知中心</strong><small class="nc-status"></small></span></button><span class="nc-announcement" role="status" aria-live="polite" aria-atomic="true"></span>`;
+        <button type="button" class="nc-support-launcher" data-nc-support aria-label="联系客服">${icon('headset', 18)}<span>联系客服</span></button><button type="button" class="nc-launcher" data-nc-toggle aria-controls="syncNotificationPanel" aria-expanded="false"><span class="nc-launcher-icon" aria-hidden="true">${icon('bell', 21)}<b class="nc-count" hidden></b></span><span class="nc-launcher-copy"><strong>通知中心</strong><small class="nc-status"></small></span></button><span class="nc-announcement" role="status" aria-live="polite" aria-atomic="true"></span>`;
       root.addEventListener('click', onClick);
       document.addEventListener('keydown', onKeyDown);
     }
-    document.body.append(root);
+    (target || document.body).append(root);
     render();
     return root;
   }

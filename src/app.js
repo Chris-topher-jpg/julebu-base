@@ -14,12 +14,14 @@ import { requestJson } from './request.js';
 import { lockForm } from './form-state.js';
 import { realNameMarkup, bindRealName } from './real-name.js';
 import { bindAuth } from './auth.js';
+import { admissionsMarkup, mountAdmissions, openAdmissions } from './admissions.js';
 
 const labels = { overview: '工作台', serviceManagement: '客服管理', examinerCandidates: '考核与质检', orders: '订单管理', dispatch: '派单台', conversations: '会话中心', escorts: '陪玩成员', catalog: '游戏与商品', topups: '充值审核', flows: '资金流水', settlements: '提现与结算', accounts: '成员与权限', availableOrders: '接单大厅', myOrders: '我的订单', myEarnings: '我的收益', memberProfile: '个人中心', memberHome: '个人主页', memberOrders: '我的点单', memberAfterSales: '售后记录' };
 const symbols = { overview: 'grid', serviceManagement:'headset', examinerCandidates:'users', orders: 'receipt', dispatch: 'trend', conversations: 'users', escorts: 'headset', catalog: 'game', topups: 'wallet', flows: 'trend', settlements: 'wallet', accounts: 'users', availableOrders: 'game', myOrders: 'receipt', myEarnings: 'wallet', memberProfile: 'grid', memberHome: 'users', memberOrders: 'receipt', memberAfterSales: 'headset' };
-const state = { workspace: null, mode: 'public', page: 'overview', filter: '全部', query: '', busy: false };
+const state = { workspace: null, mode: 'public', page: 'overview', filter: '全部', query: '', busy: false, pendingAdmission: false };
 let syncGeneration = 0, pendingMutations = 0, pendingRender = false, viewEpoch = 0;
 let notificationUser = null;
+let leaveAdmissions = () => {};
 const dirtyForms = new WeakSet();
 // Navigation has its own lifetime: creating a chat changes the data revision,
 // but must not cancel the view that is waiting to open that same chat.
@@ -96,6 +98,7 @@ async function refresh(render = true) {
 
 const notifications = createNotificationCenter({
   openItem: openNotification,
+  openSupport: () => openHeaderChat({ consultationOnly: true }),
   markRead: async ids => {
     const userId = state.workspace?.user.id;
     const result = await api('/notifications/read', { ids });
@@ -138,6 +141,8 @@ function updateLiveOrderDetail() {
 }
 function flushSyncedView() {
   if (!pendingRender || !state.workspace || state.busy || pendingMutations || document.querySelector('dialog[open]')) return;
+  // The assessment view syncs its own records and preserves conversation drafts.
+  if (state.page === 'admissions' && document.querySelector('.admissions')) { pendingRender = false; return; }
   if ([...document.querySelectorAll('#app form')].some(form => dirtyForms.has(form))) return;
   // Keep filters, focus and scroll while rebuilding a list with new records.
   const controls = [...document.querySelectorAll('#app input, #app select, #app textarea')];
@@ -163,7 +168,9 @@ async function openNotification(item) {
   if (!await switchWorkspace(item.mode, item.page, completedView => { view = completedView; }) || !currentView(view) || state.workspace?.user.id !== userId) return false;
   const ensureCurrent = () => { if (!currentView(view)) throw new Error('页面已切换'); };
   try {
-    if (item.kind === 'conversation' && state.workspace.conversations?.some(chat => chat.id === item.entityId)) {
+    if (item.kind === 'admission') {
+      bindAdmissionPage(item.entityId);
+    } else if (item.kind === 'conversation' && state.workspace.conversations?.some(chat => chat.id === item.entityId)) {
       await openConversation(item.entityId, {
         state, toast,
         api: async (path, body) => {
@@ -232,6 +239,7 @@ function navigate(page, filter = '全部') {
   window.scrollTo({ top: 0, behavior: 'instant' });
 }
 async function renderLogin() {
+  leaveAdmissions(); leaveAdmissions = () => {};
   syncGeneration++; viewEpoch++; liveSync.stop(); notifications.reset(); notificationUser = null; pendingRender = false;
   document.querySelectorAll('dialog[open]').forEach(modal => { modal.close(); modal.remove(); });
   leaveOwner(); state.workspace = null; state.mode = 'public';
@@ -259,7 +267,10 @@ async function renderLogin() {
       if (!currentView(view) || !authCurrent()) return;
       if (workspace.user.id !== identity.user.id) { renderLogin(); toast('登录账号已变化，请重新登录'); return; }
       modal.close();
-      if (parsedRoute.mode === 'public') renderPublicHome(workspace, publicPage);
+      if (parsedRoute.mode === 'public') {
+        renderPublicHome(workspace, publicPage);
+        if (state.pendingAdmission) { state.pendingAdmission = false; requestAnimationFrame(() => openAdmissionDialog()); }
+      }
       else { state.mode = parsedRoute.mode; state.workspace = workspace; navigate(parsedRoute.page); }
       } catch (error) { if (currentView(view) && authCurrent()) throw error; }
     },
@@ -280,6 +291,11 @@ function enhancePublicHome(workspace = state.workspace) {
   });
   links.forEach(link => link.addEventListener('click', () => markNavigation(link.hash)));
   const parsed = parseRoute(location.hash);
+  const admissionEntry = document.createElement('section');
+  admissionEntry.className = 'public-admission-entry';
+  admissionEntry.innerHTML = `<div><span>加入星河 · 成为陪玩</span><strong>把你的游戏实力，变成接单资格</strong><p>选择游戏并确认考核标准，提交订单后由后台安排考官联系；通过后开启接单。</p></div><button type="button" class="public-admission-button" data-action="openAdmissions">${icon('game', 20)} 成为打手 ${icon('arrow', 17)}</button>`;
+  admissionEntry.querySelector('[data-action="openAdmissions"]').onclick = openAdmissionDialog;
+  home.querySelector('.public-hero')?.after(admissionEntry);
   const section = parsed.page === 'companions' ? '#members' : parsed.page === 'guarantees' ? '#rules' : '#games';
   markNavigation(parsed.page === 'companions' ? '#/public/companions' : parsed.page === 'guarantees' ? '#/public/guarantees' : '#/public/overview');
   const online = home.querySelector('.public-online');
@@ -319,7 +335,7 @@ function renderPublicStandalone(page) {
   const rules = home.querySelector('#rules');
   const help = home.querySelector('#help');
   const footer = home.querySelector('.public-footer');
-  [hero, members, rules, help, footer].forEach(el => { if (el) el.hidden = true; });
+  [hero, members, rules, help, footer, home.querySelector('.public-admission-entry')].forEach(el => { if (el) el.hidden = true; });
   const active = page === 'companions' ? members : rules;
   if (!active) return;
   active.hidden = false;
@@ -410,6 +426,7 @@ async function openHeaderChat({ consultationOnly = false } = {}) {
   finally { openHeaderChat.pending = false; }
 }
 function renderPublicHome(workspace, page = 'overview') {
+  leaveAdmissions(); leaveAdmissions = () => {};
   if (!workspace?.user) return renderLogin();
   if (state.mode !== 'public' || state.page !== page || state.workspace?.user.id !== workspace.user.id) viewEpoch++;
   closeDialog(); leaveOwner(); state.workspace = workspace; state.mode = 'public'; state.page = page;
@@ -427,6 +444,9 @@ function renderPublicHome(workspace, page = 'overview') {
     const unread = (workspace.conversations || []).reduce((sum, item) => sum + (Number(item.unread) || 0), 0);
     const onlineAction = membership?.active && membership.role === 'escort' ? `<button type="button" role="menuitem" data-action="headerOnline">${icon('headset', 18)}<span>${user.online ? '当前在线' : '当前离线'}</span><small class="account-status-dot ${user.online ? 'is-online' : ''}">${user.online ? '在线' : '离线'}</small></button>` : '';
     actions.innerHTML = `<button class="public-header-message" type="button" data-action="headerMessages" aria-label="消息与售后${unread ? `，${unread}条未读` : ''}">${icon('message', 20)}${unread ? `<span class="public-header-dot">${unread > 99 ? '99+' : unread}</span>` : ''}</button><div class="public-account-wrap"><button class="public-account-trigger" type="button" data-action="headerAccount" aria-haspopup="menu" aria-expanded="false"><span class="public-account-avatar">${e(displayName.slice(0, 1))}</span><span class="public-account-copy"><small>用户</small><strong>${e(displayName)}</strong></span>${icon('chevron', 14)}</button><div class="public-account-menu" role="menu" hidden><div class="public-account-menu-head"><span class="public-account-avatar">${e(displayName.slice(0, 1))}</span><div><strong>${e(displayName)}</strong><small>${e(user.username || user.phone || '')}</small></div></div><div class="public-account-menu-separator"></div>${onlineAction}<button type="button" role="menuitem" data-action="headerPersonal">${icon('users', 18)}<span>个人中心</span>${icon('arrow', 14)}</button><button type="button" role="menuitem" data-action="headerProfile">${icon('users', 18)}<span>设置</span>${icon('arrow', 14)}</button>${canEnterManagement ? `<button type="button" role="menuitem" data-action="enterManagement">${icon('building', 18)}<span>进入后台管理</span>${icon('arrow', 14)}</button>` : ''}<div class="public-account-menu-separator"></div><button type="button" role="menuitem" class="is-danger" data-action="headerLogout">${icon('arrow', 18)}<span>退出登录</span></button></div></div>`;
+    const notificationSlot = notifications.mount(actions);
+    const accountWrap = actions.querySelector('.public-account-wrap');
+    if (accountWrap) actions.insertBefore(notificationSlot, accountWrap);
     actions.querySelector('[data-action="headerMessages"]').onclick = () => openHeaderChat();
     const accountButton = actions.querySelector('[data-action="headerAccount"]');
     const menu = actions.querySelector('.public-account-menu');
@@ -512,7 +532,25 @@ function openPersonalSupport() {
     },
   });
 }
+
+function openAdmissionDialog() {
+  if (!state.workspace?.user) {
+    state.pendingAdmission = true;
+    document.querySelector('.nav-login-link[data-action="openLogin"]')?.click();
+    return;
+  }
+  if (state.mode === 'management') return openWorkspace('personal', 'admissions');
+  return openAdmissions({
+    api,
+    workspace: state.workspace,
+    mode: 'personal',
+    onRealName: () => openWorkspace('personal', 'realName'),
+    onTopup: () => perform({ dataset: { action: 'personalTopup' } }),
+    onNavigate: target => target === 'management' ? openWorkspace('management', 'overview') : target && openWorkspace('personal', target),
+  });
+}
 function renderApp() {
+  leaveAdmissions(); leaveAdmissions = () => {};
   const w = state.workspace; if (!w) return renderLogin();
   startWorkspaceSync();
   if (!w.role.pages.includes(state.page)) { state.page = 'overview'; history.replaceState(null, '', route('overview')); }
@@ -520,6 +558,7 @@ function renderApp() {
   if (state.mode === 'personal') {
     leaveOwner();
     document.querySelector('#app').innerHTML = personalShellMarkup(w, state.page, pageContent());
+    notifications.mount(document.querySelector('.account-header-actions'));
     bindSharedActions();
     const accountNav = document.querySelector('.account-sidebar nav');
     const activeNav = accountNav?.querySelector('[aria-current="page"]');
@@ -527,9 +566,18 @@ function renderApp() {
     return;
   }
   renderOwner({ state, api, navigate, refresh, dialog, orderDetail, toast, legacyContent: pageContent });
+  notifications.mount(document.querySelector('.account-header-actions'));
   bindSharedActions();
 }
+function bindAdmissionPage(initialId) {
+  leaveAdmissions();
+  leaveAdmissions = mountAdmissions(document.querySelector('#app'), {
+    api, workspace: state.workspace, initialId,
+    onNavigate: page => page === 'management' ? openWorkspace('management', 'overview') : ['verifyRealName', 'topup'].includes(page) ? perform({ dataset: { action: page === 'topup' ? 'personalTopup' : 'verifyRealName' } }) : navigate(page),
+  });
+}
 function bindSharedActions() {
+  if (state.page === 'admissions') bindAdmissionPage();
   bindRealName({ state, api, refresh, toast, dialog });
  document.querySelectorAll('[data-page]').forEach(el => el.onclick = () => navigate(el.dataset.page));
   document.querySelectorAll('[data-action]').forEach(el => el.onclick = () => perform(el));
@@ -588,6 +636,7 @@ function bindSharedActions() {
   });
 }
 function pageContent() {
+  if (state.page === 'admissions') return admissionsMarkup(state.workspace);
   if (state.page === 'realName') return realNameMarkup(state.workspace);
   if (state.mode === 'personal') return ({ overview: personalOverview, memberProfile: () => personalCenterMarkup(state.workspace), memberHome: () => personalHomeMarkup(state.workspace), placeOrder: placeOrderPage, memberOrders: memberOrdersPage, memberAfterSales: memberAfterSalesPage, memberWallet: memberWalletPage })[state.page]();
   const pages = { memberProfile: () => personalCenterMarkup(state.workspace), memberHome: () => personalHomeMarkup(state.workspace), examinerCandidates: examinerCandidatesPage, overview, placeOrder: placeOrderPage, orders: () => orderPage(false), orderList: () => orderPage(false), transferOrders: () => orderPage(false), dispatchOrders: dispatchPage, myOrders: () => orderPage(true), dispatch: dispatchPage, availableOrders: availablePage, conversations: conversationPage, myEarnings: earningsPage, accounts: accountsPage, escorts: membersPage, catalog: catalogPage, flows: flowPage, topups: topupsPage, settlements: settlementsPage, memberOrders: memberOrdersPage, memberAfterSales: memberAfterSalesPage, memberWallet: memberWalletPage };
@@ -625,7 +674,10 @@ function examinerCandidatesPage() {
 }
 function overview() {
   const w = state.workspace; const mine = w.user.role === 'escort';
-  if(w.user.role==='examiner') { const records = assessmentRecords(); return intro('考官工作台','处理入店考核与在店质检，所有结论均保留操作记录。') + `<section class="stats">${metric('待处理考核',records.filter(a=>['待考核','进行中','待复核'].includes(a.status)).length,'优先处理新入店申请','orange','calendar')}${metric('待质检',records.filter(a=>a.type==='quality' && ['待考核','进行中','待复核'].includes(a.status)).length,'跟进水平下降或周期复检','purple','trend')}${metric('历史记录',records.length,'可追溯评分与改进建议','blue','receipt')}</section>` + panel('今日工作', '按成员档案进入考核与质检', `<div class="owner-subnav"><button data-page="examinerCandidates">进入考核与质检 →</button></div>`); }
+  if(w.user.role==='examiner') {
+    const orders = w.admissionOrders || [], active = orders.filter(order => !['passed', 'failed', 'cancelled', 'refunded'].includes(order.status));
+    return intro('考官工作台', '接收后台考核派单，联系申请人、确认时间并提交考核结果。') + `<section class="stats">${metric('待联系申请人', active.filter(order => !order.contactedAt && !order.appointmentAt).length, '新派单请先联系申请人', 'orange', 'message')}${metric('待安排时间', active.filter(order => !order.appointmentAt).length, '与申请人协商后保存时间', 'purple', 'calendar')}${metric('进行中考核订单', active.length, '查看支付、安排和考核进度', 'blue', 'receipt')}</section>` + panel('考核订单', '按订单联系申请人，已支付并确认时间后可开始考核', '<div class="owner-subnav"><button data-page="admissions">进入考核订单 →</button><button data-page="examinerCandidates">陪玩质检与档案 →</button></div>');
+  }
   if(w.user.role==='afterSales') { const linked = w.conversations.filter(c=>c.orderId || c.order); return intro('售后工作台','围绕订单处理异议、退款和服务质量问题；非订单诉求直接在会话中跟进。') + `<section class="stats">${metric('退款待跟进',w.orders.filter(o=>o.status==='退款审核').length,'及时处理售后申请','orange','receipt')}${metric('待验收订单',w.orders.filter(o=>o.status==='待验收').length,'核对服务完成情况','green','trend')}${metric('待跟进会话',w.conversations.filter(c=>c.state!=='已结束').length,'回复客户并记录结果','blue','users')}${metric('订单关联会话',linked.length,'可直接查看接单打手和订单记录','purple','headset')}</section>` + panel('售后业务','订单争议与非订单意见统一从会话进入',`<div class="owner-subnav"><button data-page="conversations">打开会话中心 →</button><button data-page="orders">查看订单记录 →</button></div>`); }
   if(w.user.role==='finance') return intro('财务工作台','处理所有与金钱相关的充值、退款赔偿、资金流水与提现结算。') + `<section class="stats">${metric('待审核充值',w.topups.filter(t=>t.state==='待审核').length,'核实实际收款后入账','blue','wallet')}${metric('待处理退款',w.refunds.filter(r=>['待审核','待线下退款'].includes(r.status)).length,'确认赔付金额与返还渠道','pink','receipt')}${metric('待审核提现',w.withdrawals.filter(t=>t.status==='待审核').length,'审核后安排线下打款','orange','receipt')}${metric('资金流水',w.ledger.length,'所有账户变动均可追溯','green','trend')}</section>` + panel('财务业务','按实际凭证核验并留存审核说明',`<div class="owner-subnav"><button data-page="topups">充值 / 退款审核</button><button data-page="flows">资金流水</button><button data-page="settlements">提现与结算</button></div>`);
   if(['user','member'].includes(w.user.role)) {
@@ -900,7 +952,7 @@ async function perform(el) {
           },
         });
       }
-      const form = dialog('新建陪玩订单', `${field('老板称呼', 'boss', 'text', '', 'maxlength="30" list="customerList"')}<datalist id="customerList">${w.customers.map(c => `<option value="${e(c.name)}">余额 ${money(c.balanceCents)}</option>`).join('')}</datalist><label class="form-field">游戏商品<select name="productId">${products.map(p => `<option value="${p.id}">${e(p.game)} · ${e(p.name)}</option>`).join('')}</select></label><label class="form-field">订单等级<select name="levelId">${w.levels.map(l=>`<option value="${l.id}" ${l.id==='gold'?'selected':''}>${l.name}及以上</option>`).join('')}</select></label>${field('服务时长（小时）','hours','number',1,'min="1" max="24" step="1"')}<div class="form-total">订单金额 <strong id="orderQuote"></strong></div><label class="form-field">支付方式<select name="pay"><option>线下已收款</option><option>余额支付</option></select></label><label class="form-field">Tag 标签（可选，用逗号分隔）<input name="tags" maxlength="240" placeholder="例如：娱乐、上分、新人"></label>${textarea('服务要求', 'requirement', '例如：开麦沟通、游戏区服、服务时间和段位要求')}<p class="detail-note">选择“线下已收款”表示客服已经核实收款；余额支付会即时扣减老板余额。</p>`, '创建订单', submitOrder);
+      const form = dialog('新建陪玩订单', `${field('老板称呼', 'boss', 'text', '', 'maxlength="30" list="customerList"')}<datalist id="customerList">${w.customers.map(c => `<option value="${e(c.name)}">余额 ${money(c.balanceCents)}</option>`).join('')}</datalist><label class="form-field">游戏商品<select name="productId">${products.map(p => `<option value="${p.id}">${e(p.game)} · ${e(p.name)}</option>`).join('')}</select></label><label class="form-field">订单等级<select name="levelId">${w.levels.map(l=>`<option value="${l.id}" ${l.id==='gold'?'selected':''}>${l.name}及以上</option>`).join('')}</select></label>${field('服务时长（小时）','hours','number',1,'min="1" max="24" step="1"')}<div class="form-total">订单金额 <strong id="orderQuote"></strong></div><label class="form-field">支付方式<input name="pay" value="余额支付" readonly></label>${textarea('服务要求', 'requirement', '例如：开麦沟通、游戏区服、服务时间和段位要求')}<p class="detail-note">创建订单后将从所选老板的账户余额扣款；余额不足时请先充值。</p>`, '创建订单', submitOrder);
       let requestSignature = '', requestId = '';
       function orderUnitPrice(productId, levelId) {
         const product = products.find(item => item.id === productId);
@@ -910,7 +962,7 @@ async function perform(el) {
       }
       function submitOrder(data) {
         const input = Object.fromEntries(data);
-        const payload = { ...input, expectedUnitPriceCents: orderUnitPrice(input.productId, input.levelId) };
+        const payload = { ...input, pay: '余额支付', expectedUnitPriceCents: orderUnitPrice(input.productId, input.levelId) };
         const signature = JSON.stringify(payload);
         if (signature !== requestSignature) { requestSignature = signature; requestId = crypto.randomUUID(); }
         return api('/orders', { ...payload, requestId });

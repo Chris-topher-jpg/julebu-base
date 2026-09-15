@@ -60,3 +60,45 @@
 @keyframes nc-enter{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
 @media(max-width:560px){.notification-center{right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px))}.nc-launcher{min-height:48px;padding:9px 12px;border-radius:14px;gap:8px}.nc-launcher-copy{max-width:105px}.nc-status{max-width:105px}.nc-panel,.nc-toast{bottom:62px}.nc-panel{max-height:calc(100dvh - 116px - env(safe-area-inset-bottom,0px))}.nc-panel-head{padding:16px}.nc-toolbar{padding:10px 16px}.nc-item{padding:15px 16px}.nc-view{min-height:34px}.nc-read{min-height:34px}.nc-icon-button{width:34px;height:34px}.nc-toast{padding:14px}.nc-error{bottom:calc(100% + 72px)}}
 @media(prefers-reduced-motion:reduce){.nc-toast{animation:none}.nc-launcher{transition:none}}
+
+/* Keep notification actions together at the top-right of the viewport. */
+.notification-center{top:78px;right:24px;bottom:auto;display:flex;align-items:center;gap:8px;max-width:none}
+.public-nav-actions .notification-center{position:relative;inset:auto;display:flex;align-items:center}
+.account-header-actions .notification-center,.owner-top-actions .notification-center{position:relative;inset:auto;display:flex;align-items:center}
+.account-header-actions .notification-center{order:0}
+/* Support and notifications remain available outside the management workspace. */
+.owner-top-actions .account-header-actions .notification-center{display:none}
+.account-header-actions .account-header-message{order:1}
+.account-header-actions .account-user-button{order:2}
+.account-header-actions .account-logout{order:3}
+.notification-center .nc-launcher{order:2}
+.notification-center .nc-support-launcher{order:1;pointer-events:auto;display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:54px;padding:10px 14px;border:1px solid #f0cbb8;border-radius:16px;background:#fffaf7;color:#b16e43;box-shadow:0 5px 22px #3024581c;font-size:12px;font-weight:600;white-space:nowrap}
+.notification-center .nc-support-launcher:hover{background:#fff0e6;box-shadow:0 6px 24px #4d3b8228}
+.notification-center .nc-panel,.notification-center .nc-toast{top:68px;bottom:auto}
+.notification-center .nc-error{top:68px;bottom:auto}
+.public-nav-actions .notification-center .nc-panel,.public-nav-actions .notification-center .nc-toast,.public-nav-actions .notification-center .nc-error{top:68px;bottom:auto}
+@media(max-width:560px){.notification-center{inset:auto;gap:6px}.notification-center .nc-support-launcher{min-height:42px;padding:8px 10px;border-radius:12px;font-size:11px}.notification-center .nc-support-launcher span{display:none}.notification-center .nc-launcher{min-height:42px;padding:7px 9px;border-radius:12px}.notification-center .nc-launcher-copy{display:none}.notification-center .nc-panel,.notification-center .nc-toast{top:52px;bottom:auto}.notification-center .nc-error{top:52px;bottom:auto}}
+
+.account-page .account-header-actions{gap:12px;min-width:0}
+.account-page .account-logout{white-space:nowrap}
+.notification-center .nc-launcher,.notification-center .nc-support-launcher{border-radius:8px}
+@media(max-width:1100px){
+  .account-page .account-brand small{display:none}
+  .account-page .account-header-inner{gap:20px}
+  .account-page .account-public-nav{display:none}
+}
+@media(max-width:700px){
+  .owner-topbar{height:auto;min-height:90px;flex-wrap:wrap;gap:6px;padding:8px}
+  .owner-topbar>div:first-child{width:100%}
+  .owner-top-actions{width:100%;justify-content:flex-end;overflow:visible;flex-wrap:wrap}
+  .owner-username{max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .owner-top-actions button[data-action="logout"]{font-size:11px;width:auto;white-space:nowrap;flex-shrink:0}
+}
+@media(max-width:560px){
+  .account-page .account-header{height:auto;min-height:65px}
+  .account-page .account-header-inner{flex-wrap:wrap;padding:12px 0;gap:10px}
+  .account-page .account-header-actions{width:100%;justify-content:flex-end;gap:14px}
+  .account-page .account-header-message{margin-right:auto}
+  .notification-center .nc-panel,.notification-center .nc-toast,.notification-center .nc-error{position:fixed;right:14px;top:74px;max-width:calc(100vw - 28px)}
+  .account-header-actions .notification-center .nc-panel,.account-header-actions .notification-center .nc-toast,.account-header-actions .notification-center .nc-error{top:124px}
+}

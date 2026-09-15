@@ -1,3 +1,4 @@
+export const MIN_WITHDRAWAL_DEPOSIT_CENTS = 100000;
 export const defaultLevels = [
   { id: 'star', name: '明星', rank: 4, shareBps: 8500 },
   { id: 'demon', name: '魔王', rank: 3, shareBps: 8000 },

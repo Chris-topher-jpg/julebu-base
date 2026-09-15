@@ -87,6 +87,23 @@ export function recordNotifications(data, before, actor) {
     customer(item.customerId, { ...details, page: 'memberWallet' });
   }
 
+  const oldAdmissions = index(before.admissionApplications);
+  const oldAdmissionOrders = index(before.admissionOrders);
+  const oldAdmissionChats = index(before.admissionConversations);
+  for (const application of data.admissionApplications || []) {
+    const order = (data.admissionOrders || []).find(item => item.id === application.orderId);
+    const chat = (data.admissionConversations || []).find(item => item.id === application.conversationId);
+    const newMessage = (chat?.messages?.length || 0) > (oldAdmissionChats.get(chat?.id)?.messages?.length || 0);
+    if (!newMessage && same(application, oldAdmissions.get(application.id)) && same(order, oldAdmissionOrders.get(order?.id))) continue;
+    const labels = { consulting: '咨询中', unpaid: '待支付', pending: '待考核', inProgress: '考核中', recheck: '待复核', passed: '已通过', failed: '未通过', cancelled: '已取消', refunded: '已退款' };
+    const assignmentChanged = application.examinerId && application.examinerId !== oldAdmissions.get(application.id)?.examinerId;
+    const title = newMessage ? '收到考核会话消息' : order && !oldAdmissionOrders.has(order.id) ? '考核订单已创建' : assignmentChanged ? '考核订单已分配考官' : '考核订单进度有更新';
+    const details = { kind: 'admission', entityId: application.id, orderId: order?.id, page: 'admissions', title, body: `${application.game} · ${labels[application.status] || '进度更新'}${order && !application.examinerId ? ' · 等待安排考官' : ''}` };
+    push(application.userId, { ...details, mode: 'personal' });
+    push(application.examinerId, { ...details, title: assignmentChanged && order ? '收到考核派单，请联系申请人' : details.title, mode: 'management' });
+    staff(['admin'], { ...details, title: order?.dispute?.status === 'pending' ? '有考核争议等待处理' : order && !application.examinerId ? '考核订单待分配考官' : details.title });
+  }
+
   const oldAssessments = index(before.assessments);
   for (const item of data.assessments || []) if (!same(item, oldAssessments.get(item.id))) {
     const details = { kind: 'assessment', entityId: item.id, title: '考核进度已更新', body: `${item.type} · ${item.status}${item.result ? ` · ${item.result}` : ''}` };
@@ -148,6 +165,10 @@ export function notificationFeed(data, user, roles) {
     if (item.kind === 'assessment') {
       const assessment = data.assessments.find(assessment => assessment.id === item.entityId);
       return Boolean(assessment && (item.mode === 'personal' ? assessment.memberId === user.id : user.role === 'admin' || assessment.examinerId === user.id));
+    }
+    if (item.kind === 'admission') {
+      const application = (data.admissionApplications || []).find(record => record.id === item.entityId);
+      return Boolean(application && (item.mode === 'personal' ? application.userId === user.id : user.role === 'admin' || user.role === 'examiner' && application.examinerId === user.id));
     }
     if (item.kind === 'account') return item.mode === 'personal' ? item.entityId === user.id : user.role === 'admin';
     if (item.kind === 'wallet') return item.entityId === user.id;
