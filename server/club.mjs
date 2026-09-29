@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { randomBytes, randomUUID, scryptSync, timingSafeEqual, createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { isProfileAvatarPreset } from '../src/profile-avatars.js';
 import * as seed from './seed.mjs';
 import { personalContext, walletPayment, serviceOccupiesMember, settleOrder, reverseRefundEarnings } from './flow.mjs';
 import { FOUR_HOURS, clubDay, metrics, dailyBusinessMetrics, dateRange, trend, ranking, analyticsOptions } from './analytics.mjs';
@@ -1087,7 +1088,7 @@ export class ClubStore {
       const payload = input && typeof input === 'object' ? input : {};
       const name = textInput(payload.name, '昵称', 30);
       const avatar = typeof payload.avatar === 'string' ? payload.avatar.trim() : '';
-      const preset = /^\/src\/escort-(0[1-9]|1[0-4])\.jpg$/.test(avatar);
+      const preset = isProfileAvatarPreset(avatar) || /^\/src\/escort-(0[1-9]|1[0-4])\.jpg$/.test(avatar);
       const dataUrlMatch = avatar.match(/^data:image\/jpeg;base64,([A-Za-z0-9+/]+={0,2})$/);
       if (avatar) {
         requireThat(avatar.length <= 90000, '头像数据过大');

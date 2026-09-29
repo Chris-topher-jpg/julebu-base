@@ -8,13 +8,14 @@ test('updateProfile is self-only, validates fields, and persists safe public dat
   const admin = { id: 'admin' };
   const beforeEscort = store.read().users.find(user => user.id === 'demo-escort');
   const result = store.updateProfile(admin, {
-    name: '新管理员', avatar: '/src/escort-14.jpg', bio: '俱乐部管理员', tags: ['管理', '管理'],
+    name: '新管理员', avatar: '/src/profile-avatar-star.svg', bio: '俱乐部管理员', tags: ['管理', '管理'],
     id: 'demo-escort', role: 'escort', balanceCents: 1, passwordHash: 'hostile', online: false,
   });
   assert.equal(result.name, '新管理员');
   const savedAdmin = store.read().users.find(user => user.id === 'admin');
   assert.equal(savedAdmin.name, '新管理员');
-  assert.equal(savedAdmin.avatar, '/src/escort-14.jpg');
+  assert.equal(savedAdmin.avatar, '/src/profile-avatar-star.svg');
+  assert.equal(store.personal(admin).user.avatar, '/src/profile-avatar-star.svg');
   assert.deepEqual(savedAdmin.profileTags, ['管理']);
   const afterEscort = store.read().users.find(user => user.id === 'demo-escort');
   assert.equal(afterEscort.name, beforeEscort.name);
@@ -47,6 +48,8 @@ test('updateProfile rejects invalid avatars, lengths, and tag payloads', t => {
   t.after(() => store.close());
   const user = { id: 'admin' };
   assert.throws(() => store.updateProfile(user, { name: '管理员', avatar: '/src/escort-00.jpg' }), /头像格式无效/);
+  assert.throws(() => store.updateProfile(user, { name: '管理员', avatar: '/src/profile-avatar-unknown.svg' }), /头像格式无效/);
+  assert.throws(() => store.updateProfile(user, { name: '管理员', avatar: 'data:image/svg+xml,<svg onload="alert(1)"/>' }), /头像格式无效/);
   assert.throws(() => store.updateProfile(user, { name: '管理员', avatar: 'data:image/jpeg;base64,SGVsbG8=' }), /有效的 JPEG/);
   assert.throws(() => store.updateProfile(user, { name: '管理员', avatar: `data:image/jpeg;base64,${'A'.repeat(90000)}` }), /头像数据过大/);
   assert.throws(() => store.updateProfile(user, { name: '管理员', bio: 'x'.repeat(241) }), /个人介绍最多/);

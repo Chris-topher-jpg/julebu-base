@@ -599,7 +599,10 @@ function bindSharedActions() {
     form?.querySelector('[name="avatar"]')?.setAttribute('value', button.dataset.profileAvatar || '');
     if (form) form.querySelector('[name="avatar"]').value = button.dataset.profileAvatar || '';
     form?.querySelector('#profileAvatarPreview')?.setAttribute('src', button.dataset.profileAvatar || '');
-    form?.querySelectorAll('[data-profile-avatar]').forEach(item => item.classList.toggle('is-selected', item === button));
+    form?.querySelectorAll('[data-profile-avatar]').forEach(item => {
+      item.classList.toggle('is-selected', item === button);
+      item.setAttribute('aria-pressed', String(item === button));
+    });
   }));
   document.querySelector('#profileAvatarFile')?.addEventListener('change', event => {
     const file = event.target.files?.[0]; const form = event.target.form; if (!file || !form) return;
@@ -615,7 +618,10 @@ function bindSharedActions() {
         const dataUrl = canvas.toDataURL('image/jpeg', .82);
         if (dataUrl.length > 90000) { if (feedback) feedback.textContent = '头像图片过大，请选择较小的图片'; return; }
         form.elements.avatar.value = dataUrl; form.querySelector('#profileAvatarPreview').src = dataUrl;
-        form.querySelectorAll('[data-profile-avatar]').forEach(item => item.classList.remove('is-selected'));
+        form.querySelectorAll('[data-profile-avatar]').forEach(item => {
+          item.classList.remove('is-selected');
+          item.setAttribute('aria-pressed', 'false');
+        });
         if (feedback) feedback.textContent = '';
       };
       image.src = reader.result;

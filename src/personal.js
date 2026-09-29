@@ -1,6 +1,7 @@
 import { escapeHtml as e, icon } from './ui.js';
 import { accountHeaderActionsMarkup } from './account-header.js';
 import { realNameNotice, realNameMarkup } from './real-name.js';
+import { profileAvatars } from './profile-avatars.js';
 
 const money = value => `¥ ${((Number(value) || 0) / 100).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const date = value => value && Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) : '时间未记录';
@@ -33,10 +34,18 @@ export function personalProfileMarkup(workspace) {
 
 export function personalHomeMarkup(workspace) {
   const user = workspace.user || {};
-  const avatars = Array.from({ length: 14 }, (_, index) => `/src/escort-${String(index + 1).padStart(2, '0')}.jpg`);
-  const current = user.avatar || avatars[0];
+  const avatars = profileAvatars;
+  const current = user.avatar || avatars[0].src;
   const tags = Array.isArray(user.profileTags) ? user.profileTags.join('、') : '';
-  return `<section class="profile-editor"><form id="profileEditorForm"><div class="profile-editor-head"><div><p class="account-eyebrow">我的公开资料</p><h2>个人主页</h2><p>这些资料会显示在你的账户和陪玩展示卡片中。</p></div><span class="profile-editor-status">${user.online ? '在线' : '离线'}</span></div><div class="profile-editor-grid"><div class="profile-avatar-editor"><img id="profileAvatarPreview" src="${e(current)}" alt="头像预览"><input type="hidden" name="avatar" value="${e(user.avatar || '')}"><label class="profile-upload-button">上传头像<input id="profileAvatarFile" type="file" accept="image/jpeg,image/png,image/webp"></label><p>或选择头像</p><div class="profile-avatar-options">${avatars.map(avatar => `<button type="button" class="profile-avatar-option ${current === avatar ? 'is-selected' : ''}" data-profile-avatar="${e(avatar)}"><img src="${e(avatar)}" alt="选择头像"></button>`).join('')}</div></div><div class="profile-fields"><label class="form-field">昵称<input name="name" value="${e(user.name || '')}" maxlength="30" required></label><label class="form-field">个人介绍<textarea name="bio" rows="5" maxlength="240" placeholder="介绍一下自己">${e(user.bio || '')}</textarea></label><label class="form-field">个人标签<input name="tags" value="${e(tags)}" maxlength="200" placeholder="用顿号分隔，例如：开麦、耐心、团队配合"><small>最多填写 8 个标签</small></label><p class="detail-note">登录账号和用户编号由系统管理，不能在此修改。</p><button type="submit" class="primary-action">保存个人主页</button><p class="profile-editor-feedback" role="status" aria-live="polite"></p></div></div></form></section>`;
+  return `<section class="profile-editor"><form id="profileEditorForm"><div class="profile-editor-head"><div><p class="account-eyebrow">我的公开资料</p><h2>个人主页</h2><p>这些资料会显示在你的账户和陪玩展示卡片中。</p></div><span class="profile-editor-status">${user.online ? '在线' : '离线'}</span></div><div class="profile-editor-grid">
+    <div class="profile-avatar-editor">
+      <img id="profileAvatarPreview" src="${e(current)}" alt="头像预览">
+      <input type="hidden" name="avatar" value="${e(current)}">
+      <label class="profile-upload-button">上传头像<input id="profileAvatarFile" type="file" accept="image/jpeg,image/png,image/webp"></label>
+      <p>星河伙伴</p><span class="profile-avatar-hint">选一位搭子，和你一起开局</span>
+      <div class="profile-avatar-options">${avatars.map(avatar => `<button type="button" class="profile-avatar-option ${current === avatar.src ? 'is-selected' : ''}" data-profile-avatar="${e(avatar.src)}" aria-label="选择${e(avatar.name)}头像" aria-pressed="${current === avatar.src}" title="${e(avatar.name)}"><img src="${e(avatar.src)}" alt="${e(avatar.name)}"></button>`).join('')}</div>
+    </div>
+    <div class="profile-fields"><label class="form-field">昵称<input name="name" value="${e(user.name || '')}" maxlength="30" required></label><label class="form-field">个人介绍<textarea name="bio" rows="5" maxlength="240" placeholder="介绍一下自己">${e(user.bio || '')}</textarea></label><label class="form-field">个人标签<input name="tags" value="${e(tags)}" maxlength="200" placeholder="用顿号分隔，例如：开麦、耐心、团队配合"><small>最多填写 8 个标签</small></label><p class="detail-note">登录账号和用户编号由系统管理，不能在此修改。</p><button type="submit" class="primary-action">保存个人主页</button><p class="profile-editor-feedback" role="status" aria-live="polite"></p></div></div></form></section>`;
 }
 
 function recentActivities(workspace) {
