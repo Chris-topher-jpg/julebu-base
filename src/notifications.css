@@ -1,0 +1,104 @@
+.notification-center{position:fixed;inset:auto 24px 22px auto;z-index:90;font-family:inherit;color:#263047;pointer-events:none;--nc-accent:#6454dc;--nc-border:#e8e9f2;max-width:calc(100vw - 32px)}
+.notification-center [hidden]{display:none!important}
+.notification-center button{font:inherit;cursor:pointer}
+.notification-center button:disabled{opacity:.55;cursor:wait}
+.notification-center button:focus-visible{outline:3px solid #b5aaff;outline-offset:3px}
+.nc-launcher{pointer-events:auto;display:flex;align-items:center;gap:11px;min-height:54px;padding:10px 17px 10px 13px;border:1px solid #dfdcef;border-radius:16px;background:#fff;color:#36334e;box-shadow:0 5px 22px #3024581c;text-align:left;transition:box-shadow .15s,background .15s}
+.nc-launcher:hover,.nc-launcher[aria-expanded="true"]{background:#fbfaff;box-shadow:0 6px 24px #4d3b8228}
+.nc-launcher-icon{position:relative;display:grid;place-items:center;width:30px;height:31px;color:var(--nc-accent)}
+.nc-count{position:absolute;top:-7px;right:-7px;display:grid;place-items:center;min-width:19px;height:19px;padding:0 4px;border:2px solid #fff;border-radius:10px;background:#e86670;color:#fff;font-size:10px;line-height:1}
+.nc-launcher-copy{display:flex;flex-direction:column;gap:4px;max-width:175px}
+.nc-launcher-copy strong{font-size:12px;font-weight:600}
+.nc-status{max-width:175px;overflow:hidden;color:#858398;font-size:10px;text-overflow:ellipsis;white-space:nowrap}
+.nc-panel,.nc-toast,.nc-error{pointer-events:auto;position:absolute;right:0;bottom:68px;width:min(390px,calc(100vw - 32px));border:1px solid var(--nc-border);border-radius:16px;background:#fff;box-shadow:0 14px 50px #23244324}
+.nc-panel{display:flex;flex-direction:column;overflow:hidden;max-height:min(600px,calc(100dvh - 112px))}
+.nc-panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:19px 19px 15px}
+.nc-panel-head h2{margin:0 0 5px;font-size:17px;line-height:1.4;font-weight:650;letter-spacing:-.3px}
+.nc-unread-summary{font-size:11px;color:#9690a6}
+.nc-icon-button{display:grid;place-items:center;flex-shrink:0;width:30px;height:30px;padding:0;border:0;border-radius:8px;background:transparent;color:#8d90a0}
+.nc-icon-button:hover{background:#f0eefb;color:var(--nc-accent)}
+.nc-toolbar{display:flex;align-items:center;justify-content:space-between;gap:9px;padding:11px 19px;background:#faf9ff;border-top:1px solid #f0eef6;border-bottom:1px solid #f0eef6}
+.nc-toolbar>span{display:flex;align-items:center;gap:6px;min-width:0;color:#858097;font-size:10px}
+.nc-toolbar i{width:5px;height:5px;flex-shrink:0;border-radius:50%;background:#9587d8}
+.nc-panel-status{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nc-toolbar button{flex-shrink:0;padding:2px 0;border:0;background:transparent;color:var(--nc-accent);font-size:11px}
+.nc-list-scroll{min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#d9d3ee transparent}
+.nc-list{list-style:none;margin:0;padding:0}
+.nc-item{padding:17px 19px;border-bottom:1px solid #eeedf4;background:#fff}
+.nc-item:last-child{border-bottom:0}
+.nc-item.is-unread{background:#fdfcff}
+.nc-item-top{display:flex;align-items:center;gap:10px}
+.nc-item-icon{display:grid;place-items:center;flex-shrink:0;width:31px;height:31px;border-radius:10px;background:#f1edff;color:#8575d2}
+.nc-item-copy{display:flex;flex:1;flex-direction:column;gap:4px;min-width:0}
+.nc-item-title{font-size:12px;line-height:1.5;font-weight:600;overflow-wrap:anywhere}
+.nc-item-context{font-size:10px;color:#a09bac}
+.nc-unread-dot{width:6px;height:6px;flex-shrink:0;border-radius:50%;background:var(--nc-accent)}
+.nc-item-body{margin:10px 0 12px;font-size:11px;line-height:1.8;color:#79788b;white-space:pre-wrap;overflow-wrap:anywhere}
+.nc-item-bottom{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.nc-item-time{color:#a39dac;font-size:10px;white-space:nowrap}
+.nc-item-actions{display:flex;align-items:center;gap:11px;margin-left:auto}
+.nc-read{border:0;background:transparent;padding:5px 0;color:#9b92af;font-size:10px!important}
+.nc-read:hover{color:var(--nc-accent)}
+.nc-view{display:inline-flex;align-items:center;justify-content:center;min-height:30px;padding:6px 11px;border:1px solid #e8e1ff;border-radius:7px;background:#f3efff;color:var(--nc-accent);font-size:11px!important;font-weight:600!important;white-space:nowrap}
+.nc-view:hover{background:#eae2ff}
+.nc-panel-footer{flex-shrink:0;border-top:1px solid #efedf5;padding:12px 19px;color:#aaa4b5;font-size:10px;text-align:center;line-height:1.5}
+.nc-empty{display:flex;flex-direction:column;align-items:center;gap:11px;padding:43px 20px;color:#b3a9d0}
+.nc-empty strong{color:#767184;font-size:12px;font-weight:500}
+.nc-empty p{margin:0;color:#a9a1b4;font-size:11px;line-height:1.6}
+.nc-toast{padding:16px 17px;background:linear-gradient(135deg,#fff 60%,#fbf9ff);animation:nc-enter .18s ease-out}
+.nc-toast-head{display:flex;align-items:center;gap:9px}
+.nc-toast-symbol{display:grid;place-items:center;flex-shrink:0;width:31px;height:31px;border-radius:10px;background:#efeaff;color:#7b64d4}
+.nc-toast-title{flex:1;min-width:0;overflow-wrap:anywhere;font-size:12px;font-weight:650;line-height:1.6}
+.nc-toast-body{margin:10px 0 13px;color:#858095;font-size:11px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere;max-height:120px;overflow:auto}
+.nc-toast-bottom{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.nc-toast-bottom .nc-view{margin-left:auto}
+.nc-toast-extra{color:#a69ab8;font-size:10px}
+.nc-error{bottom:calc(100% + 78px);z-index:2;display:flex;align-items:flex-start;gap:10px;padding:13px 14px;border-color:#f1d3d6;border-radius:11px;background:#fff4f5;color:#bd5364;font-size:11px;line-height:1.7}
+.nc-error-text{flex:1;overflow-wrap:anywhere}
+.nc-error button{display:grid;place-items:center;flex-shrink:0;width:24px;height:24px;padding:0;border:0;border-radius:5px;background:transparent;color:#bf7480}
+.nc-announcement{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+@keyframes nc-enter{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:560px){.notification-center{right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px))}.nc-launcher{min-height:48px;padding:9px 12px;border-radius:14px;gap:8px}.nc-launcher-copy{max-width:105px}.nc-status{max-width:105px}.nc-panel,.nc-toast{bottom:62px}.nc-panel{max-height:calc(100dvh - 116px - env(safe-area-inset-bottom,0px))}.nc-panel-head{padding:16px}.nc-toolbar{padding:10px 16px}.nc-item{padding:15px 16px}.nc-view{min-height:34px}.nc-read{min-height:34px}.nc-icon-button{width:34px;height:34px}.nc-toast{padding:14px}.nc-error{bottom:calc(100% + 72px)}}
+@media(prefers-reduced-motion:reduce){.nc-toast{animation:none}.nc-launcher{transition:none}}
+
+/* Keep notification actions together at the top-right of the viewport. */
+.notification-center{top:78px;right:24px;bottom:auto;display:flex;align-items:center;gap:8px;max-width:none}
+.public-nav-actions .notification-center{position:relative;inset:auto;display:flex;align-items:center}
+.account-header-actions .notification-center,.owner-top-actions .notification-center{position:relative;inset:auto;display:flex;align-items:center}
+.account-header-actions .notification-center{order:0}
+/* Support and notifications remain available outside the management workspace. */
+.owner-top-actions .account-header-actions .notification-center{display:none}
+.account-header-actions .account-header-message{order:1}
+.account-header-actions .account-user-button{order:2}
+.account-header-actions .account-logout{order:3}
+.notification-center .nc-launcher{order:2}
+.notification-center .nc-support-launcher{order:1;pointer-events:auto;display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:54px;padding:10px 14px;border:1px solid #f0cbb8;border-radius:16px;background:#fffaf7;color:#b16e43;box-shadow:0 5px 22px #3024581c;font-size:12px;font-weight:600;white-space:nowrap}
+.notification-center .nc-support-launcher:hover{background:#fff0e6;box-shadow:0 6px 24px #4d3b8228}
+.notification-center .nc-panel,.notification-center .nc-toast{top:68px;bottom:auto}
+.notification-center .nc-error{top:68px;bottom:auto}
+.public-nav-actions .notification-center .nc-panel,.public-nav-actions .notification-center .nc-toast,.public-nav-actions .notification-center .nc-error{top:68px;bottom:auto}
+@media(max-width:560px){.notification-center{inset:auto;gap:6px}.notification-center .nc-support-launcher{min-height:42px;padding:8px 10px;border-radius:12px;font-size:11px}.notification-center .nc-support-launcher span{display:none}.notification-center .nc-launcher{min-height:42px;padding:7px 9px;border-radius:12px}.notification-center .nc-launcher-copy{display:none}.notification-center .nc-panel,.notification-center .nc-toast{top:52px;bottom:auto}.notification-center .nc-error{top:52px;bottom:auto}}
+
+.account-page .account-header-actions{gap:12px;min-width:0}
+.account-page .account-logout{white-space:nowrap}
+.notification-center .nc-launcher,.notification-center .nc-support-launcher{border-radius:8px}
+@media(max-width:1100px){
+  .account-page .account-brand small{display:none}
+  .account-page .account-header-inner{gap:20px}
+  .account-page .account-public-nav{display:none}
+}
+@media(max-width:700px){
+  .owner-topbar{height:auto;min-height:90px;flex-wrap:wrap;gap:6px;padding:8px}
+  .owner-topbar>div:first-child{width:100%}
+  .owner-top-actions{width:100%;justify-content:flex-end;overflow:visible;flex-wrap:wrap}
+  .owner-username{max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .owner-top-actions button[data-action="logout"]{font-size:11px;width:auto;white-space:nowrap;flex-shrink:0}
+}
+@media(max-width:560px){
+  .account-page .account-header{height:auto;min-height:65px}
+  .account-page .account-header-inner{flex-wrap:wrap;padding:12px 0;gap:10px}
+  .account-page .account-header-actions{width:100%;justify-content:flex-end;gap:14px}
+  .account-page .account-header-message{margin-right:auto}
+  .notification-center .nc-panel,.notification-center .nc-toast,.notification-center .nc-error{position:fixed;right:14px;top:74px;max-width:calc(100vw - 28px)}
+  .account-header-actions .notification-center .nc-panel,.account-header-actions .notification-center .nc-toast,.account-header-actions .notification-center .nc-error{top:124px}
+}

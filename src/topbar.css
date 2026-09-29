@@ -1,0 +1,97 @@
+/* Shared top navigation treatment for public, account and staff workspaces. */
+:root{--topbar-height:64px;--topbar-border:#e8ebf2;--topbar-ink:#34405a;--topbar-muted:#8993a7}
+
+.public-nav,.account-page .account-header,.owner-topbar{height:var(--topbar-height);border-bottom:1px solid var(--topbar-border);box-shadow:0 1px 8px #24324b08}
+.public-nav,.account-page .account-header-inner,.owner-topbar{background:#fff}
+
+.public-nav{padding:0 clamp(20px,4vw,64px);gap:28px}
+.public-brand{gap:10px;min-width:0}
+.public-brand strong{font-size:15px;white-space:nowrap}
+.public-brand small{font-size:10px;color:var(--topbar-muted)}
+.public-nav nav{gap:26px}
+.public-nav nav a{font-size:12px;color:#68758e;padding:21px 0 19px;border-bottom:2px solid transparent}
+.public-nav nav a:hover,.public-nav nav a[aria-current=page]{color:#5363dc;border-bottom-color:#5363dc}
+.public-nav-actions{gap:10px!important;min-width:0}
+.public-nav-actions .nav-login-link{min-height:36px;padding:8px 13px;border:1px solid #dfe4f0;border-radius:7px;color:#5363dc;background:#fff}
+
+.account-page .account-header-inner{width:min(1280px,calc(100% - 48px));gap:38px}
+.account-page .account-header{height:var(--topbar-height)}
+.account-page .account-public-nav{gap:24px}
+.account-page .account-public-nav>a{padding:21px 0 19px;border-bottom:2px solid transparent;font-size:12px}
+.account-page .account-public-nav>a:hover{border-bottom-color:#5967dc}
+:is(.account-page,.owner-topbar) .account-header-actions{display:flex;align-items:center;gap:10px;min-width:0;min-height:42px;margin-left:auto;font-family:'Microsoft YaHei','Noto Sans SC',sans-serif;line-height:1.6}
+:is(.account-page,.owner-topbar) .account-header-actions>a{text-decoration:none}
+:is(.account-page,.owner-topbar) .account-header-message{position:relative;display:grid;place-items:center;flex-shrink:0;width:38px;height:38px;margin:0;border-radius:8px;color:#7e889b}
+:is(.account-page,.owner-topbar) .account-header-message>svg{width:20px;height:20px}
+:is(.account-page,.owner-topbar) .account-header-message:hover{background:#f4f5ff;color:#5363dc}
+:is(.account-page,.owner-topbar) .account-unread{position:absolute;top:0;right:-3px;min-width:17px;height:17px;padding:0 4px;border:2px solid #fff;border-radius:10px;background:#ef7c70;color:#fff;font-size:9px;line-height:13px;text-align:center}
+:is(.account-page,.owner-topbar) .account-user-button{display:flex;align-items:center;gap:9px;min-width:0;min-height:38px;padding:3px 8px 3px 4px;border:0;border-radius:8px;background:transparent;color:#46516a;font-size:13px}
+:is(.account-page,.owner-topbar) .account-user-button>span:last-child{max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+:is(.account-page,.owner-topbar) .account-user-button:hover{background:#f4f5ff}
+:is(.account-page,.owner-topbar) .account-role{flex-shrink:0;padding-left:10px;border-left:1px solid #edf0f5;color:#9aa3b3;font-size:10px;white-space:nowrap}
+:is(.account-page,.owner-topbar) .account-mini-avatar{display:grid;place-items:center;flex-shrink:0;width:32px;height:32px;border-radius:50%;background:#eeecff;color:#7b70d8;font-size:13px}
+:is(.account-page,.owner-topbar) .account-mini-avatar img{width:100%;height:100%;object-fit:cover;border-radius:50%}
+:is(.account-page,.owner-topbar) .account-logout{flex-shrink:0;height:28px;padding:0 0 0 13px;border:0;border-left:1px solid #e9ecf3;background:none;color:#9199aa;font:inherit;font-size:11px;white-space:nowrap;cursor:pointer}
+:is(.account-page,.owner-topbar) .account-logout:hover{color:#5b5ce9}
+:is(.account-page,.owner-topbar) .account-header-actions :is(a,button):focus-visible{outline:3px solid #bec0ff;outline-offset:3px}
+.account-header-actions .notification-center{flex:0 0 auto}
+.account-header-actions .notification-center :is(.nc-support-launcher,.nc-launcher){height:44px;min-height:44px;padding:6px 11px;border-radius:8px;box-shadow:none}
+.account-header-actions .nc-launcher-copy{gap:2px}
+.account-header-actions .nc-launcher-copy strong{line-height:16px}
+.account-header-actions .nc-status{line-height:12px}
+.account-header-actions .notification-center :is(.nc-panel,.nc-toast,.nc-error){top:calc(100% + 14px)}
+
+.owner-topbar{height:var(--topbar-height);padding:0 28px 0 20px;gap:20px;box-shadow:0 1px 8px #24324b08}
+.owner-topbar>div:first-child{gap:12px}
+.owner-topbar .owner-icon-button{border-radius:7px;color:#6d7890}
+.owner-topbar .owner-icon-button:hover{background:#f3f5fa;color:#5363dc}
+.owner-breadcrumb{font-size:13px;color:#718097;font-weight:500}
+.owner-top-actions{gap:18px!important;min-width:0}
+.owner-context-actions{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.owner-top-actions .owner-home-button{height:34px;padding:0 10px;border-radius:7px}
+.owner-top-actions .owner-link{height:34px;margin:0;padding:0 9px;border-radius:7px;text-decoration:none!important}
+.owner-top-actions .owner-link:hover{background:#f3f5ff}
+
+@media(max-width:1100px){
+  .owner-topbar{height:auto;min-height:96px;padding-top:8px;padding-bottom:8px;flex-wrap:wrap;gap:4px}
+  .owner-topbar>div:first-child{width:100%;height:28px}
+  .owner-top-actions{width:100%;justify-content:flex-end}
+}
+
+@media(max-width:900px){
+  .public-nav{padding:0 20px;gap:18px}
+  .account-page .account-header-inner{width:calc(100% - 36px);gap:20px}
+  .owner-topbar{padding-right:16px}
+  .account-header-actions .notification-center :is(.nc-support-launcher span,.nc-launcher-copy){display:none}
+  .account-header-actions .notification-center :is(.nc-support-launcher,.nc-launcher){width:38px;height:38px;min-height:38px;padding:6px}
+  .account-header-actions .notification-center .nc-launcher-icon{width:24px;height:24px}
+}
+@media(max-width:700px){
+  :root{--topbar-height:58px}
+  .public-nav{height:58px}
+  .account-page .account-header{height:auto;min-height:58px}
+  .account-page .account-header-inner{min-height:58px;padding:7px 0;gap:8px}
+  :is(.account-page,.owner-topbar) .account-header-actions{gap:7px;flex-wrap:nowrap}
+  :is(.account-page,.owner-topbar) .account-user-button{padding:3px}
+  :is(.account-page,.owner-topbar) .account-user-button>span:last-child{display:none}
+  .owner-topbar{height:auto;min-height:88px;padding:8px 10px;align-items:flex-start;flex-wrap:wrap}
+  .owner-topbar>div:first-child{width:100%;height:28px}
+  .owner-top-actions{width:100%;justify-content:flex-end;gap:6px!important;overflow:visible;flex-wrap:nowrap}
+  .owner-top-actions .owner-home-button{font-size:0;width:32px;padding:0}
+  .owner-top-actions .owner-home-button:before{content:'⌂';font-size:17px}
+  .owner-top-actions .owner-home-button:last-child:before{content:'⌂'}
+  .owner-top-actions .owner-link[data-action="online"]{display:inline-flex;align-items:center;height:30px;font-size:11px;padding:0 5px}
+  .owner-top-actions:has([data-action="online"]) .owner-home-button{display:none}
+  .account-header-actions .notification-center :is(.nc-panel,.nc-toast,.nc-error){position:fixed;right:14px;top:104px;max-width:calc(100vw - 28px)}
+}
+@media(max-width:560px){
+  .account-page .account-header-actions .notification-center :is(.nc-panel,.nc-toast,.nc-error){top:124px}
+}
+@media(max-width:380px){
+  .owner-topbar{padding-right:8px;padding-left:8px}
+  .owner-topbar .account-header-actions{gap:5px}
+  .owner-topbar .account-header-message{width:30px}
+  .owner-topbar .account-logout{padding-left:8px}
+  .owner-topbar .account-header-actions .notification-center :is(.nc-support-launcher,.nc-launcher){width:32px}
+  .owner-topbar .owner-context-actions{min-width:0;flex-shrink:1}
+}

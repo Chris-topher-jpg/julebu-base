@@ -1,0 +1,80 @@
+{
+  "database": "C:\\Users\\44244\\Desktop\\guanlihoutai\\test-results\\virtual-escorts-smoke.sqlite",
+  "runId": "76bd21ca-47d0-42a8-9d27-4ad2865e35b1",
+  "startedAt": "2026-09-14T07:00:32.398Z",
+  "checks": [
+    "demo-escort-4 can serve star orders",
+    "demo-escort-5 can serve star orders",
+    "double star one-hour charge",
+    "double order debits customer wallet",
+    "both stars applied",
+    "buyer selection requires confirmation",
+    "first confirmation waits for second",
+    "all confirmed enables start",
+    "double service started",
+    "first completion waits for second",
+    "all submitted reaches acceptance",
+    "customer service acceptance settles order",
+    "two equal earnings at 70% total",
+    "earnings credit escort accounts",
+    "personal escort wallets stay separate",
+    "customer charge ledger",
+    "earnings ledger total",
+    "demo-escort-4 withdrawal freezes full new earnings",
+    "demo-escort-4 financial approval awaits payment",
+    "demo-escort-4 simulated payout recorded",
+    "demo-escort-4 withdrawal ledger net",
+    "demo-escort-4 payout external ledger",
+    "demo-escort-5 withdrawal freezes full new earnings",
+    "demo-escort-5 financial approval awaits payment",
+    "demo-escort-5 simulated payout recorded",
+    "demo-escort-5 withdrawal ledger net",
+    "demo-escort-5 payout external ledger",
+    "single star charge",
+    "designated star starts after buyer selection",
+    "combined customer charges remain consistent",
+    "withdrawal does not debit twice at markPaid",
+    "test escorts remain online"
+  ],
+  "duoOrderId": "PO178936923244442DF",
+  "duo": {
+    "status": "已完成",
+    "amountCents": 19600,
+    "totalEarningCents": 13720,
+    "retainedCents": 5880
+  },
+  "withdrawals": [
+    {
+      "id": "TX178936923253165550E26BA09",
+      "userId": "demo-escort-4",
+      "status": "已打款",
+      "amountCents": 6860
+    },
+    {
+      "id": "TX1789369232544FDA101F8146C",
+      "userId": "demo-escort-5",
+      "status": "已打款",
+      "amountCents": 6860
+    }
+  ],
+  "designated": {
+    "id": "PO178936923255628F0",
+    "status": "陪玩中",
+    "amountCents": 9800,
+    "participant": "demo-escort-4"
+  },
+  "balances": {
+    "initialCustomerWalletCents": 82600,
+    "finalCustomerWalletCents": 53200,
+    "initialEscortBalances": [
+      3960,
+      3960
+    ],
+    "finalEscortBalances": [
+      3960,
+      3960
+    ]
+  },
+  "passed": true,
+  "finishedAt": "2026-09-14T07:00:32.604Z"
+}
