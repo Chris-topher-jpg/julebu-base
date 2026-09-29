@@ -29,6 +29,16 @@ p { line-height: 1.75; text-wrap: pretty; }
 .icon-button { width: 34px; height: 34px; display: inline-grid; place-items: center; border-radius: 6px; background: transparent; color: #728178; }
 .icon-button:hover { background: #edf3ef; color: var(--green); }
 .full-width { width: 100%; }
+.game-picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin: 18px 0 24px; }
+.game-choice { display: flex; align-items: center; gap: 12px; min-height: 66px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); text-align: left; }
+.game-choice span { min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
+.game-choice small { display: block; margin-top: 5px; color: #65786a; font-size: 11px; font-weight: 400; }
+.game-choice:hover, .game-choice.selected { border-color: var(--green); background: #edf4f0; color: var(--green); }
+.catalog-results { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 16px; }
+.catalog-results span { color: #65786a; font-size: 12px; flex: none; }
+.game-table td:first-child { min-width: 180px; }
+.game-table .service-icon { width: 32px; height: 32px; }
+@media (max-width: 760px) { .game-picker { grid-template-columns: repeat(2, minmax(0, 1fr)); } .game-choice { padding: 12px; gap: 8px; font-size: 12px; } .settings-summary { flex-wrap: wrap; } }
 .topbar { min-height: 80px; display: flex; align-items: center; gap: 54px; padding: 14px max(28px, calc((100% - 1240px) / 2)); background: #fff; border-bottom: 1px solid var(--line); }
 .brand { display: inline-flex; align-items: center; gap: 11px; font-size: 19px; font-weight: 700; color: #224f3d; flex: none; }
 .brand > .icon { width: 36px; height: 36px; padding: 7px; background: var(--green); color: #fff; border-radius: 10px; }
