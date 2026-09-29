@@ -188,6 +188,19 @@ export function createBasicClubServer(options = {}) {
           db.prepare('INSERT INTO users (id,username,password_hash,name,role,created_at) VALUES (?,?,?,?,?,?)').run(id('u'), username, hash(value(body.password, '密码', 8, 128)), value(body.name, '称呼', 1, 30), body.role, now());
           return respond({ ok: true }, 201);
         }
+        const staffMatch = url.pathname.match(/^\/api\/staff\/([^/]+)$/);
+        if (staffMatch && req.method === 'POST') {
+          if (user.role !== 'admin') fail('只有管理员可以维护业务账号', 403);
+          const member = userById(decodeURIComponent(staffMatch[1]));
+          if (!member || !['service', 'escort'].includes(member.role)) fail('业务账号不存在', 404);
+          if (typeof body.active !== 'boolean') fail('请提供有效的账号状态');
+          if (!body.active && db.prepare("SELECT id FROM orders WHERE escort_id=? AND status IN ('待服务','服务中','待验收') LIMIT 1").get(member.id)) fail('该陪玩仍有未完成订单，请完成订单后再停用', 409);
+          atomic(() => {
+            db.prepare('UPDATE users SET active=? WHERE id=?').run(Number(body.active), member.id);
+            if (!body.active) db.prepare('DELETE FROM sessions WHERE user_id=?').run(member.id);
+          });
+          return respond({ ok: true });
+        }
         if (url.pathname === '/api/orders' && req.method === 'POST') {
           if (user.role !== 'customer') fail('只有用户可以提交订单', 403);
           const service = db.prepare('SELECT * FROM services WHERE id=? AND active=1').get(integer(body.serviceId, '服务项目', 1, 999999));
@@ -219,6 +232,14 @@ export function createBasicClubServer(options = {}) {
               requireState(staff.has(user.role), ['待支付', '待核款']);
               update('待派单', { paidAt: now() });
               addEvent(order.id, user.name, '客服确认收款');
+            } else if (action === 'reject-payment') {
+              requireState(staff.has(user.role), ['待核款']);
+              const note = value(body.note, '退回原因', 2, 200);
+              update('待支付');
+              addEvent(order.id, user.name, '付款报备已退回', note);
+            } else if (action === 'note') {
+              requireState(staff.has(user.role) || user.id === order.escort_id, ['待支付', '待核款', '待派单', '待服务', '服务中', '待验收']);
+              addEvent(order.id, user.name, '服务跟进', value(body.note, '跟进内容', 2, 300));
             } else if (action === 'dispatch') {
               requireState(staff.has(user.role), ['待派单']);
               const escort = userById(value(body.escortId, '陪玩人员', 1, 60));

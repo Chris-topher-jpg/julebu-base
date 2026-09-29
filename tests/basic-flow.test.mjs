@@ -171,3 +171,63 @@ test('production bootstrap requires configuration and never seeds demo users or 
   assert.equal(logged.response.status, 200);
   assert.match(logged.response.headers.get('set-cookie'), /Secure/);
 });
+
+test('payment rejection requires a reason and allows resubmission without bypassing verification', async t => {
+  const { app, base } = await start();
+  t.after(() => { app.server.close(); app.close(); });
+  const customer = await login(base, 'user');
+  const service = await login(base, 'service');
+  const created = await request(base, '/orders', { cookie: customer, body: { serviceId: 1, contact: 'test-contact' } });
+  const path = `/orders/${created.result.id}/actions`;
+  await request(base, path, { cookie: customer, body: { action: 'pay', reference: '付款凭证待核实' } });
+  assert.equal((await request(base, path, { cookie: customer, body: { action: 'reject-payment', note: '自行退回' } })).response.status, 403);
+  assert.equal((await request(base, path, { cookie: service, body: { action: 'reject-payment', note: '' } })).response.status, 400);
+  assert.equal((await request(base, '/me', { cookie: service })).result.orders[0].status, '待核款');
+  const rejected = await request(base, path, { cookie: service, body: { action: 'reject-payment', note: '请补充付款人和转账时间' } });
+  assert.equal(rejected.result.status, '待支付');
+  assert.equal(rejected.result.paid_at, null);
+  assert.equal(rejected.result.events.at(-1).note, '请补充付款人和转账时间');
+  assert.equal((await request(base, path, { cookie: service, body: { action: 'dispatch', escortId: 'u_escort' } })).response.status, 409);
+  assert.equal((await request(base, path, { cookie: customer, body: { action: 'pay', reference: '已补充付款人和时间' } })).result.status, '待核款');
+  assert.equal((await request(base, path, { cookie: service, body: { action: 'confirm-payment' } })).result.status, '待派单');
+});
+
+test('follow-up notes retain actor and visibility without allowing unauthorized or closed-order edits', async t => {
+  const { app, base } = await start();
+  t.after(() => { app.server.close(); app.close(); });
+  const customer = await login(base, 'user'), service = await login(base, 'service'), escort = await login(base, 'escort');
+  const created = await request(base, '/orders', { cookie: customer, body: { serviceId: 1, contact: 'test-contact' } });
+  const path = `/orders/${created.result.id}/actions`;
+  assert.equal((await request(base, path, { cookie: customer, body: { action: 'note', note: '用户不应该伪造跟进' } })).response.status, 403);
+  assert.equal((await request(base, path, { cookie: escort, body: { action: 'note', note: '未派单不能跟进' } })).response.status, 404);
+  const note = await request(base, path, { cookie: service, body: { action: 'note', note: '已联系客户，约定 20:00 服务' } });
+  assert.equal(note.result.status, '待支付');
+  assert.equal(note.result.events.at(-1).actor, '客服小星');
+  assert.equal((await request(base, '/me', { cookie: customer })).result.orders[0].events.at(-1).note, '已联系客户，约定 20:00 服务');
+  await request(base, path, { cookie: customer, body: { action: 'cancel' } });
+  assert.equal((await request(base, path, { cookie: service, body: { action: 'note', note: '已取消不可继续跟进' } })).response.status, 409);
+});
+
+test('disabling staff invalidates sessions and rejects active assignments without breaking unfinished orders', async t => {
+  const { app, base } = await start();
+  t.after(() => { app.server.close(); app.close(); });
+  const admin = await login(base, 'admin'), customer = await login(base, 'user'), service = await login(base, 'service'), escort = await login(base, 'escort');
+  assert.equal((await request(base, '/staff/u_escort', { cookie: service, body: { active: false } })).response.status, 403);
+  assert.equal((await request(base, '/staff/u_admin', { cookie: admin, body: { active: false } })).response.status, 404);
+  assert.equal((await request(base, '/staff/u_escort', { cookie: admin, body: { active: 'false' } })).response.status, 400);
+  assert.equal((await request(base, '/staff/u_escort', { cookie: admin, body: { active: false } })).response.status, 200);
+  assert.equal((await request(base, '/me', { cookie: escort })).response.status, 401);
+  assert.ok(!(await request(base, '/me', { cookie: service })).result.escorts.some(user => user.id === 'u_escort'));
+  assert.equal((await request(base, '/login', { body: { username: 'escort', password: '123456' } })).response.status, 401);
+  const order = await request(base, '/orders', { cookie: customer, body: { serviceId: 1, contact: 'test-contact' } });
+  const path = `/orders/${order.result.id}/actions`;
+  await request(base, path, { cookie: service, body: { action: 'confirm-payment' } });
+  assert.equal((await request(base, path, { cookie: service, body: { action: 'dispatch', escortId: 'u_escort' } })).response.status, 400);
+  await request(base, '/staff/u_escort', { cookie: admin, body: { active: true } });
+  assert.equal((await request(base, '/me', { cookie: escort })).response.status, 401);
+  const newEscort = await login(base, 'escort');
+  await request(base, path, { cookie: service, body: { action: 'dispatch', escortId: 'u_escort' } });
+  assert.equal((await request(base, '/staff/u_escort', { cookie: admin, body: { active: false } })).response.status, 409);
+  assert.equal((await request(base, path, { cookie: newEscort, body: { action: 'start' } })).result.status, '服务中');
+  assert.equal((await request(base, path, { cookie: newEscort, body: { action: 'note', note: '已按预约时间开始服务' } })).response.status, 200);
+});
