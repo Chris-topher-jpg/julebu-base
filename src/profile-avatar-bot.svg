@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-label="信号小队">
-<title>信号小队</title><rect width="160" height="160" rx="80" fill="#E7EBF5"/><path d="m31 35 2-6 2 6 6 2-6 2-2 6-2-6-6-2Z" fill="#8396BC"/><circle cx="125" cy="116" r="3" fill="#8396BC"/>
-<path d="M80 49V35" stroke="#627694" stroke-width="5"/><circle cx="80" cy="30" r="7" fill="#F1BB78"/>
-<rect x="34" y="68" width="14" height="24" rx="6" fill="#8396BC"/><rect x="112" y="68" width="14" height="24" rx="6" fill="#8396BC"/>
-<rect x="45" y="48" width="70" height="66" rx="24" fill="#A8B9D7" stroke="#647796" stroke-width="4"/><rect x="54" y="62" width="52" height="38" rx="15" fill="#EDF4F8"/>
-<g fill="#424A63"><ellipse cx="70" cy="77" rx="3" ry="4"/><ellipse cx="90" cy="77" rx="3" ry="4"/></g><path d="M75 88h10" stroke="#424A63" stroke-width="3" stroke-linecap="round"/>
-</svg>

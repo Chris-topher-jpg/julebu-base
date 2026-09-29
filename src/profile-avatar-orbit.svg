@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-label="轨道精灵">
-<title>轨道精灵</title><rect width="160" height="160" rx="80" fill="#EEE9FB"/><path d="m31 35 2-6 2 6 6 2-6 2-2 6-2-6-6-2Z" fill="#A893CD"/><circle cx="125" cy="120" r="3" fill="#A893CD"/>
-<path d="M62 48 52 33m43 14 13-17" stroke="#8C77AF" stroke-width="5" stroke-linecap="round"/><circle cx="51" cy="31" r="6" fill="#D5B1D4"/><circle cx="109" cy="29" r="6" fill="#D5B1D4"/>
-<path d="M45 79c0-45 70-45 70 0 0 18-14 34-35 43-21-9-35-25-35-43Z" fill="#C2B0E4" stroke="#8C77AF" stroke-width="4"/><path d="M46 91c-27 18-14 30 30 21s66-28 39-29" fill="none" stroke="#A895CA" stroke-width="4" stroke-linecap="round"/>
-<g fill="#5E5374"><ellipse cx="70" cy="72" rx="3" ry="4"/><ellipse cx="90" cy="72" rx="3" ry="4"/></g><path d="M75 83q5 5 10 0" stroke="#5E5374" stroke-width="3" fill="none" stroke-linecap="round"/>
-</svg>

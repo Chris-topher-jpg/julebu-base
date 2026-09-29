@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-label="巡航卫星">
-<title>巡航卫星</title><rect width="160" height="160" rx="80" fill="#E4F0EF"/><path d="m31 35 2-6 2 6 6 2-6 2-2 6-2-6-6-2Z" fill="#75AAA5"/><circle cx="125" cy="119" r="3" fill="#75AAA5"/>
-<path d="m105 51 12-12" stroke="#668E91" stroke-width="4"/><circle cx="120" cy="36" r="5" fill="#E2B56B"/>
-<rect x="23" y="62" width="27" height="40" rx="6" fill="#7CAAAE"/><rect x="110" y="62" width="27" height="40" rx="6" fill="#7CAAAE"/><path d="M36 64v36m88-36v36M25 82h24m63 0h24" stroke="#B7D9D7" stroke-width="3"/>
-<rect x="51" y="49" width="58" height="65" rx="19" fill="#E8D9B9" stroke="#829893" stroke-width="4"/>
-<g fill="#566C70"><ellipse cx="70" cy="77" rx="3" ry="4"/><ellipse cx="90" cy="77" rx="3" ry="4"/></g><path d="M75 88q5 5 10 0" stroke="#566C70" stroke-width="3" fill="none" stroke-linecap="round"/>
-</svg>
