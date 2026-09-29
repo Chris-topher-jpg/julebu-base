@@ -2,7 +2,7 @@ const app = document.querySelector('#app');
 const state = {
   services: [], games: [], workspace: null, dialog: null, demo: false, paymentContact: '',
   filter: '全部', search: '', page: 1, catalogCategory: '全部', catalogGameId: '', catalogSearch: '',
-  catalogSort: 'default', settingsTab: 'games', pendingService: null,
+  catalogSort: 'default', settingsTab: 'games', pendingService: null, supportId: null, supportFilter: 'open', busy: 0,
 };
 const statuses = ['待支付', '待核款', '待派单', '待服务', '服务中', '待验收', '已完成', '已取消'];
 const pageSize = 8;
@@ -55,12 +55,13 @@ function toast(message) {
 async function run(button, task) {
   if (button?.disabled) return;
   if (button) button.disabled = true;
+  state.busy++;
   try { await task(); } catch (error) {
     if (error.status === 401 && state.workspace) { state.workspace = null; state.dialog = { type: 'auth' }; render(); }
-    const output = document.querySelector('dialog .form-error');
+    const output = document.querySelector('dialog .form-error, #support-reply-form .form-error');
     if (output) { output.textContent = error.message; output.scrollIntoView({ block: 'nearest' }); }
     else toast(error.message);
-  } finally { if (button) button.disabled = false; }
+  } finally { state.busy--; if (button) button.disabled = false; }
 }
 async function refresh() {
   const catalog = await api('/public/services');
@@ -72,11 +73,11 @@ async function refresh() {
 function brand() { return `<a class="brand" href="#/">${icon('game')}<span>星河俱乐部<small>游戏陪伴 · 服务管理</small></span></a>`; }
 function header(route) {
   const user = state.workspace?.user;
-  return `<header class="topbar">${brand()}<nav aria-label="主导航"><a ${!route ? 'aria-current="page"' : ''} href="#/">服务大厅</a><a ${route === 'orders' ? 'aria-current="page"' : ''} href="${isOperator() ? '#/dashboard' : '#/orders'}">${isOperator() ? '管理工作台' : '我的订单'}</a><button class="nav-link" data-open="contact">联系客服</button></nav><div class="account">${user ? `<span class="avatar">${esc(user.name.slice(0, 1))}</span><span class="account-name">${esc(user.name)}<small>${esc(user.roleLabel)}</small></span><button class="icon-button" data-open="password" aria-label="修改密码" title="修改密码">${icon('shield')}</button><button class="icon-button" data-logout aria-label="退出登录" title="退出登录">${icon('exit')}</button>` : '<button class="primary small" data-open="auth">登录 / 注册</button>'}</div></header>`;
+  return `<header class="topbar">${brand()}<nav aria-label="主导航"><a ${!route ? 'aria-current="page"' : ''} href="#/">服务大厅</a><a ${route === 'orders' ? 'aria-current="page"' : ''} href="${isOperator() ? '#/dashboard' : '#/orders'}">${isOperator() ? '管理工作台' : '我的订单'}</a>${user?.role === 'customer' ? `<a ${route === 'support' ? 'aria-current="page"' : ''} href="#/support">客服咨询</a>` : '<button class="nav-link" data-open="contact">联系客服</button>'}</nav><div class="account">${user ? `<span class="avatar">${esc(user.name.slice(0, 1))}</span><span class="account-name">${esc(user.name)}<small>${esc(user.roleLabel)}</small></span><button class="icon-button" data-open="password" aria-label="修改密码" title="修改密码">${icon('shield')}</button><button class="icon-button" data-logout aria-label="退出登录" title="退出登录">${icon('exit')}</button>` : '<button class="primary small" data-open="auth">登录 / 注册</button>'}</div></header>`;
 }
 function sidebar(route) {
   const user = state.workspace.user;
-  const nav = [['dashboard', 'grid', '工作台概览'], ['manage', 'order', '订单管理'], ...(user.role === 'admin' ? [['settings', 'game', '游戏与服务']] : [])];
+  const nav = [['dashboard', 'grid', '工作台概览'], ['manage', 'order', '订单管理'], ...(isStaff() ? [['support', 'people', '客服咨询']] : []), ...(user.role === 'admin' ? [['settings', 'game', '游戏与服务']] : [])];
   return `<aside class="sidebar">${brand()}<div class="workspace-label">俱乐部管理中心</div><nav aria-label="后台导航">${nav.map(([path, symbol, text]) => `<a href="#/${path}" ${route === path ? 'aria-current="page"' : ''}>${icon(symbol)}<span>${text}</span>${path === 'manage' && activeOrders().length ? `<b>${activeOrders().length}</b>` : ''}</a>`).join('')}</nav><div class="sidebar-bottom"><span class="edition">基础运营版</span><p>下单、核款、派单、履约<br />一条完整的服务链路</p><a href="#/">${icon('home')}返回服务大厅</a></div></aside>`;
 }
 function home() {
@@ -129,7 +130,7 @@ function dashboard() {
   const cards = user.role === 'escort'
     ? [['待开始', count('待服务'), 'clock', '待服务', '确认服务时间并开始'], ['服务中', count('服务中'), 'game', '服务中', '正在履约的订单'], ['待验收', count('待验收'), 'shield', '待验收', '等待客户确认完成'], ['已完成', count('已完成'), 'check', '已完成', '查看已完成的服务']]
     : [['待核款', count('待核款'), 'shield', '待核款', '核实客户付款报备'], ['待派单', count('待派单'), 'people', '待派单', '为已收款订单安排陪玩'], ['服务中', count('服务中'), 'game', '服务中', '查看当前履约进度'], ['待验收', count('待验收'), 'check', '待验收', '等待客户确认完成']];
-  return `<section class="page-heading"><div><p class="eyebrow">${new Intl.DateTimeFormat('zh-CN', { dateStyle: 'full' }).format(new Date())}</p><h1>${esc(user.name)}，欢迎回来</h1><p class="page-description">${pending.length ? `有 ${pending.length} 笔订单等待你处理。` : '当前没有待处理任务，可以查看订单进度。'}</p></div><button class="secondary" data-refresh>${icon('refresh')}刷新工作台</button></section>${metrics(cards)}<div class="dashboard-grid"><section class="panel"><div class="panel-heading"><div><h2>待办订单 <span class="count-badge">${pending.length}</span></h2><p>优先处理需要你操作的订单</p></div><a class="text-button" href="#/manage">全部订单 ${icon('arrow')}</a></div>${pending.length ? orderTable(pending.slice(0, 5)) : empty('待办已处理完毕', '新的付款报备或派单任务会显示在这里。', '<a class="secondary" href="#/manage">查看所有订单</a>')}</section><aside class="panel activity-panel"><div class="panel-heading"><div><h2>最近动态</h2><p>来自真实订单的流程记录</p></div></div>${recentEvents.length ? `<ol class="activity-list">${recentEvents.map(event => `<li><i></i><div><b>${esc(event.action)}</b><span>${esc(event.actor)} · ${date(event.createdAt)}</span><button class="text-button" data-order-detail="${esc(event.order.id)}">${esc(event.order.service_name)} #${shortId(event.order.id)}</button></div></li>`).join('')}</ol>` : '<p class="quiet-empty">订单创建后，将在这里显示最新动态。</p>'}</aside></div><div class="quick-links"><a href="#/manage">${icon('order')}<span>订单管理<small>查询、跟进与处理服务订单</small></span>${icon('arrow')}</a>${user.role === 'admin' ? `<a href="#/settings">${icon('game')}<span>游戏与服务<small>添加游戏类别，维护服务和业务账号</small></span>${icon('arrow')}</a>` : `<a href="#/">${icon('home')}<span>查看服务大厅<small>查看当前在售服务项目</small></span>${icon('arrow')}</a>`}</div>`;
+  return `<section class="page-heading"><div><p class="eyebrow">${new Intl.DateTimeFormat('zh-CN', { dateStyle: 'full' }).format(new Date())}</p><h1>${esc(user.name)}，欢迎回来</h1><p class="page-description">${pending.length ? `有 ${pending.length} 笔订单等待你处理。` : '当前没有待处理任务，可以查看订单进度。'}${isStaff() ? ` 另有 ${state.workspace.supportThreads.filter(thread => thread.status === 'open').length} 条咨询待回复。` : ''}</p></div><button class="secondary" data-refresh>${icon('refresh')}刷新工作台</button></section>${metrics(cards)}<div class="dashboard-grid"><section class="panel"><div class="panel-heading"><div><h2>待办订单 <span class="count-badge">${pending.length}</span></h2><p>优先处理需要你操作的订单</p></div><a class="text-button" href="#/manage">全部订单 ${icon('arrow')}</a></div>${pending.length ? orderTable(pending.slice(0, 5)) : empty('待办已处理完毕', '新的付款报备或派单任务会显示在这里。', '<a class="secondary" href="#/manage">查看所有订单</a>')}</section><aside class="panel activity-panel"><div class="panel-heading"><div><h2>最近动态</h2><p>来自真实订单的流程记录</p></div></div>${recentEvents.length ? `<ol class="activity-list">${recentEvents.map(event => `<li><i></i><div><b>${esc(event.action)}</b><span>${esc(event.actor)} · ${date(event.createdAt)}</span><button class="text-button" data-order-detail="${esc(event.order.id)}">${esc(event.order.service_name)} #${shortId(event.order.id)}</button></div></li>`).join('')}</ol>` : '<p class="quiet-empty">订单创建后，将在这里显示最新动态。</p>'}</aside></div><div class="quick-links"><a href="#/manage">${icon('order')}<span>订单管理<small>查询、跟进与处理服务订单</small></span>${icon('arrow')}</a>${isStaff() ? `<a href="#/support">${icon('people')}<span>客服咨询<small>${state.workspace.supportThreads.filter(thread => thread.status === 'open').length} 条待回复</small></span>${icon('arrow')}</a>` : ''}${user.role === 'admin' ? `<a href="#/settings">${icon('game')}<span>游戏与服务<small>添加游戏类别，维护服务和业务账号</small></span>${icon('arrow')}</a>` : `<a href="#/">${icon('home')}<span>查看服务大厅<small>查看当前在售服务项目</small></span>${icon('arrow')}</a>`}</div>`;
 }
 function orderTable(orders) {
   return `<div class="table-scroll"><table class="order-table"><thead><tr><th>订单 / 服务</th><th>客户 / 陪玩</th><th>金额</th><th>状态</th><th class="align-right">操作</th></tr></thead><tbody>${orders.map(order => `<tr><td><b>${esc(order.service_name)}</b><small>${esc(order.game_name || '历史订单')}${order.game_category ? ` · ${esc(order.game_category)}` : ''}</small><small>#${shortId(order.id)} · ${date(order.created_at)}</small></td><td>${esc(order.customer)}<small>${esc(order.escort || '暂未分配陪玩')}</small></td><td class="numeric">${currency(order.price_cents)}<small>${order.duration_hours} 小时</small></td><td>${badge(order.status)}</td><td class="align-right"><button class="text-button" data-order-detail="${esc(order.id)}">${closed(order) ? '查看详情' : '处理订单'} ${icon('arrow')}</button></td></tr>`).join('')}</tbody></table></div>`;
@@ -156,6 +157,13 @@ function settings() {
   const serviceTab = state.settingsTab === 'services';
   return `<section class="page-heading"><div><p class="eyebrow">基础配置</p><h1>游戏与服务</h1><p class="page-description">先添加游戏与类别，再配置对应服务、价格和业务账号。</p></div><button class="primary" data-open="${gameTab ? 'game' : serviceTab ? 'service' : 'staff'}">${icon('plus')}${gameTab ? '新增游戏' : serviceTab ? '新增服务' : '新增账号'}</button></section><div class="settings-summary"><span>${icon('game')}<b>${games.filter(g => g.active).length}</b> 在架游戏</span><span>${icon('game')}<b>${state.services.length}</b> 在售服务</span><span>${icon('people')}<b>${users.filter(u => u.active && u.role === 'escort').length}</b> 可用陪玩</span><span>${icon('shield')}<b>${users.filter(u => u.active && u.role === 'service').length}</b> 客服账号</span></div><section class="panel"><div class="order-tabs" aria-label="管理内容"><button class="order-tab ${gameTab ? 'selected' : ''}" data-settings-tab="games" aria-pressed="${gameTab}">游戏目录 <b>${games.length}</b></button><button class="order-tab ${serviceTab ? 'selected' : ''}" data-settings-tab="services" aria-pressed="${serviceTab}">服务项目 <b>${services.length}</b></button><button class="order-tab ${state.settingsTab === 'staff' ? 'selected' : ''}" data-settings-tab="staff" aria-pressed="${state.settingsTab === 'staff'}">业务人员 <b>${users.length}</b></button></div>${gameTab ? gameTable(games, services) : serviceTab ? `<div class="table-scroll"><table><thead><tr><th>服务项目</th><th>所属游戏 / 服务分类</th><th>价格 / 时长</th><th>状态</th><th class="align-right">操作</th></tr></thead><tbody>${services.map(service => `<tr><td><b>${esc(service.name)}</b><small class="description-cell">${esc(service.description)}</small></td><td>${esc(service.gameName || '通用服务')}<small>${esc(service.category)}</small></td><td class="numeric">${currency(service.priceCents)}<small>${service.durationHours} 小时 / 次</small></td><td><span class="status ${service.active && (!service.gameId || games.some(g => g.id === service.gameId && g.active)) ? 'positive' : 'neutral'}"><i></i>${!service.active ? '已下架' : service.gameId && !games.some(g => g.id === service.gameId && g.active) ? '游戏已下架' : '在售'}</span></td><td class="align-right"><div class="row-actions"><button class="text-button" data-edit-service="${service.id}">${icon('edit')}编辑</button><button class="text-button" data-toggle-service="${service.id}" data-active="${service.active ? '0' : '1'}">${service.active ? '下架' : '上架'}</button></div></td></tr>`).join('')}</tbody></table></div>${!services.length ? empty('还没有服务项目', '添加名称、价格与时长，即可在大厅展示。', '<button class="secondary" data-open="service">新增服务</button>') : ''}` : `<div class="table-scroll"><table><thead><tr><th>人员</th><th>登录账号</th><th>角色</th><th>进行中订单</th><th>状态</th><th class="align-right">操作</th></tr></thead><tbody>${users.map(user => `<tr><td><div class="person"><span class="avatar">${esc(user.name.slice(0, 1))}</span><b>${esc(user.name)}</b></div></td><td>${esc(user.username)}</td><td>${esc(user.roleLabel)}</td><td>${user.role === 'escort' ? state.workspace.orders.filter(o => o.escort_id === user.id && !closed(o)).length : '—'}</td><td><span class="status ${user.active ? 'positive' : 'neutral'}"><i></i>${user.active ? '启用' : '已停用'}</span></td><td class="align-right"><button class="text-button" data-toggle-staff="${esc(user.id)}">${user.active ? '停用账号' : '启用账号'}</button></td></tr>`).join('')}</tbody></table></div>${!users.length ? empty('添加你的第一位业务人员', '创建客服或陪玩账号，用于处理和履约订单。', '<button class="secondary" data-open="staff">新增账号</button>') : ''}`}<div class="panel-note">${icon('shield')}${gameTab ? '下架游戏后，对应服务暂停接单；已有订单可继续核款、派单和履约。' : serviceTab ? '调价仅影响新订单，已有订单保留原价格和服务信息。' : '停用后账号无法登录；陪玩有未完成订单时不能停用。'}</div></section>`;
 }
+function support() {
+  const threads = state.workspace.supportThreads;
+  const visible = isStaff() && state.supportFilter === 'open' ? threads.filter(thread => thread.status === 'open') : threads;
+  const selected = visible.find(thread => thread.id === state.supportId) || visible[0];
+  const label = thread => ({ open: '待客服回复', replied: '客服已回复', closed: '已结束' })[thread.status];
+  return `<section class="page-heading"><div><p class="eyebrow">${isStaff() ? '客户服务' : '我的咨询'}</p><h1>客服咨询</h1><p class="page-description">${isStaff() ? '查看用户问题，回复并处理咨询。' : '向客服提问，查看回复和历史记录。'}</p></div><div class="support-heading-actions">${!isStaff() ? `<button class="primary" data-open="support-new">${icon('plus')}发起咨询</button>` : ''}<button class="secondary" data-refresh>${icon('refresh')}刷新</button></div></section><div class="support-layout"><section class="support-list" aria-label="咨询列表">${isStaff() ? `<div class="support-filter"><button class="order-tab ${state.supportFilter === 'open' ? 'selected' : ''}" data-support-filter="open">待回复 <b>${threads.filter(thread => thread.status === 'open').length}</b></button><button class="order-tab ${state.supportFilter === 'all' ? 'selected' : ''}" data-support-filter="all">全部 <b>${threads.length}</b></button></div>` : ''}${visible.length ? visible.map(thread => `<button class="support-item ${selected?.id === thread.id ? 'selected' : ''}" data-support-id="${esc(thread.id)}"><span class="support-item-top"><b>${esc(thread.subject)}</b><small>${date(thread.updatedAt)}</small></span><span class="support-item-meta">${isStaff() ? `${esc(thread.customerName)} · ` : ''}${esc(thread.serviceName || '普通咨询')} · ${label(thread)}</span><span class="support-preview">${esc(thread.messages.at(-1)?.body || '')}</span></button>`).join('') : empty(isStaff() ? '没有待回复咨询' : '还没有咨询', isStaff() ? '新的用户咨询会出现在这里。' : '发起咨询后，客服的回复会显示在这里。')}</section><section class="support-conversation" aria-label="咨询内容">${selected ? `<div class="support-conversation-head"><div><h2>${esc(selected.subject)}</h2><p>${isStaff() ? `${esc(selected.customerName)} · ` : ''}${selected.orderId ? `关联订单 #${shortId(selected.orderId)}` : '普通咨询'} · ${label(selected)}</p></div>${isStaff() && selected.status !== 'closed' ? `<button class="secondary small" data-support-close="${esc(selected.id)}">结束咨询</button>` : ''}</div><div class="support-messages" role="log">${selected.messages.map(message => `<div class="support-message ${message.role === 'customer' ? 'from-customer' : 'from-staff'}"><div><b>${esc(message.sender)}</b><small>${date(message.createdAt)}</small></div><p>${esc(message.body)}</p></div>`).join('')}</div><form id="support-reply-form" class="support-reply" data-thread-id="${esc(selected.id)}"><label for="support-message">${isStaff() ? '回复用户' : selected.status === 'closed' ? '继续咨询' : '补充消息'}</label><textarea id="support-message" name="message" required minlength="2" maxlength="1000" placeholder="输入消息内容"></textarea><p class="form-error" role="alert"></p><button class="primary" type="submit">发送消息</button></form>` : `<div class="support-placeholder">${icon('people')}<h2>选择一条咨询</h2><p>${isStaff() ? '从左侧选择用户咨询，查看内容并回复。' : '发起咨询或从左侧查看之前的对话。'}</p></div>`}</section></div>`;
+}
 function gameTable(games, services) {
   if (!games.length) return empty('添加第一款游戏', '填写游戏名称和类别，支持自定义类别。', '<button class="secondary" data-open="game">新增游戏</button>');
   return `<div class="table-scroll"><table class="game-table"><thead><tr><th>游戏名称</th><th>游戏类别</th><th>专属服务</th><th>状态</th><th class="align-right">操作</th></tr></thead><tbody>${games.map(game => `<tr><td><div class="person"><span class="service-icon">${icon('game')}</span><b>${esc(game.name)}</b></div></td><td>${esc(game.category)}</td><td>${services.filter(s => s.gameId === game.id).length} 项<small>另可使用通用服务</small></td><td><span class="status ${game.active ? 'positive' : 'neutral'}"><i></i>${game.active ? '已上架' : '已下架'}</span></td><td class="align-right"><div class="row-actions"><button class="text-button" data-edit-game="${game.id}">${icon('edit')}编辑</button><button class="text-button" data-toggle-game="${game.id}" data-active="${game.active ? '0' : '1'}">${game.active ? '下架' : '上架'}</button></div></td></tr>`).join('')}</tbody></table></div>`;
@@ -164,7 +172,7 @@ function field(label, name, options = {}) {
   return `<label>${label}<input name="${name}" ${options.type ? `type="${options.type}"` : ''} ${options.attrs || ''} value="${esc(options.value ?? '')}" ${options.optional ? '' : 'required'} /></label>`;
 }
 function detail(order) {
-  return `<div data-order-id="${esc(order.id)}"><div class="detail-title"><div><p class="eyebrow">订单 #${shortId(order.id)}</p><h2 id="dialog-title">${esc(order.service_name)}</h2></div>${badge(order.status)}</div><div class="detail-hint">${icon('clock')}<span>${nextStep(order)}</span></div>${progress(order)}<dl class="detail-info"><div><dt>游戏</dt><dd>${esc(order.game_name || '历史订单未记录游戏')}</dd></div><div><dt>游戏类别</dt><dd>${esc(order.game_category || '—')}</dd></div><div><dt>订单金额</dt><dd class="price">${currency(order.price_cents)}</dd></div><div><dt>服务时长</dt><dd>${order.duration_hours} 小时</dd></div><div><dt>客户</dt><dd>${esc(order.customer)}</dd></div><div><dt>陪玩</dt><dd>${esc(order.escort || '待安排')}</dd></div><div><dt>联系方式</dt><dd>${esc(order.contact)}</dd></div><div><dt>下单时间</dt><dd>${date(order.created_at)}</dd></div></dl><section class="detail-section"><h3>需求备注</h3><p class="order-note">${esc(order.note || '暂无额外需求')}</p></section>${state.workspace.user.role === 'customer' && order.status === '待支付' ? `<p class="payment-contact">收款联系：${esc(state.paymentContact)}</p>` : ''}<section class="detail-section"><div class="section-heading"><h3>流程记录</h3>${isOperator() && !closed(order) ? '<button class="text-button" data-order-action="note">添加跟进</button>' : ''}</div><ol class="timeline">${order.events.map(event => `<li><i></i><div><b>${esc(event.action)}</b><small>${esc(event.actor)} · ${date(event.createdAt)}</small>${event.note ? `<p>${esc(event.note)}</p>` : ''}</div></li>`).join('')}</ol></section><p class="form-error" role="alert"></p><div class="detail-actions">${actions(order)}${!isOperator() && closed(order) && state.services.some(s => s.id === order.service_id) ? `<button class="primary" data-order-service="${order.service_id}" data-reorder="${esc(order.id)}">再来一单</button>` : ''}<button class="secondary" data-close>关闭详情</button></div><p class="full-id">完整订单号：${esc(order.id)}</p></div>`;
+  return `<div data-order-id="${esc(order.id)}"><div class="detail-title"><div><p class="eyebrow">订单 #${shortId(order.id)}</p><h2 id="dialog-title">${esc(order.service_name)}</h2></div>${badge(order.status)}</div><div class="detail-hint">${icon('clock')}<span>${nextStep(order)}</span></div>${progress(order)}<dl class="detail-info"><div><dt>游戏</dt><dd>${esc(order.game_name || '历史订单未记录游戏')}</dd></div><div><dt>游戏类别</dt><dd>${esc(order.game_category || '—')}</dd></div><div><dt>订单金额</dt><dd class="price">${currency(order.price_cents)}</dd></div><div><dt>服务时长</dt><dd>${order.duration_hours} 小时</dd></div><div><dt>客户</dt><dd>${esc(order.customer)}</dd></div><div><dt>陪玩</dt><dd>${esc(order.escort || '待安排')}</dd></div><div><dt>联系方式</dt><dd>${esc(order.contact)}</dd></div><div><dt>下单时间</dt><dd>${date(order.created_at)}</dd></div></dl><section class="detail-section"><h3>需求备注</h3><p class="order-note">${esc(order.note || '暂无额外需求')}</p></section>${state.workspace.user.role === 'customer' && order.status === '待支付' ? `<p class="payment-contact">收款联系：${esc(state.paymentContact)}</p>` : ''}<section class="detail-section"><div class="section-heading"><h3>流程记录</h3>${isOperator() && !closed(order) ? '<button class="text-button" data-order-action="note">添加跟进</button>' : ''}</div><ol class="timeline">${order.events.map(event => `<li><i></i><div><b>${esc(event.action)}</b><small>${esc(event.actor)} · ${date(event.createdAt)}</small>${event.note ? `<p>${esc(event.note)}</p>` : ''}</div></li>`).join('')}</ol></section><p class="form-error" role="alert"></p><div class="detail-actions">${state.workspace.user.role === 'customer' ? `<button class="secondary" data-support-order="${esc(order.id)}">咨询此订单</button>` : ''}${actions(order)}${!isOperator() && closed(order) && state.services.some(s => s.id === order.service_id) ? `<button class="primary" data-order-service="${order.service_id}" data-reorder="${esc(order.id)}">再来一单</button>` : ''}<button class="secondary" data-close>关闭详情</button></div><p class="full-id">完整订单号：${esc(order.id)}</p></div>`;
 }
 function modal() {
   const { type, id, mode } = state.dialog;
@@ -211,22 +219,26 @@ function modal() {
     body = `${field('当前密码', 'currentPassword', { type: 'password', attrs: 'autocomplete="current-password" maxlength="128"' })}${field('新密码', 'password', { type: 'password', attrs: 'minlength="8" maxlength="128" autocomplete="new-password"' })}`;
   } else if (type === 'contact') {
     title = '联系俱乐部客服'; form = false;
-    body = `<span class="contact-symbol">${icon('people')}</span><p class="contact-text">${esc(state.paymentContact)}</p><p class="muted">咨询时请提供服务名称；已有订单请附上订单编号，方便客服查询。</p><button class="secondary full-width" data-close>我知道了</button>`;
+    body = `<span class="contact-symbol">${icon('people')}</span><p class="contact-text">${esc(state.paymentContact)}</p><p class="muted">登录用户也可以在站内发起咨询并查看客服回复。</p><button class="primary full-width" data-go-support>进入客服咨询</button>`;
+  } else if (type === 'support-new') {
+    title = '发起客服咨询'; submit = '提交咨询';
+    body = `${field('咨询主题', 'subject', { attrs: 'minlength="2" maxlength="80" placeholder="简要说明你的问题"' })}<label>关联订单（选填）<select name="orderId"><option value="">不关联订单</option>${state.workspace.orders.map(order => `<option value="${esc(order.id)}" ${order.id === state.dialog.orderId ? 'selected' : ''}>#${shortId(order.id)} · ${esc(order.service_name)}</option>`).join('')}</select></label><label>问题内容<textarea name="message" required minlength="2" maxlength="1000" placeholder="请描述你需要客服协助的事项"></textarea></label>`;
   }
   return `<dialog aria-labelledby="dialog-title"><button class="close" type="button" data-close aria-label="关闭">×</button><h2 id="dialog-title">${esc(title)}</h2>${form ? `<form id="dialog-form" class="stack">${body}<p class="form-error" role="alert"></p><button class="primary" type="submit">${submit}</button></form>` : body}${type === 'auth' && state.demo ? '<details class="demo-note"><summary>演示环境测试账号</summary><p>管理员 admin · 客服 service<br />陪玩 escort · 用户 user<br />密码均为 123456</p></details>' : ''}</dialog>`;
 }
 function render() {
-  const route = routeName(), backoffice = isOperator() && ['dashboard', 'manage', 'settings'].includes(route);
+  const route = routeName(), backoffice = isOperator() && ['dashboard', 'manage', 'settings', 'support'].includes(route);
   let page = home();
-  if (['dashboard', 'orders', 'manage', 'settings'].includes(route)) {
+  if (['dashboard', 'orders', 'manage', 'settings', 'support'].includes(route)) {
     if (!state.workspace) page = empty('登录后继续', '进入你的订单或工作台，查看服务的最新进度。', '<button class="primary" data-open="auth">登录 / 注册</button>');
     else if (route === 'settings') page = state.workspace.user.role === 'admin' ? settings() : empty('此页面仅限管理员', '可以返回订单页继续处理自己的任务。', '<a class="secondary" href="#/orders">返回订单</a>');
     else if (route === 'dashboard' && isOperator()) page = dashboard();
+    else if (route === 'support') page = state.workspace.user.role === 'escort' ? empty('此页面仅限客服与用户', '可以返回订单页继续处理任务。', '<a class="secondary" href="#/manage">返回订单</a>') : support();
     else page = orders();
   }
   const previousDialog = document.querySelector('dialog');
   if (previousDialog?.open) previousDialog.close();
-  app.innerHTML = backoffice ? `<div class="admin-layout">${sidebar(route)}<div class="admin-body"><header class="admin-topbar"><div><span>工作空间</span><b>${({ dashboard: '工作台概览', manage: '订单管理', settings: '游戏与服务' })[route]}</b></div><div class="account"><span class="avatar">${esc(state.workspace.user.name.slice(0, 1))}</span><span class="account-name">${esc(state.workspace.user.name)}<small>${esc(state.workspace.user.roleLabel)}</small></span><button class="icon-button" data-open="password" aria-label="修改密码" title="修改密码">${icon('shield')}</button><button class="icon-button" data-logout aria-label="退出登录" title="退出登录">${icon('exit')}</button></div></header><main>${page}</main><footer>星河俱乐部 · 基础运营版</footer></div></div>` : `${header(route)}<main class="public-main">${page}</main><footer><b>星河俱乐部</b><span>游戏陪伴 · 服务管理</span><button class="text-button" data-open="contact">联系客服</button></footer>`;
+  app.innerHTML = backoffice ? `<div class="admin-layout">${sidebar(route)}<div class="admin-body"><header class="admin-topbar"><div><span>工作空间</span><b>${({ dashboard: '工作台概览', manage: '订单管理', settings: '游戏与服务', support: '客服咨询' })[route]}</b></div><div class="account"><span class="avatar">${esc(state.workspace.user.name.slice(0, 1))}</span><span class="account-name">${esc(state.workspace.user.name)}<small>${esc(state.workspace.user.roleLabel)}</small></span><button class="icon-button" data-open="password" aria-label="修改密码" title="修改密码">${icon('shield')}</button><button class="icon-button" data-logout aria-label="退出登录" title="退出登录">${icon('exit')}</button></div></header><main>${page}</main><footer>星河俱乐部 · 基础运营版</footer></div></div>` : `${header(route)}<main class="public-main">${page}</main><footer><b>星河俱乐部</b><span>游戏陪伴 · 服务管理</span><button class="text-button" data-open="contact">联系客服</button></footer>`;
   if (state.dialog) {
     app.insertAdjacentHTML('beforeend', modal());
     const dialog = document.querySelector('dialog'); dialog.showModal();
@@ -247,9 +259,10 @@ app.addEventListener('click', event => {
   if (!button || button.disabled) return;
   const data = button.dataset;
   if ('open' in data) return openDialog({ type: data.open });
+  if ('goSupport' in data) { state.dialog = null; location.hash = '#/support'; render(); return; }
   if ('close' in data) return closeDialog();
   if ('switchAuth' in data) return openDialog({ type: 'auth', mode: state.dialog.mode === 'register' ? 'login' : 'register' });
-  if ('logout' in data) return run(button, async () => { await api('/logout', {}); state.workspace = null; state.dialog = null; state.pendingService = null; state.filter = '全部'; state.search = ''; state.page = 1; location.hash = '#/'; render(); });
+  if ('logout' in data) return run(button, async () => { await api('/logout', {}); state.workspace = null; state.dialog = null; state.pendingService = null; state.supportId = null; state.supportFilter = 'open'; state.filter = '全部'; state.search = ''; state.page = 1; location.hash = '#/'; render(); });
   if ('refresh' in data) return run(button, async () => { await refresh(); render(); toast('已更新最新数据'); });
   if ('browse' in data) return document.querySelector('#catalog')?.scrollIntoView({ block: 'start' });
   if ('category' in data) { state.catalogCategory = data.category; state.catalogGameId = ''; render(); return; }
@@ -258,6 +271,10 @@ app.addEventListener('click', event => {
   if ('serviceDetail' in data) return openDialog({ type: 'service-detail', id: Number(data.serviceDetail) });
   if ('orderService' in data) return book(Number(data.orderService), data.reorder ? state.games.find(g => g.name === orderById(data.reorder)?.game_name)?.id : undefined);
   if ('orderDetail' in data) return openDialog({ type: 'detail', id: data.orderDetail });
+  if ('supportOrder' in data) return openDialog({ type: 'support-new', orderId: data.supportOrder });
+  if ('supportFilter' in data) { state.supportFilter = data.supportFilter; state.supportId = null; render(); return; }
+  if ('supportId' in data) { state.supportId = data.supportId; render(); return; }
+  if ('supportClose' in data) return run(button, async () => { await api(`/support/${encodeURIComponent(data.supportClose)}`, { action: 'close' }); await refresh(); state.supportFilter = 'all'; render(); toast('咨询已结束'); });
   if ('filter' in data) return goOrders(data.filter);
   if ('clearOrders' in data) return goOrders('全部');
   if ('page' in data) { state.page = Number(data.page); document.querySelector('#order-list').innerHTML = orderList(); return; }
@@ -282,6 +299,11 @@ app.addEventListener('change', event => {
   if (event.target.id === 'catalog-sort') { state.catalogSort = event.target.value; document.querySelector('#catalog-list').innerHTML = catalogList(); }
 });
 app.addEventListener('submit', event => {
+  if (event.target.id === 'support-reply-form') {
+    event.preventDefault();
+    const form = event.target, threadId = form.dataset.threadId;
+    return run(form.querySelector('[type="submit"]'), async () => { await api(`/support/${encodeURIComponent(threadId)}`, { action: 'message', message: form.elements.message.value }); await refresh(); state.supportId = threadId; render(); toast('消息已发送'); });
+  }
   if (event.target.id !== 'dialog-form') return;
   event.preventDefault();
   const form = event.target, data = fields(form), dialog = { ...state.dialog };
@@ -296,6 +318,7 @@ app.addEventListener('submit', event => {
     else if (dialog.type === 'game-status') await api(`/games/${dialog.id}`, { active: !state.workspace.games.find(g => g.id === dialog.id).active });
     else if (dialog.type === 'staff') await api('/staff', data);
     else if (dialog.type === 'staff-status') await api(`/staff/${encodeURIComponent(dialog.id)}`, { active: !state.workspace.users.find(u => u.id === dialog.id).active });
+    else if (dialog.type === 'support-new') { const created = await api('/support', data); state.supportId = created.id; }
     else if (dialog.type === 'password') await api('/password', data);
     await refresh();
     state.dialog = dialog.returnTo ? { type: 'detail', id: dialog.returnTo } : null;
@@ -303,11 +326,33 @@ app.addEventListener('submit', event => {
       state.filter = '全部'; state.search = ''; state.page = 1;
       const pending = state.pendingService; state.pendingService = null;
       if (pending && !isOperator() && state.games.length && state.services.some(s => s.id === pending)) { location.hash = '#/'; state.dialog = { type: 'order', id: pending }; }
-      else location.hash = isOperator() ? '#/dashboard' : '#/orders';
+      else location.hash = isOperator() ? '#/dashboard' : routeName() === 'support' ? '#/support' : '#/orders';
     }
     if (dialog.type === 'order') { state.filter = '全部'; state.search = ''; state.page = 1; location.hash = '#/orders'; }
+    if (dialog.type === 'support-new' && location.hash !== '#/support') location.hash = '#/support';
     render(); toast(dialog.type === 'auth' ? '登录成功' : '操作成功');
   });
 });
-addEventListener('hashchange', () => { if (state.dialog?.type !== 'order') state.dialog = null; render(); });
+addEventListener('hashchange', () => { if (!['order', 'support-new'].includes(state.dialog?.type)) state.dialog = null; render(); });
 refresh().then(render).catch(error => { app.innerHTML = `<p class="empty">${esc(error.message)}，请刷新页面重试。</p>`; });
+// Refresh the inbox while preserving an unsent reply and its cursor.
+async function pollSupport() {
+  try {
+    const route = routeName(), userId = state.workspace?.user.id;
+    if (!document.hidden && userId && !state.busy && !state.dialog && ['support', 'dashboard'].includes(route)) {
+      const updated = await api('/me');
+      if (state.workspace?.user.id === userId && routeName() === route && !state.busy && !state.dialog && JSON.stringify(updated.supportThreads) !== JSON.stringify(state.workspace.supportThreads)) {
+        const input = document.querySelector('#support-message');
+        const draft = input?.value, focused = input === document.activeElement, start = input?.selectionStart, end = input?.selectionEnd;
+        state.workspace = updated; render();
+        const replacement = document.querySelector('#support-message');
+        if (replacement && draft !== undefined) { replacement.value = draft; if (focused) { replacement.focus(); replacement.setSelectionRange(start, end); } }
+        const messages = document.querySelector('.support-messages');
+        if (messages) messages.scrollTop = messages.scrollHeight;
+      }
+    }
+  } catch (error) {
+    if (error.status === 401 && state.workspace && !state.busy && !state.dialog) { state.workspace = null; render(); }
+  } finally { setTimeout(pollSupport, 5000); }
+}
+setTimeout(pollSupport, 5000);

@@ -63,7 +63,11 @@ function initialize(db, { production, adminPassword, adminUsername, adminName })
     CREATE TABLE IF NOT EXISTS games (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, category TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1) STRICT;
     CREATE TABLE IF NOT EXISTS services (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, category TEXT NOT NULL, description TEXT NOT NULL, price_cents INTEGER NOT NULL, duration_hours INTEGER NOT NULL, active INTEGER NOT NULL DEFAULT 1, game_id INTEGER REFERENCES games(id)) STRICT;
     CREATE TABLE IF NOT EXISTS orders (id TEXT PRIMARY KEY, customer_id TEXT NOT NULL REFERENCES users(id), escort_id TEXT REFERENCES users(id), service_id INTEGER NOT NULL, service_name TEXT NOT NULL, category TEXT NOT NULL, price_cents INTEGER NOT NULL, duration_hours INTEGER NOT NULL, contact TEXT NOT NULL, note TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, paid_at TEXT, started_at TEXT, finished_at TEXT, accepted_at TEXT, game_name TEXT NOT NULL DEFAULT '', game_category TEXT NOT NULL DEFAULT '') STRICT;
-    CREATE TABLE IF NOT EXISTS order_events (id INTEGER PRIMARY KEY, order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE, actor TEXT NOT NULL, action TEXT NOT NULL, note TEXT NOT NULL, created_at TEXT NOT NULL) STRICT;`);
+    CREATE TABLE IF NOT EXISTS order_events (id INTEGER PRIMARY KEY, order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE, actor TEXT NOT NULL, action TEXT NOT NULL, note TEXT NOT NULL, created_at TEXT NOT NULL) STRICT;
+    CREATE TABLE IF NOT EXISTS support_threads (id TEXT PRIMARY KEY, customer_id TEXT NOT NULL REFERENCES users(id), order_id TEXT REFERENCES orders(id), subject TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('open','replied','closed')), created_at TEXT NOT NULL, updated_at TEXT NOT NULL) STRICT;
+    CREATE TABLE IF NOT EXISTS support_messages (id INTEGER PRIMARY KEY, thread_id TEXT NOT NULL REFERENCES support_threads(id) ON DELETE CASCADE, sender_id TEXT NOT NULL REFERENCES users(id), body TEXT NOT NULL, created_at TEXT NOT NULL) STRICT;
+    CREATE INDEX IF NOT EXISTS support_threads_customer ON support_threads(customer_id,updated_at);
+    CREATE INDEX IF NOT EXISTS support_messages_thread ON support_messages(thread_id,id);`);
   if (!db.prepare('PRAGMA table_info(services)').all().some(column => column.name === 'game_id')) db.exec('ALTER TABLE services ADD COLUMN game_id INTEGER REFERENCES games(id)');
   if (!db.prepare('PRAGMA table_info(orders)').all().some(column => column.name === 'game_name')) db.exec("ALTER TABLE orders ADD COLUMN game_name TEXT NOT NULL DEFAULT ''");
   if (!db.prepare('PRAGMA table_info(orders)').all().some(column => column.name === 'game_category')) db.exec("ALTER TABLE orders ADD COLUMN game_category TEXT NOT NULL DEFAULT ''");
@@ -120,6 +124,8 @@ export function createBasicClubServer(options = {}) {
   const orderById = orderId => db.prepare(`${columns} WHERE o.id=?`).get(orderId);
   const addEvent = (orderId, actor, action, note = '') => db.prepare('INSERT INTO order_events (order_id,actor,action,note,created_at) VALUES (?,?,?,?,?)').run(orderId, actor, action, note, now());
   const orderView = order => ({ ...order, customer: order.customer_name, escort: order.escort_name || '', events: db.prepare('SELECT actor,action,note,created_at createdAt FROM order_events WHERE order_id=? ORDER BY id').all(order.id) });
+  const threadView = thread => ({ ...thread, messages: db.prepare('SELECT m.id,m.body,m.created_at createdAt,u.name sender,u.role FROM support_messages m JOIN users u ON u.id=m.sender_id WHERE m.thread_id=? ORDER BY m.id').all(thread.id) });
+  const threadsFor = user => db.prepare(`SELECT t.id,t.customer_id customerId,t.order_id orderId,t.subject,t.status,t.created_at createdAt,t.updated_at updatedAt,u.name customerName,o.service_name serviceName FROM support_threads t JOIN users u ON u.id=t.customer_id LEFT JOIN orders o ON o.id=t.order_id ${staff.has(user.role) ? '' : 'WHERE t.customer_id=?'} ORDER BY t.updated_at DESC,t.id DESC`).all(...(staff.has(user.role) ? [] : [user.id])).map(threadView);
   const servicesFor = all => db.prepare(`SELECT services.id,services.name,services.category,services.description,services.price_cents priceCents,services.duration_hours durationHours,services.active,services.game_id gameId,games.name gameName,games.category gameCategory FROM services LEFT JOIN games ON games.id=services.game_id ${all ? '' : 'WHERE services.active=1 AND (services.game_id IS NULL OR games.active=1)'} ORDER BY services.id`).all();
   const gamesFor = all => db.prepare(`SELECT id,name,category,active FROM games ${all ? '' : 'WHERE active=1'} ORDER BY id`).all();
   const workspace = user => {
@@ -127,6 +133,7 @@ export function createBasicClubServer(options = {}) {
     return {
       user: publicUser(user),
       orders: db.prepare(`${columns}${clause} ORDER BY o.created_at DESC`).all(...(staff.has(user.role) ? [] : [user.id])).map(orderView),
+      supportThreads: user.role === 'escort' ? [] : threadsFor(user),
       services: servicesFor(user.role === 'admin'),
       games: user.role === 'admin' ? gamesFor(true) : gamesFor(false),
       escorts: staff.has(user.role) ? db.prepare("SELECT id,name FROM users WHERE role='escort' AND active=1 ORDER BY name").all() : [],
@@ -191,6 +198,40 @@ export function createBasicClubServer(options = {}) {
         }
         const user = requireUser(req);
         if (url.pathname === '/api/me' && req.method === 'GET') return respond(workspace(user));
+        if (url.pathname === '/api/support' && req.method === 'POST') {
+          if (user.role !== 'customer') fail('只有用户可以发起咨询', 403);
+          const orderId = body.orderId ? value(body.orderId, '订单', 1, 60) : null;
+          if (orderId && !db.prepare('SELECT id FROM orders WHERE id=? AND customer_id=?').get(orderId, user.id)) fail('订单不存在', 404);
+          const subject = value(body.subject, '咨询主题', 2, 80);
+          const message = value(body.message, '咨询内容', 2, 1000);
+          const threadId = id('t'), created = now();
+          atomic(() => {
+            db.prepare("INSERT INTO support_threads (id,customer_id,order_id,subject,status,created_at,updated_at) VALUES (?,?,?,?,'open',?,?)").run(threadId, user.id, orderId, subject, created, created);
+            db.prepare('INSERT INTO support_messages (thread_id,sender_id,body,created_at) VALUES (?,?,?,?)').run(threadId, user.id, message, created);
+          });
+          return respond({ id: threadId }, 201);
+        }
+        const supportMatch = url.pathname.match(/^\/api\/support\/([^/]+)$/);
+        if (supportMatch && req.method === 'POST') {
+          const threadId = decodeURIComponent(supportMatch[1]);
+          const thread = db.prepare('SELECT * FROM support_threads WHERE id=?').get(threadId);
+          if (!thread || !(staff.has(user.role) || thread.customer_id === user.id)) fail('咨询不存在', 404);
+          const action = value(body.action, '操作', 1, 20);
+          if (action === 'close') {
+            if (!staff.has(user.role)) fail('只有客服可以关闭咨询', 403);
+            if (thread.status === 'closed') fail('咨询已关闭', 409);
+            db.prepare("UPDATE support_threads SET status='closed',updated_at=? WHERE id=?").run(now(), threadId);
+          } else if (action === 'message') {
+            if (thread.status === 'closed' && staff.has(user.role)) fail('咨询已结束，等待用户再次提问', 409);
+            const message = value(body.message, '咨询内容', 2, 1000);
+            atomic(() => {
+              const created = now();
+              db.prepare('INSERT INTO support_messages (thread_id,sender_id,body,created_at) VALUES (?,?,?,?)').run(threadId, user.id, message, created);
+              db.prepare('UPDATE support_threads SET status=?,updated_at=? WHERE id=?').run(staff.has(user.role) ? 'replied' : 'open', created, threadId);
+            });
+          } else fail('不支持的咨询操作', 404);
+          return respond({ ok: true });
+        }
         if (url.pathname === '/api/password' && req.method === 'POST') {
           if (!matches(value(body.currentPassword, '当前密码', 1, 128), user.password_hash)) fail('当前密码不正确', 403);
           db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(hash(value(body.password, '新密码', 8, 128)), user.id);

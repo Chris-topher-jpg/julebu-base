@@ -302,6 +302,80 @@ test('game categories, service associations and availability are enforced while 
   assert.equal((await request(base, '/orders', { cookie: customer, body: { ...orderPayload, gameId: 1 } })).response.status, 201);
 });
 
+test('support consultations keep replies private, link owned orders, and reopen after a follow-up', async t => {
+  const { app, base } = await start();
+  t.after(() => { app.server.close(); app.close(); });
+  const customer = await login(base, 'user'), service = await login(base, 'service'), admin = await login(base, 'admin'), escort = await login(base, 'escort');
+  const other = (await request(base, '/register', { body: { username: 'support_other', password: '12345678', name: '其他用户' } })).cookie;
+  const order = (await request(base, '/orders', { cookie: customer, body: { gameId: 1, serviceId: 1, contact: 'support-contact' } })).result;
+  const payload = { subject: '预约时间咨询', message: '可以改到今晚九点吗？', orderId: order.id };
+  assert.equal((await request(base, '/support', { body: payload })).response.status, 401);
+  for (const cookie of [service, admin, escort]) assert.equal((await request(base, '/support', { cookie, body: payload })).response.status, 403);
+  assert.equal((await request(base, '/support', { cookie: other, body: payload })).response.status, 404);
+  assert.equal((await request(base, '/support', { cookie: customer, body: { ...payload, message: ' ' } })).response.status, 400);
+  assert.equal((await request(base, '/me', { cookie: customer })).result.supportThreads.length, 0);
+  const created = await request(base, '/support', { cookie: customer, body: payload });
+  assert.equal(created.response.status, 201);
+  const path = `/support/${created.result.id}`;
+  for (const cookie of [other, escort]) {
+    assert.deepEqual((await request(base, '/me', { cookie })).result.supportThreads, []);
+    assert.equal((await request(base, path, { cookie, body: { action: 'message', message: '越权留言' } })).response.status, 404);
+    assert.equal((await request(base, path, { cookie, body: { action: 'close' } })).response.status, 404);
+  }
+  const find = async cookie => (await request(base, '/me', { cookie })).result.supportThreads.find(thread => thread.id === created.result.id);
+  const opened = await find(service);
+  assert.equal(opened.status, 'open');
+  assert.equal(opened.orderId, order.id);
+  assert.equal(opened.serviceName, order.service_name);
+  assert.equal(opened.customerName, '演示用户');
+  assert.equal((await request(base, path, { cookie: customer, body: { action: 'close' } })).response.status, 403);
+  assert.equal((await request(base, path, { cookie: service, body: { action: 'message', message: 'x'.repeat(1001) } })).response.status, 400);
+  assert.equal((await find(customer)).messages.length, 1);
+  await request(base, path, { cookie: service, body: { action: 'message', message: '可以，已帮你确认时间。', sender: '伪造人员', role: 'customer' } });
+  const replied = await find(customer);
+  assert.equal(replied.status, 'replied');
+  assert.equal(replied.messages.at(-1).sender, '客服小星');
+  assert.equal(replied.messages.at(-1).role, 'service');
+  assert.equal((await request(base, path, { cookie: admin, body: { action: 'close' } })).response.status, 200);
+  assert.equal((await find(customer)).status, 'closed');
+  assert.equal((await request(base, path, { cookie: service, body: { action: 'close' } })).response.status, 409);
+  await request(base, path, { cookie: customer, body: { action: 'message', message: '还需要确认一下区服。' } });
+  assert.equal((await find(service)).status, 'open');
+  assert.equal((await find(admin)).messages.length, 3);
+  assert.equal((await request(base, '/me', { cookie: customer })).result.orders[0].status, '待支付');
+  const general = await request(base, '/support', { cookie: other, body: { subject: '下单前咨询', message: '<script>hello</script>' } });
+  assert.equal(general.response.status, 201);
+  assert.equal((await request(base, '/me', { cookie: other })).result.supportThreads[0].messages[0].body, '<script>hello</script>');
+});
+
+test('support messages survive restarts and existing databases add support tables without losing orders', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'club-support-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const database = join(directory, 'club.sqlite');
+  const original = createBasicClubServer({ database });
+  await new Promise(resolve => original.server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${original.server.address().port}`;
+  const customer = await login(base, 'user');
+  const order = await request(base, '/orders', { cookie: customer, body: { gameId: 1, serviceId: 1, contact: 'persistent-contact' } });
+  await new Promise(resolve => original.server.close(resolve));
+  original.db.exec('DROP TABLE support_messages; DROP TABLE support_threads;');
+  original.close();
+  const upgraded = createBasicClubServer({ database });
+  await new Promise(resolve => upgraded.server.listen(0, '127.0.0.1', resolve));
+  const upgradedBase = `http://127.0.0.1:${upgraded.server.address().port}`;
+  const created = await request(upgradedBase, '/support', { cookie: customer, body: { orderId: order.result.id, subject: '订单咨询', message: '确认预约时间' } });
+  assert.equal(created.response.status, 201);
+  await new Promise(resolve => upgraded.server.close(resolve));
+  upgraded.close();
+  const reopened = createBasicClubServer({ database });
+  try {
+    assert.equal(reopened.db.prepare('SELECT COUNT(*) count FROM orders').get().count, 1);
+    assert.equal(reopened.db.prepare('SELECT COUNT(*) count FROM order_events').get().count, 1);
+    assert.equal(reopened.db.prepare('SELECT body FROM support_messages').get().body, '确认预约时间');
+    assert.equal(reopened.db.prepare('SELECT order_id FROM support_threads').get().order_id, order.result.id);
+  } finally { reopened.close(); }
+});
+
 test('existing basic databases migrate without losing services, orders or order events and can reopen repeatedly', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'club-games-migration-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
