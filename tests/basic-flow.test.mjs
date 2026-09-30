@@ -114,7 +114,7 @@ test('catalog edits preserve order type, duration and price snapshots and block 
   assert.ok((await request(base, '/public/services')).result.services.some(item => item.id === serviceId));
 });
 
-test('custom service types support independent hourly packages and reject invalid configurations', async t => {
+test('custom service types support independent fixed packages and reject invalid configurations', async t => {
   const { app, base } = await start();
   t.after(() => { app.server.close(); app.close(); });
   const admin = await login(base, 'admin');
@@ -137,6 +137,79 @@ test('custom service types support independent hourly packages and reject invali
   assert.equal(catalog.find(item => item.id === original.id).durationHours, 24);
   assert.equal(catalog.find(item => item.id === original.id).category, edited.category);
   assert.equal(catalog.find(item => item.name === copied.name).category, payload.category);
+});
+
+test('hourly orders calculate selected hours on the server and keep their quote through fulfillment', async t => {
+  const { app, base } = await start();
+  t.after(() => { app.server.close(); app.close(); });
+  const admin = await login(base, 'admin'), customer = await login(base, 'user'), staff = await login(base, 'service'), escort = await login(base, 'escort');
+  const payload = { name: '按小时语音陪玩', category: '语音陪玩', description: '按用户选定的小时数提供服务', priceCents: 6801, pricingMode: 'hourly', gameId: 1 };
+  for (const cookie of [customer, staff, escort]) assert.equal((await request(base, '/services', { cookie, body: payload })).response.status, 403);
+  assert.equal((await request(base, '/services', { cookie: admin, body: { ...payload, pricingMode: 'other' } })).response.status, 400);
+  assert.equal((await request(base, '/services', { cookie: admin, body: payload })).response.status, 201);
+  const service = (await request(base, '/public/services')).result.services.find(item => item.name === payload.name);
+  assert.equal(service.pricingMode, 'hourly');
+  assert.equal(service.durationHours, 1);
+  const orderPayload = { serviceId: service.id, gameId: 1, contact: 'hourly-customer' };
+  for (const hours of [undefined, null, false, true, '', '2', [2], 0, -1, 1.5, 25, 1000000]) {
+    assert.equal((await request(base, '/orders', { cookie: customer, body: { ...orderPayload, hours } })).response.status, 400);
+  }
+  assert.equal((await request(base, '/me', { cookie: customer })).result.orders.length, 0);
+  const created = await request(base, '/orders', { cookie: customer, body: { ...orderPayload, hours: 3, priceCents: 1, unitPriceCents: 1, pricingMode: 'package', durationHours: 1 } });
+  assert.equal(created.response.status, 201);
+  assert.equal(created.result.price_cents, 20403);
+  assert.equal(created.result.duration_hours, 3);
+  assert.equal(created.result.unit_price_cents, 6801);
+  assert.equal(created.result.pricing_mode, 'hourly');
+  for (const hours of [1, 24]) {
+    const boundary = await request(base, '/orders', { cookie: customer, body: { ...orderPayload, hours } });
+    assert.equal(boundary.response.status, 201);
+    assert.equal(boundary.result.price_cents, 6801 * hours);
+  }
+  const fixed = { ...payload, pricingMode: 'package', priceCents: 12800, durationHours: 2 };
+  assert.equal((await request(base, `/services/${service.id}`, { cookie: admin, body: fixed })).response.status, 200);
+  const packageOrder = await request(base, '/orders', { cookie: customer, body: { ...orderPayload, hours: 24 } });
+  assert.equal(packageOrder.response.status, 201);
+  assert.equal(packageOrder.result.pricing_mode, 'package');
+  assert.equal(packageOrder.result.price_cents, 12800);
+  assert.equal(packageOrder.result.duration_hours, 2);
+  const path = `/orders/${created.result.id}/actions`;
+  for (const [cookie, action] of [[customer, 'pay'], [staff, 'confirm-payment'], [staff, 'dispatch'], [escort, 'start'], [escort, 'finish'], [customer, 'accept']]) {
+    const result = await request(base, path, { cookie, body: { action, reference: '线下支付 204.03 元', escortId: 'u_escort' } });
+    assert.equal(result.response.status, 200);
+    assert.equal(result.result.price_cents, 20403);
+    assert.equal(result.result.unit_price_cents, 6801);
+    assert.equal(result.result.duration_hours, 3);
+    assert.equal(result.result.pricing_mode, 'hourly');
+  }
+  assert.equal((await request(base, '/me', { cookie: customer })).result.orders.find(order => order.id === created.result.id).status, '已完成');
+});
+
+test('changed service prices, modes and package durations require customers to review the current quote', async t => {
+  const { app, base } = await start();
+  t.after(() => { app.server.close(); app.close(); });
+  const admin = await login(base, 'admin'), customer = await login(base, 'user');
+  const baseService = { name: '报价确认测试', category: '教学陪练', description: '由用户确认计价和服务时长', pricingMode: 'hourly', priceCents: 5000 };
+  await request(base, '/services', { cookie: admin, body: baseService });
+  const service = (await request(base, '/public/services')).result.services.find(item => item.name === baseService.name);
+  const orderPayload = { serviceId: service.id, gameId: 1, contact: 'quote-test', hours: 2, expectedPricingMode: 'hourly', expectedUnitPriceCents: 5000, expectedDurationHours: 1 };
+  await request(base, `/services/${service.id}`, { cookie: admin, body: { ...baseService, priceCents: 6000 } });
+  assert.equal((await request(base, '/orders', { cookie: customer, body: orderPayload })).response.status, 409);
+  assert.equal((await request(base, '/me', { cookie: customer })).result.orders.length, 0);
+  assert.equal((await request(base, '/orders', { cookie: customer, body: { ...orderPayload, expectedUnitPriceCents: 6000 } })).result.price_cents, 12000);
+  await request(base, `/services/${service.id}`, { cookie: admin, body: { ...baseService, pricingMode: 'package', priceCents: 6000, durationHours: 3 } });
+  assert.equal((await request(base, '/orders', { cookie: customer, body: { ...orderPayload, expectedUnitPriceCents: 6000 } })).response.status, 409);
+  const fixedPayload = { ...orderPayload, expectedPricingMode: 'package', expectedUnitPriceCents: 6000, expectedDurationHours: 3 };
+  assert.equal((await request(base, '/orders', { cookie: customer, body: fixedPayload })).result.price_cents, 6000);
+  await request(base, `/services/${service.id}`, { cookie: admin, body: { ...baseService, pricingMode: 'package', priceCents: 6000, durationHours: 4 } });
+  assert.equal((await request(base, '/orders', { cookie: customer, body: fixedPayload })).response.status, 409);
+  const accepted = await request(base, '/orders', { cookie: customer, body: { ...fixedPayload, expectedDurationHours: 4 } });
+  assert.equal(accepted.response.status, 201);
+  assert.equal(accepted.result.duration_hours, 4);
+  assert.equal(accepted.result.unit_price_cents, 6000);
+  assert.equal(accepted.result.price_cents, 6000);
+  await request(base, `/services/${service.id}`, { cookie: admin, body: { active: false } });
+  assert.equal((await request(base, '/orders', { cookie: customer, body: { ...fixedPayload, expectedDurationHours: 4 } })).response.status, 404);
 });
 
 test('staff accounts can be created only by administrators; password changes invalidate prior sessions', async t => {
@@ -411,6 +484,52 @@ test('support messages survive restarts and existing databases add support table
     assert.equal(reopened.db.prepare('SELECT body FROM support_messages').get().body, '确认预约时间');
     assert.equal(reopened.db.prepare('SELECT order_id FROM support_threads').get().order_id, order.result.id);
   } finally { reopened.close(); }
+});
+
+test('pricing migrations preserve legacy package totals and persist new hourly snapshots across restarts', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'club-pricing-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const database = join(directory, 'club.sqlite');
+  const legacy = createBasicClubServer({ database });
+  await new Promise(resolve => legacy.server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${legacy.server.address().port}`;
+  const customer = await login(base, 'user'), admin = await login(base, 'admin');
+  const order = (await request(base, '/orders', { cookie: customer, body: { serviceId: 3, gameId: 1, contact: 'legacy-package' } })).result;
+  assert.equal(order.price_cents, 12800);
+  assert.equal(order.duration_hours, 2);
+  await new Promise(resolve => legacy.server.close(resolve));
+  legacy.db.exec('ALTER TABLE services DROP COLUMN pricing_mode; ALTER TABLE orders DROP COLUMN pricing_mode; ALTER TABLE orders DROP COLUMN unit_price_cents;');
+  legacy.close();
+  let hourlyId;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const upgraded = createBasicClubServer({ database });
+    await new Promise(resolve => upgraded.server.listen(0, '127.0.0.1', resolve));
+    try {
+      const upgradedBase = `http://127.0.0.1:${upgraded.server.address().port}`;
+      const preserved = upgraded.db.prepare('SELECT * FROM orders WHERE id=?').get(order.id);
+      assert.equal(preserved.pricing_mode, 'package');
+      assert.equal(preserved.price_cents, 12800);
+      assert.equal(preserved.unit_price_cents, 12800);
+      assert.equal(preserved.duration_hours, 2);
+      assert.equal(upgraded.db.prepare('SELECT pricing_mode FROM services WHERE id=3').get().pricing_mode, 'package');
+      assert.equal(upgraded.db.prepare('SELECT COUNT(*) count FROM order_events WHERE order_id=?').get(order.id).count, 1);
+      if (attempt === 0) {
+        const hourly = { name: '升级后的小时服务', category: '教学', description: '升级后按小时选择时长', pricingMode: 'hourly', priceCents: 7500 };
+        assert.equal((await request(upgradedBase, '/services', { cookie: admin, body: hourly })).response.status, 201);
+        const catalog = (await request(upgradedBase, '/public/services')).result;
+        const serviceId = catalog.services.find(service => service.name === hourly.name).id;
+        const created = await request(upgradedBase, '/orders', { cookie: customer, body: { serviceId, gameId: 1, hours: 4, contact: 'hourly-persistence' } });
+        assert.equal(created.response.status, 201);
+        hourlyId = created.result.id;
+      } else {
+        const persisted = upgraded.db.prepare('SELECT * FROM orders WHERE id=?').get(hourlyId);
+        assert.equal(persisted.pricing_mode, 'hourly');
+        assert.equal(persisted.unit_price_cents, 7500);
+        assert.equal(persisted.duration_hours, 4);
+        assert.equal(persisted.price_cents, 30000);
+      }
+    } finally { await new Promise(resolve => upgraded.server.close(resolve)); upgraded.close(); }
+  }
 });
 
 test('existing basic databases migrate without losing services, orders or order events and can reopen repeatedly', async t => {

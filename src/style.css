@@ -252,6 +252,14 @@ dialog h2 { font-size: 21px; padding-right: 24px; margin-bottom: 24px; }
 .duration-presets > span { color: var(--muted); font-size: 12px; margin-right: 2px; }
 .duration-presets .chip { padding: 8px 12px; color: var(--ink); }
 .duration-presets .chip.selected { color: #fff; }
+.duration-presets[hidden] { display: none; }
+.service-pricing-fields.hourly { grid-template-columns: minmax(0, 1fr); }
+.booking-hours { display: grid; gap: 12px; }
+.booking-hours > label { color: var(--ink); }
+.hours-stepper { display: flex; align-items: center; gap: 10px; }
+.hours-stepper input { width: 88px; text-align: center; font-variant-numeric: tabular-nums; }
+.hours-stepper > span { font-size: 12px; color: var(--muted); }
+.hours-stepper button { min-width: 42px; font-size: 18px; padding: 8px 12px; }
 .package-preview { display: block; padding: 14px 16px; border: 1px solid var(--line); border-radius: 7px; background: #edf4f0; color: var(--green); font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .package-rate { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .form-error { color: #b34538; font-size: 12px; }

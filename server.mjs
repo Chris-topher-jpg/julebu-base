@@ -71,6 +71,19 @@ function initialize(db, { production, adminPassword, adminUsername, adminName })
   if (!db.prepare('PRAGMA table_info(services)').all().some(column => column.name === 'game_id')) db.exec('ALTER TABLE services ADD COLUMN game_id INTEGER REFERENCES games(id)');
   if (!db.prepare('PRAGMA table_info(orders)').all().some(column => column.name === 'game_name')) db.exec("ALTER TABLE orders ADD COLUMN game_name TEXT NOT NULL DEFAULT ''");
   if (!db.prepare('PRAGMA table_info(orders)').all().some(column => column.name === 'game_category')) db.exec("ALTER TABLE orders ADD COLUMN game_category TEXT NOT NULL DEFAULT ''");
+  // Legacy services and orders were fixed packages. Preserve their price meaning.
+  db.exec('BEGIN');
+  try {
+    for (const table of ['services', 'orders']) {
+      if (!db.prepare(`PRAGMA table_info(${table})`).all().some(column => column.name === 'pricing_mode')) {
+        db.exec(`ALTER TABLE ${table} ADD COLUMN pricing_mode TEXT NOT NULL DEFAULT 'package' CHECK(pricing_mode IN ('hourly','package'))`);
+      }
+    }
+    if (!db.prepare('PRAGMA table_info(orders)').all().some(column => column.name === 'unit_price_cents')) {
+      db.exec('ALTER TABLE orders ADD COLUMN unit_price_cents INTEGER NOT NULL DEFAULT 0; UPDATE orders SET unit_price_cents=price_cents;');
+    }
+    db.exec('COMMIT');
+  } catch (error) { db.exec('ROLLBACK'); throw error; }
   const mode = db.prepare("SELECT value FROM settings WHERE key='mode'").get()?.value;
   const existing = db.prepare('SELECT COUNT(*) count FROM users').get().count;
   if (production && existing && mode !== 'production') throw new Error('正式环境必须使用独立数据库，不能使用演示数据库');
@@ -126,7 +139,7 @@ export function createBasicClubServer(options = {}) {
   const orderView = order => ({ ...order, customer: order.customer_name, escort: order.escort_name || '', events: db.prepare('SELECT actor,action,note,created_at createdAt FROM order_events WHERE order_id=? ORDER BY id').all(order.id) });
   const threadView = thread => ({ ...thread, messages: db.prepare('SELECT m.id,m.body,m.created_at createdAt,u.name sender,u.role FROM support_messages m JOIN users u ON u.id=m.sender_id WHERE m.thread_id=? ORDER BY m.id').all(thread.id) });
   const threadsFor = user => db.prepare(`SELECT t.id,t.customer_id customerId,t.order_id orderId,t.subject,t.status,t.created_at createdAt,t.updated_at updatedAt,u.name customerName,o.service_name serviceName FROM support_threads t JOIN users u ON u.id=t.customer_id LEFT JOIN orders o ON o.id=t.order_id ${staff.has(user.role) ? '' : 'WHERE t.customer_id=?'} ORDER BY t.updated_at DESC,t.id DESC`).all(...(staff.has(user.role) ? [] : [user.id])).map(threadView);
-  const servicesFor = all => db.prepare(`SELECT services.id,services.name,services.category,services.description,services.price_cents priceCents,services.duration_hours durationHours,services.active,services.game_id gameId,games.name gameName,games.category gameCategory FROM services LEFT JOIN games ON games.id=services.game_id ${all ? '' : 'WHERE services.active=1 AND (services.game_id IS NULL OR games.active=1)'} ORDER BY services.id`).all();
+  const servicesFor = all => db.prepare(`SELECT services.id,services.name,services.category,services.description,services.price_cents priceCents,services.duration_hours durationHours,services.pricing_mode pricingMode,services.active,services.game_id gameId,games.name gameName,games.category gameCategory FROM services LEFT JOIN games ON games.id=services.game_id ${all ? '' : 'WHERE services.active=1 AND (services.game_id IS NULL OR games.active=1)'} ORDER BY services.id`).all();
   const gamesFor = all => db.prepare(`SELECT id,name,category,active FROM games ${all ? '' : 'WHERE active=1'} ORDER BY id`).all();
   const workspace = user => {
     const clause = staff.has(user.role) ? '' : user.role === 'escort' ? ' WHERE o.escort_id=?' : ' WHERE o.customer_id=?';
@@ -266,9 +279,18 @@ export function createBasicClubServer(options = {}) {
           if (!service) fail('服务项目不可用', 404);
           const game = db.prepare('SELECT * FROM games WHERE id=? AND active=1').get(integer(body.gameId, '游戏', 1, 999999));
           if (!game || (service.game_id && service.game_id !== game.id)) fail('所选游戏与服务不匹配', 400);
+          if ((body.expectedPricingMode !== undefined && body.expectedPricingMode !== service.pricing_mode)
+            || (body.expectedUnitPriceCents !== undefined && body.expectedUnitPriceCents !== service.price_cents)
+            || (body.expectedDurationHours !== undefined && body.expectedDurationHours !== service.duration_hours)) {
+            fail('服务已调整，请核对最新计价方式、价格和时长后再次确认', 409);
+          }
+          const hourly = service.pricing_mode === 'hourly';
+          if (hourly && typeof body.hours !== 'number') fail('请选择 1–24 整小时的服务时长');
+          const hours = hourly ? integer(body.hours, '服务时长（1–24 整小时）', 1, 24) : service.duration_hours;
+          const total = service.price_cents * (hourly ? hours : 1);
           const created = now(), orderId = id('o');
           atomic(() => {
-            db.prepare("INSERT INTO orders (id,customer_id,service_id,service_name,category,price_cents,duration_hours,contact,note,status,created_at,updated_at,game_name,game_category) VALUES (?,?,?,?,?,?,?,?,?,'待支付',?,?,?,?)").run(orderId, user.id, service.id, service.name, service.category, service.price_cents, service.duration_hours, value(body.contact, '联系方式', 2, 80), value(body.note || '', '备注', 0, 300), created, created, game.name, game.category);
+            db.prepare("INSERT INTO orders (id,customer_id,service_id,service_name,category,price_cents,duration_hours,contact,note,status,created_at,updated_at,game_name,game_category,pricing_mode,unit_price_cents) VALUES (?,?,?,?,?,?,?,?,?,'待支付',?,?,?,?,?,?)").run(orderId, user.id, service.id, service.name, service.category, total, hours, value(body.contact, '联系方式', 2, 80), value(body.note || '', '备注', 0, 300), created, created, game.name, game.category, service.pricing_mode, service.price_cents);
             addEvent(orderId, user.name, '提交订单');
           });
           return respond(orderView(orderById(orderId)), 201);
@@ -352,16 +374,20 @@ export function createBasicClubServer(options = {}) {
         if ((url.pathname === '/api/services' || serviceMatch) && req.method === 'POST') {
           if (user.role !== 'admin') fail('只有管理员可以维护服务项目', 403);
           const serviceId = serviceMatch ? Number(serviceMatch[1]) : null;
-          if (serviceId && !db.prepare('SELECT id FROM services WHERE id=?').get(serviceId)) fail('服务项目不存在', 404);
+          const currentService = serviceId ? db.prepare('SELECT * FROM services WHERE id=?').get(serviceId) : null;
+          if (serviceId && !currentService) fail('服务项目不存在', 404);
           if (serviceId && Object.keys(body).length === 1 && typeof body.active === 'boolean') {
             db.prepare('UPDATE services SET active=? WHERE id=?').run(Number(body.active), serviceId);
           } else {
             const gameId = body.gameId === null || body.gameId === '' || body.gameId === undefined ? null : integer(body.gameId, '所属游戏', 1, 999999);
             if (gameId && !db.prepare('SELECT id FROM games WHERE id=?').get(gameId)) fail('所属游戏不存在');
-            const fields = [value(body.name, '套餐名称', 2, 50), value(body.category, '服务类型', 2, 30), value(body.description, '服务说明', 5, 200), integer(body.priceCents, '套餐总价', 100, 10000000), integer(body.durationHours, '服务时长（1–24 整小时）', 1, 24), gameId];
+            const pricingMode = body.pricingMode === undefined ? currentService?.pricing_mode || 'package' : body.pricingMode;
+            if (!['hourly', 'package'].includes(pricingMode)) fail('请选择按小时或固定套餐计价');
+            const duration = pricingMode === 'hourly' ? 1 : integer(body.durationHours, '套餐时长（1–24 整小时）', 1, 24);
+            const fields = [value(body.name, '服务名称', 2, 50), value(body.category, '服务类型', 2, 30), value(body.description, '服务说明', 5, 200), integer(body.priceCents, pricingMode === 'hourly' ? '每小时单价' : '套餐总价', 100, 10000000), duration, gameId, pricingMode];
             if (db.prepare('SELECT id FROM services WHERE name=? AND id<>?').get(fields[0], serviceId || 0)) fail('服务名称已存在', 409);
-            if (serviceId) db.prepare('UPDATE services SET name=?,category=?,description=?,price_cents=?,duration_hours=?,game_id=? WHERE id=?').run(...fields, serviceId);
-            else db.prepare('INSERT INTO services (name,category,description,price_cents,duration_hours,game_id) VALUES (?,?,?,?,?,?)').run(...fields);
+            if (serviceId) db.prepare('UPDATE services SET name=?,category=?,description=?,price_cents=?,duration_hours=?,game_id=?,pricing_mode=? WHERE id=?').run(...fields, serviceId);
+            else db.prepare('INSERT INTO services (name,category,description,price_cents,duration_hours,game_id,pricing_mode) VALUES (?,?,?,?,?,?,?)').run(...fields);
           }
           return respond({ ok: true }, serviceId ? 200 : 201);
         }
