@@ -28,6 +28,12 @@ const usernameValue = input => {
   if (!/^[a-z0-9_-]+$/.test(username)) fail('账号仅支持字母、数字、下划线和连字符');
   return username;
 };
+const imageUrlValue = (input, label = '图片地址') => {
+  const url = typeof input === 'string' ? input.trim() : '';
+  if (!url) return '';
+  if (url.length > 500 || !/^(https:\/\/|\/|data:image\/)/i.test(url)) fail(`${label}仅支持 https 地址、站内路径或图片 data 地址`);
+  return url;
+};
 function hash(password) {
   const salt = randomBytes(16);
   return `${salt.toString('base64')}:${scryptSync(password, salt, 32).toString('base64')}`;
@@ -58,17 +64,21 @@ function initialize(db, { production, adminPassword, adminUsername, adminName })
   db.exec(`PRAGMA foreign_keys=ON;
     PRAGMA journal_mode=WAL;
     CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
-    CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, name TEXT NOT NULL, role TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL) STRICT;
+    CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, name TEXT NOT NULL, role TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, avatar_url TEXT NOT NULL DEFAULT '', bio TEXT NOT NULL DEFAULT '') STRICT;
     CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, expires_at INTEGER NOT NULL) STRICT;
-    CREATE TABLE IF NOT EXISTS games (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, category TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1) STRICT;
+    CREATE TABLE IF NOT EXISTS games (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, category TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1, cover_url TEXT NOT NULL DEFAULT '') STRICT;
     CREATE TABLE IF NOT EXISTS services (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, category TEXT NOT NULL, description TEXT NOT NULL, price_cents INTEGER NOT NULL, duration_hours INTEGER NOT NULL, active INTEGER NOT NULL DEFAULT 1, game_id INTEGER REFERENCES games(id)) STRICT;
-    CREATE TABLE IF NOT EXISTS orders (id TEXT PRIMARY KEY, customer_id TEXT NOT NULL REFERENCES users(id), escort_id TEXT REFERENCES users(id), service_id INTEGER NOT NULL, service_name TEXT NOT NULL, category TEXT NOT NULL, price_cents INTEGER NOT NULL, duration_hours INTEGER NOT NULL, contact TEXT NOT NULL, note TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, paid_at TEXT, started_at TEXT, finished_at TEXT, accepted_at TEXT, game_name TEXT NOT NULL DEFAULT '', game_category TEXT NOT NULL DEFAULT '') STRICT;
+    CREATE TABLE IF NOT EXISTS orders (id TEXT PRIMARY KEY, customer_id TEXT NOT NULL REFERENCES users(id), escort_id TEXT REFERENCES users(id), preferred_escort_id TEXT REFERENCES users(id), service_id INTEGER NOT NULL, service_name TEXT NOT NULL, category TEXT NOT NULL, price_cents INTEGER NOT NULL, duration_hours INTEGER NOT NULL, contact TEXT NOT NULL, note TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, paid_at TEXT, started_at TEXT, finished_at TEXT, accepted_at TEXT, game_name TEXT NOT NULL DEFAULT '', game_category TEXT NOT NULL DEFAULT '') STRICT;
     CREATE TABLE IF NOT EXISTS order_events (id INTEGER PRIMARY KEY, order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE, actor TEXT NOT NULL, action TEXT NOT NULL, note TEXT NOT NULL, created_at TEXT NOT NULL) STRICT;
     CREATE TABLE IF NOT EXISTS support_threads (id TEXT PRIMARY KEY, customer_id TEXT NOT NULL REFERENCES users(id), order_id TEXT REFERENCES orders(id), subject TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('open','replied','closed')), created_at TEXT NOT NULL, updated_at TEXT NOT NULL) STRICT;
     CREATE TABLE IF NOT EXISTS support_messages (id INTEGER PRIMARY KEY, thread_id TEXT NOT NULL REFERENCES support_threads(id) ON DELETE CASCADE, sender_id TEXT NOT NULL REFERENCES users(id), body TEXT NOT NULL, created_at TEXT NOT NULL) STRICT;
     CREATE INDEX IF NOT EXISTS support_threads_customer ON support_threads(customer_id,updated_at);
     CREATE INDEX IF NOT EXISTS support_messages_thread ON support_messages(thread_id,id);`);
   if (!db.prepare('PRAGMA table_info(services)').all().some(column => column.name === 'game_id')) db.exec('ALTER TABLE services ADD COLUMN game_id INTEGER REFERENCES games(id)');
+  if (!db.prepare('PRAGMA table_info(users)').all().some(column => column.name === 'avatar_url')) db.exec("ALTER TABLE users ADD COLUMN avatar_url TEXT NOT NULL DEFAULT ''");
+  if (!db.prepare('PRAGMA table_info(users)').all().some(column => column.name === 'bio')) db.exec("ALTER TABLE users ADD COLUMN bio TEXT NOT NULL DEFAULT ''");
+  if (!db.prepare('PRAGMA table_info(games)').all().some(column => column.name === 'cover_url')) db.exec("ALTER TABLE games ADD COLUMN cover_url TEXT NOT NULL DEFAULT ''");
+  if (!db.prepare('PRAGMA table_info(orders)').all().some(column => column.name === 'preferred_escort_id')) db.exec('ALTER TABLE orders ADD COLUMN preferred_escort_id TEXT REFERENCES users(id)');
   if (!db.prepare('PRAGMA table_info(orders)').all().some(column => column.name === 'game_name')) db.exec("ALTER TABLE orders ADD COLUMN game_name TEXT NOT NULL DEFAULT ''");
   if (!db.prepare('PRAGMA table_info(orders)').all().some(column => column.name === 'game_category')) db.exec("ALTER TABLE orders ADD COLUMN game_category TEXT NOT NULL DEFAULT ''");
   // Legacy services and orders were fixed packages. Preserve their price meaning.
@@ -120,8 +130,8 @@ function initialize(db, { production, adminPassword, adminUsername, adminName })
   } catch (error) { db.exec('ROLLBACK'); throw error; }
 }
 
-const publicUser = user => ({ id: user.id, username: user.username, name: user.name, role: user.role, active: user.active, roleLabel: { admin: '管理员', service: '客服', escort: '陪玩', customer: '用户' }[user.role] });
-const columns = 'SELECT o.*, customer.name customer_name, escort.name escort_name FROM orders o JOIN users customer ON customer.id=o.customer_id LEFT JOIN users escort ON escort.id=o.escort_id';
+const publicUser = user => ({ id: user.id, username: user.username, name: user.name, role: user.role, active: user.active, avatarUrl: user.avatar_url || '', bio: user.bio || '', roleLabel: { admin: '管理员', service: '客服', escort: '陪玩', customer: '用户' }[user.role] });
+const columns = 'SELECT o.*, customer.name customer_name, escort.name escort_name, escort.avatar_url escort_avatar_url, escort.bio escort_bio, preferred.name preferred_escort_name, preferred.avatar_url preferred_escort_avatar_url, preferred.bio preferred_escort_bio FROM orders o JOIN users customer ON customer.id=o.customer_id LEFT JOIN users escort ON escort.id=o.escort_id LEFT JOIN users preferred ON preferred.id=o.preferred_escort_id';
 
 export function createBasicClubServer(options = {}) {
   const { database = ':memory:', production = false, publicOrigin, paymentContact = '请联系俱乐部客服获取收款信息' } = options;
@@ -136,11 +146,12 @@ export function createBasicClubServer(options = {}) {
   const userById = userId => db.prepare('SELECT * FROM users WHERE id=?').get(userId);
   const orderById = orderId => db.prepare(`${columns} WHERE o.id=?`).get(orderId);
   const addEvent = (orderId, actor, action, note = '') => db.prepare('INSERT INTO order_events (order_id,actor,action,note,created_at) VALUES (?,?,?,?,?)').run(orderId, actor, action, note, now());
-  const orderView = order => ({ ...order, customer: order.customer_name, escort: order.escort_name || '', events: db.prepare('SELECT actor,action,note,created_at createdAt FROM order_events WHERE order_id=? ORDER BY id').all(order.id) });
+  const orderView = order => ({ ...order, customer: order.customer_name, escort: order.escort_name || '', escortAvatarUrl: order.escort_avatar_url || '', escortBio: order.escort_bio || '', preferredEscort: order.preferred_escort_name || '', preferredEscortAvatarUrl: order.preferred_escort_avatar_url || '', preferredEscortBio: order.preferred_escort_bio || '', events: db.prepare('SELECT actor,action,note,created_at createdAt FROM order_events WHERE order_id=? ORDER BY id').all(order.id) });
   const threadView = thread => ({ ...thread, messages: db.prepare('SELECT m.id,m.body,m.created_at createdAt,u.name sender,u.role FROM support_messages m JOIN users u ON u.id=m.sender_id WHERE m.thread_id=? ORDER BY m.id').all(thread.id) });
   const threadsFor = user => db.prepare(`SELECT t.id,t.customer_id customerId,t.order_id orderId,t.subject,t.status,t.created_at createdAt,t.updated_at updatedAt,u.name customerName,o.service_name serviceName FROM support_threads t JOIN users u ON u.id=t.customer_id LEFT JOIN orders o ON o.id=t.order_id ${staff.has(user.role) ? '' : 'WHERE t.customer_id=?'} ORDER BY t.updated_at DESC,t.id DESC`).all(...(staff.has(user.role) ? [] : [user.id])).map(threadView);
-  const servicesFor = all => db.prepare(`SELECT services.id,services.name,services.category,services.description,services.price_cents priceCents,services.duration_hours durationHours,services.pricing_mode pricingMode,services.active,services.game_id gameId,games.name gameName,games.category gameCategory FROM services LEFT JOIN games ON games.id=services.game_id ${all ? '' : 'WHERE services.active=1 AND (services.game_id IS NULL OR games.active=1)'} ORDER BY services.id`).all();
-  const gamesFor = all => db.prepare(`SELECT id,name,category,active FROM games ${all ? '' : 'WHERE active=1'} ORDER BY id`).all();
+  const servicesFor = all => db.prepare(`SELECT services.id,services.name,services.category,services.description,services.price_cents priceCents,services.duration_hours durationHours,services.pricing_mode pricingMode,services.active,services.game_id gameId,games.name gameName,games.category gameCategory,games.cover_url gameCoverUrl FROM services LEFT JOIN games ON games.id=services.game_id ${all ? '' : 'WHERE services.active=1 AND (services.game_id IS NULL OR games.active=1)'} ORDER BY services.id`).all();
+  const gamesFor = all => db.prepare(`SELECT id,name,category,active,cover_url coverUrl FROM games ${all ? '' : 'WHERE active=1'} ORDER BY id`).all();
+  const escortsFor = () => db.prepare("SELECT id,name,avatar_url avatarUrl,bio,active FROM users WHERE role='escort' AND active=1 ORDER BY name").all();
   const workspace = user => {
     const clause = staff.has(user.role) ? '' : user.role === 'escort' ? ' WHERE o.escort_id=?' : ' WHERE o.customer_id=?';
     return {
@@ -149,7 +160,7 @@ export function createBasicClubServer(options = {}) {
       supportThreads: user.role === 'escort' ? [] : threadsFor(user),
       services: servicesFor(user.role === 'admin'),
       games: user.role === 'admin' ? gamesFor(true) : gamesFor(false),
-      escorts: staff.has(user.role) ? db.prepare("SELECT id,name FROM users WHERE role='escort' AND active=1 ORDER BY name").all() : [],
+      escorts: staff.has(user.role) ? escortsFor() : [],
       users: user.role === 'admin' ? db.prepare("SELECT * FROM users WHERE role IN ('service','escort') ORDER BY created_at").all().map(publicUser) : [],
     };
   };
@@ -173,7 +184,7 @@ export function createBasicClubServer(options = {}) {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Referrer-Policy', 'same-origin');
-    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https: data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
     try {
       const url = new URL(req.url, `http://${req.headers.host || '127.0.0.1'}`);
       if (url.pathname.startsWith('/api/')) {
@@ -188,7 +199,7 @@ export function createBasicClubServer(options = {}) {
           if (++attempt.count > 30) fail('操作频繁，请稍后重试', 429);
         }
         const body = req.method === 'POST' ? await jsonBody(req) : {};
-        if (url.pathname === '/api/public/services' && req.method === 'GET') return respond({ services: servicesFor(false), games: gamesFor(false), demo: !production, paymentContact });
+        if (url.pathname === '/api/public/services' && req.method === 'GET') return respond({ services: servicesFor(false), games: gamesFor(false), escorts: escortsFor(), demo: !production, paymentContact });
         if (url.pathname === '/api/register' && req.method === 'POST') {
           const username = usernameValue(body.username);
           if (db.prepare('SELECT id FROM users WHERE username=?').get(username)) fail('该账号已被使用', 409);
@@ -257,7 +268,7 @@ export function createBasicClubServer(options = {}) {
           if (!['service', 'escort'].includes(body.role)) fail('只能创建客服或陪玩账号');
           const username = usernameValue(body.username);
           if (db.prepare('SELECT id FROM users WHERE username=?').get(username)) fail('该账号已被使用', 409);
-          db.prepare('INSERT INTO users (id,username,password_hash,name,role,created_at) VALUES (?,?,?,?,?,?)').run(id('u'), username, hash(value(body.password, '密码', 8, 128)), value(body.name, '称呼', 1, 30), body.role, now());
+          db.prepare('INSERT INTO users (id,username,password_hash,name,role,created_at,avatar_url,bio) VALUES (?,?,?,?,?,?,?,?)').run(id('u'), username, hash(value(body.password, '密码', 8, 128)), value(body.name, '称呼', 1, 30), body.role, now(), imageUrlValue(body.avatarUrl, '头像地址'), value(body.bio || '', '个人简介', 0, 200));
           return respond({ ok: true }, 201);
         }
         const staffMatch = url.pathname.match(/^\/api\/staff\/([^/]+)$/);
@@ -265,11 +276,14 @@ export function createBasicClubServer(options = {}) {
           if (user.role !== 'admin') fail('只有管理员可以维护业务账号', 403);
           const member = userById(decodeURIComponent(staffMatch[1]));
           if (!member || !['service', 'escort'].includes(member.role)) fail('业务账号不存在', 404);
-          if (typeof body.active !== 'boolean') fail('请提供有效的账号状态');
-          if (!body.active && db.prepare("SELECT id FROM orders WHERE escort_id=? AND status IN ('待服务','服务中','待验收') LIMIT 1").get(member.id)) fail('该陪玩仍有未完成订单，请完成订单后再停用', 409);
+          if (body.active !== undefined && typeof body.active !== 'boolean') fail('请提供有效的账号状态');
+          if (body.active === false && db.prepare("SELECT id FROM orders WHERE escort_id=? AND status IN ('待服务','服务中','待验收') LIMIT 1").get(member.id)) fail('该陪玩仍有未完成订单，请完成订单后再停用', 409);
+          const hasProfile = body.name !== undefined || body.avatarUrl !== undefined || body.bio !== undefined;
+          if (body.active === undefined && !hasProfile) fail('请提供要修改的资料');
           atomic(() => {
-            db.prepare('UPDATE users SET active=? WHERE id=?').run(Number(body.active), member.id);
-            if (!body.active) db.prepare('DELETE FROM sessions WHERE user_id=?').run(member.id);
+            if (body.active !== undefined) db.prepare('UPDATE users SET active=? WHERE id=?').run(Number(body.active), member.id);
+            if (hasProfile) db.prepare('UPDATE users SET name=COALESCE(?,name),avatar_url=COALESCE(?,avatar_url),bio=COALESCE(?,bio) WHERE id=?').run(body.name === undefined ? null : value(body.name, '称呼', 1, 30), body.avatarUrl === undefined ? null : imageUrlValue(body.avatarUrl, '头像地址'), body.bio === undefined ? null : value(body.bio, '个人简介', 0, 200), member.id);
+            if (body.active === false) db.prepare('DELETE FROM sessions WHERE user_id=?').run(member.id);
           });
           return respond({ ok: true });
         }
@@ -288,18 +302,24 @@ export function createBasicClubServer(options = {}) {
           if (hourly && typeof body.hours !== 'number') fail('请选择 1–24 整小时的服务时长');
           const hours = hourly ? integer(body.hours, '服务时长（1–24 整小时）', 1, 24) : service.duration_hours;
           const total = service.price_cents * (hourly ? hours : 1);
+          let preferredEscortId = null;
+          if (body.preferredEscortId) {
+            const preferred = userById(value(body.preferredEscortId, '陪玩人员', 1, 60));
+            if (!preferred || preferred.role !== 'escort' || !preferred.active) fail('请选择可用的陪玩人员');
+            preferredEscortId = preferred.id;
+          }
           const created = now(), orderId = id('o');
           atomic(() => {
-            db.prepare("INSERT INTO orders (id,customer_id,service_id,service_name,category,price_cents,duration_hours,contact,note,status,created_at,updated_at,game_name,game_category,pricing_mode,unit_price_cents) VALUES (?,?,?,?,?,?,?,?,?,'待支付',?,?,?,?,?,?)").run(orderId, user.id, service.id, service.name, service.category, total, hours, value(body.contact, '联系方式', 2, 80), value(body.note || '', '备注', 0, 300), created, created, game.name, game.category, service.pricing_mode, service.price_cents);
+            db.prepare("INSERT INTO orders (id,customer_id,preferred_escort_id,service_id,service_name,category,price_cents,duration_hours,contact,note,status,created_at,updated_at,game_name,game_category,pricing_mode,unit_price_cents) VALUES (?,?,?,?,?,?,?,?,?,?,'待支付',?,?,?,?,?,?)").run(orderId, user.id, preferredEscortId, service.id, service.name, service.category, total, hours, value(body.contact, '联系方式', 2, 80), value(body.note || '', '备注', 0, 300), created, created, game.name, game.category, service.pricing_mode, service.price_cents);
             addEvent(orderId, user.name, '提交订单');
           });
           return respond(orderView(orderById(orderId)), 201);
         }
         if (url.pathname === '/api/games' && req.method === 'POST') {
           if (user.role !== 'admin') fail('只有管理员可以维护游戏', 403);
-          const name = value(body.name, '游戏名称', 2, 40), category = value(body.category, '游戏类别', 2, 30);
+          const name = value(body.name, '游戏名称', 2, 40), category = value(body.category, '游戏类别', 2, 30), coverUrl = imageUrlValue(body.coverUrl, '游戏封面地址');
           if (db.prepare('SELECT id FROM games WHERE name=?').get(name)) fail('游戏名称已存在', 409);
-          db.prepare('INSERT INTO games (name,category) VALUES (?,?)').run(name, category);
+          db.prepare('INSERT INTO games (name,category,cover_url) VALUES (?,?,?)').run(name, category, coverUrl);
           return respond({ ok: true }, 201);
         }
         const gameMatch = url.pathname.match(/^\/api\/games\/(\d+)$/);
@@ -310,9 +330,9 @@ export function createBasicClubServer(options = {}) {
           if (Object.keys(body).length === 1 && typeof body.active === 'boolean') {
             db.prepare('UPDATE games SET active=? WHERE id=?').run(Number(body.active), gameId);
           } else {
-            const name = value(body.name, '游戏名称', 2, 40), category = value(body.category, '游戏类别', 2, 30);
+            const name = value(body.name, '游戏名称', 2, 40), category = value(body.category, '游戏类别', 2, 30), coverUrl = imageUrlValue(body.coverUrl, '游戏封面地址');
             if (db.prepare('SELECT id FROM games WHERE name=? AND id<>?').get(name, gameId)) fail('游戏名称已存在', 409);
-            db.prepare('UPDATE games SET name=?,category=? WHERE id=?').run(name, category, gameId);
+            db.prepare('UPDATE games SET name=?,category=?,cover_url=? WHERE id=?').run(name, category, coverUrl, gameId);
           }
           return respond({ ok: true });
         }
@@ -346,7 +366,8 @@ export function createBasicClubServer(options = {}) {
               addEvent(order.id, user.name, '服务跟进', value(body.note, '跟进内容', 2, 300));
             } else if (action === 'dispatch') {
               requireState(staff.has(user.role), ['待派单']);
-              const escort = userById(value(body.escortId, '陪玩人员', 1, 60));
+              const escortId = body.escortId || order.preferred_escort_id;
+              const escort = escortId ? userById(value(escortId, '陪玩人员', 1, 60)) : null;
               if (!escort || escort.role !== 'escort' || !escort.active) fail('请选择可用的陪玩人员');
               update('待服务', { escortId: escort.id });
               addEvent(order.id, user.name, '客服派单', `已分配给 ${escort.name}`);

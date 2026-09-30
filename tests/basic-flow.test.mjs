@@ -43,6 +43,34 @@ test('default catalog offers selectable hours alongside fixed packages without a
   assert.equal(packageOrder.result.price_cents, fixed.priceCents);
 });
 
+test('customers can request an active escort while staff maintain profiles and game covers', async t => {
+  const { app, base } = await start();
+  t.after(() => { app.server.close(); app.close(); });
+  const admin = await login(base, 'admin'), customer = await login(base, 'user'), service = await login(base, 'service');
+  const coverUrl = 'https://example.com/club-cover.jpg';
+  const avatarUrl = 'https://example.com/escort.jpg';
+  assert.equal((await request(base, '/games/1', { cookie: admin, body: { name: '三角洲行动', category: '射击竞技', coverUrl } })).response.status, 200);
+  assert.equal((await request(base, '/staff/u_escort', { cookie: admin, body: { name: '陪玩小北', avatarUrl, bio: '擅长射击竞技和语音组队' } })).response.status, 200);
+  assert.equal((await request(base, '/games/1', { cookie: admin, body: { name: '三角洲行动', category: '射击竞技', coverUrl: 'javascript:alert(1)' } })).response.status, 400);
+  assert.equal((await request(base, '/staff/u_escort', { cookie: admin, body: { avatarUrl: 'javascript:alert(1)' } })).response.status, 400);
+  const catalog = (await request(base, '/public/services')).result;
+  assert.equal(catalog.games[0].coverUrl, coverUrl);
+  assert.equal(catalog.escorts[0].avatarUrl, avatarUrl);
+  assert.match(catalog.escorts[0].bio, /射击竞技/);
+  const orderBody = { gameId: 1, serviceId: catalog.services[0].id, hours: 2, contact: 'escort-request', preferredEscortId: 'u_escort' };
+  for (const invalid of ['u_admin', 'missing']) assert.equal((await request(base, '/orders', { cookie: customer, body: { ...orderBody, preferredEscortId: invalid } })).response.status, 400);
+  const created = await request(base, '/orders', { cookie: customer, body: orderBody });
+  assert.equal(created.response.status, 201);
+  assert.equal(created.result.preferred_escort_id, 'u_escort');
+  assert.equal(created.result.preferredEscortAvatarUrl, avatarUrl);
+  assert.equal(created.result.escort_id, null);
+  await request(base, `/orders/${created.result.id}/actions`, { cookie: service, body: { action: 'confirm-payment' } });
+  const dispatched = await request(base, `/orders/${created.result.id}/actions`, { cookie: service, body: { action: 'dispatch' } });
+  assert.equal(dispatched.result.escort_id, 'u_escort');
+  assert.equal(dispatched.result.escortAvatarUrl, avatarUrl);
+  assert.equal((await request(base, '/staff/u_escort', { cookie: admin, body: { active: false } })).response.status, 409);
+});
+
 test('basic edition keeps the order chain from order submission to customer acceptance', async t => {
   const { app, base } = await start();
   t.after(() => { app.server.close(); app.close(); });

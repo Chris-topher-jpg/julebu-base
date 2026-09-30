@@ -17,14 +17,21 @@ test('customers can choose hours or an actual fixed package from the default cat
     page.setDefaultTimeout(8000);
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
+    assert.equal((await page.request.post(`${base}/api/login`, { data: { username: 'admin', password: '123456' } })).status(), 200);
+    assert.equal((await page.request.post(`${base}/api/staff/u_escort`, { data: { name: '陪玩小北', avatarUrl: '/src/assets/gaming.jpg', bio: '擅长射击竞技' } })).status(), 200);
+    assert.equal((await page.request.post(`${base}/api/games/1`, { data: { name: '三角洲行动', category: '射击竞技', coverUrl: '/src/assets/gaming.jpg' } })).status(), 200);
     const login = await page.request.post(`${base}/api/login`, { data: { username: 'user', password: '123456' } });
     assert.equal(login.status(), 200);
     await page.goto(base);
+    assert.equal(await page.locator('.service-cover').count(), 0);
     const openOrder = async name => {
       await page.locator('.service-card').filter({ has: page.getByRole('heading', { name, exact: true }) }).getByRole('button', { name: '查看详情', exact: true }).click();
       await page.getByRole('button', { name: /预约这项服务/ }).click();
     };
     await openOrder('竞技上分陪玩');
+    assert.equal(await page.getByText('陪玩小北', { exact: true }).count(), 1);
+    assert.equal(await page.getByAltText('陪玩小北头像').count(), 1);
+    await page.locator('.escort-choice').filter({ hasText: '陪玩小北' }).click();
     const hourly = page.locator('[data-booking-mode="hourly"]');
     const fixed = page.locator('[data-booking-mode="package"]');
     const hours = page.getByLabel('服务时长（小时）', { exact: true });
@@ -48,11 +55,13 @@ test('customers can choose hours or an actual fixed package from the default cat
     await page.getByLabel('区服（选填）', { exact: true }).fill('微信区');
     await page.getByLabel('备注', { exact: true }).fill('保留需求');
     await fixed.click();
+    assert.equal(await page.locator('input[name="preferredEscortId"]:checked').inputValue(), 'u_escort');
     await page.getByLabel('服务类型', { exact: true }).selectOption('3');
     assert.equal(await hours.count(), 0);
     assert.equal(await total.innerText(), '¥128.00');
     assert.match(await page.locator('#booking-quote').innerText(), /固定套餐 · 2 小时/);
     await hourly.click();
+    assert.equal(await page.locator('input[name="preferredEscortId"]:checked').inputValue(), 'u_escort');
     assert.equal(await hours.inputValue(), '3');
     assert.equal(await total.innerText(), '¥204.00');
     assert.equal(await page.getByLabel('联系方式', { exact: true }).inputValue(), 'booking-regression');
@@ -73,6 +82,7 @@ test('customers can choose hours or an actual fixed package from the default cat
     assert.equal(order.pricing_mode, 'hourly');
     assert.equal(order.duration_hours, 3);
     assert.equal(order.price_cents, 20400);
+    assert.equal(order.preferred_escort_id, 'u_escort');
     assert.match(order.note, /微信区[\s\S]*保留需求/);
     await page.getByRole('link', { name: '服务大厅', exact: true }).click();
     await openOrder('开黑组队服务');
