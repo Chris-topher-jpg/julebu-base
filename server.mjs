@@ -358,7 +358,7 @@ export function createBasicClubServer(options = {}) {
           } else {
             const gameId = body.gameId === null || body.gameId === '' || body.gameId === undefined ? null : integer(body.gameId, '所属游戏', 1, 999999);
             if (gameId && !db.prepare('SELECT id FROM games WHERE id=?').get(gameId)) fail('所属游戏不存在');
-            const fields = [value(body.name, '服务名称', 2, 50), value(body.category, '服务分类', 2, 30), value(body.description, '服务说明', 5, 200), integer(body.priceCents, '服务价格', 100, 10000000), integer(body.durationHours, '服务时长', 1, 24), gameId];
+            const fields = [value(body.name, '套餐名称', 2, 50), value(body.category, '服务类型', 2, 30), value(body.description, '服务说明', 5, 200), integer(body.priceCents, '套餐总价', 100, 10000000), integer(body.durationHours, '服务时长（1–24 整小时）', 1, 24), gameId];
             if (db.prepare('SELECT id FROM services WHERE name=? AND id<>?').get(fields[0], serviceId || 0)) fail('服务名称已存在', 409);
             if (serviceId) db.prepare('UPDATE services SET name=?,category=?,description=?,price_cents=?,duration_hours=?,game_id=? WHERE id=?').run(...fields, serviceId);
             else db.prepare('INSERT INTO services (name,category,description,price_cents,duration_hours,game_id) VALUES (?,?,?,?,?,?)').run(...fields);

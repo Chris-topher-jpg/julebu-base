@@ -2,7 +2,7 @@ const app = document.querySelector('#app');
 const state = {
   services: [], games: [], workspace: null, dialog: null, demo: false, paymentContact: '',
   filter: '全部', search: '', page: 1, catalogCategory: '全部', catalogGameId: '', catalogSearch: '',
-  catalogSort: 'default', settingsTab: 'games', pendingService: null, supportId: null, supportFilter: 'open', busy: 0,
+  catalogSort: 'default', catalogServiceType: '', catalogDuration: '', settingsTab: 'games', pendingService: null, supportId: null, supportFilter: 'open', busy: 0,
 };
 const statuses = ['待支付', '待核款', '待派单', '待服务', '服务中', '待验收', '已完成', '已取消'];
 const pageSize = 8;
@@ -68,6 +68,8 @@ async function refresh() {
   state.services = catalog.services; state.games = catalog.games; state.demo = catalog.demo; state.paymentContact = catalog.paymentContact;
   if (state.catalogGameId && !state.games.some(game => String(game.id) === state.catalogGameId)) state.catalogGameId = '';
   if (state.catalogCategory !== '全部' && !state.games.some(game => game.category === state.catalogCategory)) state.catalogCategory = '全部';
+  if (state.catalogServiceType && !state.services.some(service => service.category === state.catalogServiceType)) state.catalogServiceType = '';
+  if (state.catalogDuration && !state.services.some(service => String(service.durationHours) === state.catalogDuration)) state.catalogDuration = '';
   try { state.workspace = await api('/me'); } catch (error) { if (error.status !== 401) throw error; state.workspace = null; }
 }
 function brand() { return `<a class="brand" href="#/">${icon('game')}<span>星河俱乐部<small>游戏陪伴 · 服务管理</small></span></a>`; }
@@ -86,20 +88,38 @@ function home() {
     <section class="catalog" id="catalog"><div class="section-heading"><div><p class="eyebrow">找到适合你的游戏</p><h2>今天，想怎么玩？</h2></div><label class="search-field">${icon('search')}<input id="catalog-search" type="search" aria-label="搜索服务" placeholder="搜索游戏或服务" value="${esc(state.catalogSearch)}" /></label></div>
     <div class="catalog-toolbar"><div class="chips" aria-label="游戏类别">${['全部', ...new Set(state.games.map(game => game.category))].map(category => `<button data-category="${esc(category)}" class="chip ${state.catalogCategory === category ? 'selected' : ''}" aria-pressed="${state.catalogCategory === category}">${esc(category)}</button>`).join('')}</div><label class="sort-control">排序<select id="catalog-sort" aria-label="服务排序"><option value="default" ${state.catalogSort === 'default' ? 'selected' : ''}>默认排序</option><option value="price" ${state.catalogSort === 'price' ? 'selected' : ''}>价格从低到高</option><option value="duration" ${state.catalogSort === 'duration' ? 'selected' : ''}>时长从短到长</option></select></label></div>
     <div class="game-picker" aria-label="选择游戏"><button class="game-choice ${state.catalogGameId ? '' : 'selected'}" data-game-id="" aria-pressed="${!state.catalogGameId}">${icon('grid')}<span>全部游戏<small>浏览所有可用服务</small></span></button>${state.games.filter(game => state.catalogCategory === '全部' || game.category === state.catalogCategory).map(game => `<button class="game-choice ${state.catalogGameId === String(game.id) ? 'selected' : ''}" data-game-id="${game.id}" aria-pressed="${state.catalogGameId === String(game.id)}">${icon('game')}<span>${esc(game.name)}<small>${esc(game.category)}</small></span></button>`).join('')}</div>
+    <div class="package-filters" aria-label="筛选小时套餐"><label>服务类型<select id="catalog-service-type" aria-label="筛选服务类型"><option value="">全部类型</option>${[...new Set(state.services.map(service => service.category))].map(type => `<option value="${esc(type)}" ${state.catalogServiceType === type ? 'selected' : ''}>${esc(type)}</option>`).join('')}</select></label><label>服务时长<select id="catalog-duration" aria-label="筛选服务时长"><option value="">全部时长</option>${[...new Set(state.services.map(service => service.durationHours))].sort((a, b) => a - b).map(hours => `<option value="${hours}" ${state.catalogDuration === String(hours) ? 'selected' : ''}>${hours} 小时</option>`).join('')}</select></label></div>
     <div class="catalog-results"><h3>${state.catalogGameId ? `${esc(state.games.find(game => String(game.id) === state.catalogGameId)?.name)}的服务` : '全部服务'}</h3><span id="catalog-count">${catalogServices().length} 个匹配项目</span></div><div class="service-grid" id="catalog-list">${catalogList()}</div></section>
     <section class="help-section"><div><p class="eyebrow">下单前，先了解</p><h2>常见问题</h2><p>还有其他需求？<br />联系客服确认后再下单。</p><button class="text-button" data-open="contact">查看联系方式 ${icon('arrow')}</button></div><div class="faq"><details><summary>下单以后，如何付款？</summary><p>通过客服提供的线下渠道付款，在订单中填写付款备注。客服核实实际到账后，为你安排陪玩。</p></details><details><summary>可以预约服务时间吗？</summary><p>下单时选择游戏、填写期望时间和区服。客服会联系你确认安排，预约以双方确认为准。</p></details><details><summary>怎样查询服务进度？</summary><p>登录后进入“我的订单”，可以查看派单信息、履约状态和完整流程记录。</p></details><details><summary>订单可以取消吗？</summary><p>未提交付款报备的待支付订单可以取消。报备或付款后如需变更，请联系俱乐部客服线下处理。</p></details></div></section>`;
 }
 function catalogServices() {
   const query = state.catalogSearch.trim().toLowerCase();
   const games = state.games.filter(game => (state.catalogCategory === '全部' || game.category === state.catalogCategory) && (!state.catalogGameId || String(game.id) === state.catalogGameId));
-  let services = state.services.filter(s => games.some(game => (!s.gameId || s.gameId === game.id) && `${s.name} ${s.category} ${s.description} ${game.name} ${game.category}`.toLowerCase().includes(query)));
+  let services = state.services.filter(s => (!state.catalogServiceType || s.category === state.catalogServiceType) && (!state.catalogDuration || String(s.durationHours) === state.catalogDuration) && games.some(game => (!s.gameId || s.gameId === game.id) && `${s.name} ${s.category} ${s.description} ${game.name} ${game.category}`.toLowerCase().includes(query)));
   if (state.catalogSort === 'price') services.sort((a, b) => a.priceCents - b.priceCents);
   if (state.catalogSort === 'duration') services.sort((a, b) => a.durationHours - b.durationHours);
   return services;
 }
 function catalogList() {
   const services = catalogServices();
-  return services.length ? services.map(s => `<article class="service-card"><div class="service-art art-${s.id % 3}"><span class="category">${esc(s.gameName || '通用服务')}</span><span class="art-symbol">${icon(s.id % 3 === 1 ? 'game' : s.id % 3 === 2 ? 'star' : 'people')}</span><span class="art-label">${esc(s.gameName || s.category)}</span><small>${esc(s.gameCategory || '多款游戏可选')}</small></div><div class="service-copy"><h3>${esc(s.name)}</h3><p>${esc(s.description)}</p><div class="service-meta"><span>${icon('clock')}${s.durationHours} 小时 / 次</span><span>${esc(s.gameName || '下单时选择游戏')}</span></div><div class="card-footer"><span><strong>${currency(s.priceCents)}</strong><small> / 次</small></span><button class="secondary small" data-service-detail="${s.id}">查看详情 ${icon('arrow')}</button></div></div></article>`).join('') : empty('没有找到相关服务', '试试其他关键词，或查看所有服务。', '<button class="secondary" data-reset-catalog>查看全部</button>');
+  return services.length ? services.map(s => `<article class="service-card"><div class="service-art art-${s.id % 3}"><span class="category">${esc(s.gameName || '通用服务')}</span><span class="art-symbol">${icon(s.id % 3 === 1 ? 'game' : s.id % 3 === 2 ? 'star' : 'people')}</span><span class="art-label">${esc(s.gameName || s.category)}</span><small>${esc(s.gameCategory || '多款游戏可选')}</small></div><div class="service-copy"><h3>${esc(s.name)}</h3><p>${esc(s.description)}</p><div class="service-meta"><span>${icon('clock')}${s.durationHours} 小时套餐</span><span>${esc(s.category)}</span></div><div class="card-footer"><span><strong>${currency(s.priceCents)}</strong><small> / ${s.durationHours} 小时</small></span><button class="secondary small" data-service-detail="${s.id}">查看详情 ${icon('arrow')}</button></div></div></article>`).join('') : empty('没有找到相关服务', '试试其他关键词，或查看所有服务。', '<button class="secondary" data-reset-catalog>查看全部</button>');
+}
+function updateCatalogResults() {
+  document.querySelector('#catalog-list').innerHTML = catalogList();
+  document.querySelector('#catalog-count').textContent = `${catalogServices().length} 个匹配项目`;
+}
+function updatePackagePreview() {
+  const form = document.querySelector('#dialog-form');
+  if (state.dialog?.type !== 'service' || !form) return;
+  const hours = Number(form.elements.duration.value), cents = Math.round(Number(form.elements.price.value) * 100);
+  const valid = form.elements.duration.value !== '' && form.elements.price.value !== '' && form.elements.duration.validity.valid && form.elements.price.validity.valid;
+  const preview = form.querySelector('#package-preview');
+  preview.textContent = valid ? `${form.elements.category.value.trim() || '自定义服务'} · ${hours} 小时套餐，总价 ${currency(cents)}（折合 ${currency(cents / hours)} / 小时）` : '填写服务时长和套餐总价后，可预览每小时折合价格。';
+  for (const preset of form.querySelectorAll('[data-duration-preset]')) {
+    const selected = Number(preset.dataset.durationPreset) === hours;
+    preset.classList.toggle('selected', selected);
+    preset.setAttribute('aria-pressed', String(selected));
+  }
 }
 function nextStep(order) {
   return ({ 待支付: '完成线下付款后，提交付款报备。', 待核款: '客服正在核实收款，请保留转账记录。', 待派单: '收款已确认，等待客服安排陪玩。', 待服务: '陪玩已安排，请确认服务时间后开始。', 服务中: '服务进行中，结束后由陪玩提交完成。', 待验收: '服务已结束，等待客户确认验收。', 已完成: '本次服务已完成，感谢你的信任。', 已取消: '这笔订单已取消，欢迎重新选择服务。' })[order.status];
@@ -140,7 +160,7 @@ function orderCard(order) {
 }
 function filteredOrders() {
   const search = state.search.trim().toLowerCase();
-  return state.workspace.orders.filter(o => (state.filter === '全部' || o.status === state.filter) && [o.id, o.customer, o.contact, o.service_name, o.escort, o.game_name, o.game_category].some(value => String(value).toLowerCase().includes(search)));
+  return state.workspace.orders.filter(o => (state.filter === '全部' || o.status === state.filter) && [o.id, o.customer, o.contact, o.service_name, o.category, o.escort, o.game_name, o.game_category].some(value => String(value).toLowerCase().includes(search)));
 }
 function orderList() {
   const orders = filteredOrders(), pages = Math.max(1, Math.ceil(orders.length / pageSize));
@@ -155,7 +175,7 @@ function settings() {
   const services = state.workspace.services, users = state.workspace.users, games = state.workspace.games;
   const gameTab = state.settingsTab === 'games';
   const serviceTab = state.settingsTab === 'services';
-  return `<section class="page-heading"><div><p class="eyebrow">基础配置</p><h1>游戏与服务</h1><p class="page-description">先添加游戏与类别，再配置对应服务、价格和业务账号。</p></div><button class="primary" data-open="${gameTab ? 'game' : serviceTab ? 'service' : 'staff'}">${icon('plus')}${gameTab ? '新增游戏' : serviceTab ? '新增服务' : '新增账号'}</button></section><div class="settings-summary"><span>${icon('game')}<b>${games.filter(g => g.active).length}</b> 在架游戏</span><span>${icon('game')}<b>${state.services.length}</b> 在售服务</span><span>${icon('people')}<b>${users.filter(u => u.active && u.role === 'escort').length}</b> 可用陪玩</span><span>${icon('shield')}<b>${users.filter(u => u.active && u.role === 'service').length}</b> 客服账号</span></div><section class="panel"><div class="order-tabs" aria-label="管理内容"><button class="order-tab ${gameTab ? 'selected' : ''}" data-settings-tab="games" aria-pressed="${gameTab}">游戏目录 <b>${games.length}</b></button><button class="order-tab ${serviceTab ? 'selected' : ''}" data-settings-tab="services" aria-pressed="${serviceTab}">服务项目 <b>${services.length}</b></button><button class="order-tab ${state.settingsTab === 'staff' ? 'selected' : ''}" data-settings-tab="staff" aria-pressed="${state.settingsTab === 'staff'}">业务人员 <b>${users.length}</b></button></div>${gameTab ? gameTable(games, services) : serviceTab ? `<div class="table-scroll"><table><thead><tr><th>服务项目</th><th>所属游戏 / 服务分类</th><th>价格 / 时长</th><th>状态</th><th class="align-right">操作</th></tr></thead><tbody>${services.map(service => `<tr><td><b>${esc(service.name)}</b><small class="description-cell">${esc(service.description)}</small></td><td>${esc(service.gameName || '通用服务')}<small>${esc(service.category)}</small></td><td class="numeric">${currency(service.priceCents)}<small>${service.durationHours} 小时 / 次</small></td><td><span class="status ${service.active && (!service.gameId || games.some(g => g.id === service.gameId && g.active)) ? 'positive' : 'neutral'}"><i></i>${!service.active ? '已下架' : service.gameId && !games.some(g => g.id === service.gameId && g.active) ? '游戏已下架' : '在售'}</span></td><td class="align-right"><div class="row-actions"><button class="text-button" data-edit-service="${service.id}">${icon('edit')}编辑</button><button class="text-button" data-toggle-service="${service.id}" data-active="${service.active ? '0' : '1'}">${service.active ? '下架' : '上架'}</button></div></td></tr>`).join('')}</tbody></table></div>${!services.length ? empty('还没有服务项目', '添加名称、价格与时长，即可在大厅展示。', '<button class="secondary" data-open="service">新增服务</button>') : ''}` : `<div class="table-scroll"><table><thead><tr><th>人员</th><th>登录账号</th><th>角色</th><th>进行中订单</th><th>状态</th><th class="align-right">操作</th></tr></thead><tbody>${users.map(user => `<tr><td><div class="person"><span class="avatar">${esc(user.name.slice(0, 1))}</span><b>${esc(user.name)}</b></div></td><td>${esc(user.username)}</td><td>${esc(user.roleLabel)}</td><td>${user.role === 'escort' ? state.workspace.orders.filter(o => o.escort_id === user.id && !closed(o)).length : '—'}</td><td><span class="status ${user.active ? 'positive' : 'neutral'}"><i></i>${user.active ? '启用' : '已停用'}</span></td><td class="align-right"><button class="text-button" data-toggle-staff="${esc(user.id)}">${user.active ? '停用账号' : '启用账号'}</button></td></tr>`).join('')}</tbody></table></div>${!users.length ? empty('添加你的第一位业务人员', '创建客服或陪玩账号，用于处理和履约订单。', '<button class="secondary" data-open="staff">新增账号</button>') : ''}`}<div class="panel-note">${icon('shield')}${gameTab ? '下架游戏后，对应服务暂停接单；已有订单可继续核款、派单和履约。' : serviceTab ? '调价仅影响新订单，已有订单保留原价格和服务信息。' : '停用后账号无法登录；陪玩有未完成订单时不能停用。'}</div></section>`;
+  return `<section class="page-heading"><div><p class="eyebrow">基础配置</p><h1>游戏与服务</h1><p class="page-description">先添加游戏与类别，再配置对应服务、价格和业务账号。</p></div><button class="primary" data-open="${gameTab ? 'game' : serviceTab ? 'service' : 'staff'}">${icon('plus')}${gameTab ? '新增游戏' : serviceTab ? '新增小时套餐' : '新增账号'}</button></section><div class="settings-summary"><span>${icon('game')}<b>${games.filter(g => g.active).length}</b> 在架游戏</span><span>${icon('game')}<b>${state.services.length}</b> 在售服务</span><span>${icon('people')}<b>${users.filter(u => u.active && u.role === 'escort').length}</b> 可用陪玩</span><span>${icon('shield')}<b>${users.filter(u => u.active && u.role === 'service').length}</b> 客服账号</span></div><section class="panel"><div class="order-tabs" aria-label="管理内容"><button class="order-tab ${gameTab ? 'selected' : ''}" data-settings-tab="games" aria-pressed="${gameTab}">游戏目录 <b>${games.length}</b></button><button class="order-tab ${serviceTab ? 'selected' : ''}" data-settings-tab="services" aria-pressed="${serviceTab}">服务项目 <b>${services.length}</b></button><button class="order-tab ${state.settingsTab === 'staff' ? 'selected' : ''}" data-settings-tab="staff" aria-pressed="${state.settingsTab === 'staff'}">业务人员 <b>${users.length}</b></button></div>${gameTab ? gameTable(games, services) : serviceTab ? `<div class="table-scroll"><table><thead><tr><th>服务项目</th><th>所属游戏 / 服务类型</th><th>套餐总价 / 时长</th><th>状态</th><th class="align-right">操作</th></tr></thead><tbody>${services.map(service => `<tr><td><b>${esc(service.name)}</b><small class="description-cell">${esc(service.description)}</small></td><td>${esc(service.gameName || '通用服务')}<small>${esc(service.category)}</small></td><td class="numeric">${currency(service.priceCents)}<small>${service.durationHours} 小时套餐</small></td><td><span class="status ${service.active && (!service.gameId || games.some(g => g.id === service.gameId && g.active)) ? 'positive' : 'neutral'}"><i></i>${!service.active ? '已下架' : service.gameId && !games.some(g => g.id === service.gameId && g.active) ? '游戏已下架' : '在售'}</span></td><td class="align-right"><div class="row-actions"><button class="text-button" data-edit-service="${service.id}">${icon('edit')}编辑</button><button class="text-button" data-copy-service="${service.id}">复制套餐</button><button class="text-button" data-toggle-service="${service.id}" data-active="${service.active ? '0' : '1'}">${service.active ? '下架' : '上架'}</button></div></td></tr>`).join('')}</tbody></table></div>${!services.length ? empty('还没有服务项目', '填写服务类型、小时数和套餐总价，即可在大厅展示。', '<button class="secondary" data-open="service">新增小时套餐</button>') : ''}` : `<div class="table-scroll"><table><thead><tr><th>人员</th><th>登录账号</th><th>角色</th><th>进行中订单</th><th>状态</th><th class="align-right">操作</th></tr></thead><tbody>${users.map(user => `<tr><td><div class="person"><span class="avatar">${esc(user.name.slice(0, 1))}</span><b>${esc(user.name)}</b></div></td><td>${esc(user.username)}</td><td>${esc(user.roleLabel)}</td><td>${user.role === 'escort' ? state.workspace.orders.filter(o => o.escort_id === user.id && !closed(o)).length : '—'}</td><td><span class="status ${user.active ? 'positive' : 'neutral'}"><i></i>${user.active ? '启用' : '已停用'}</span></td><td class="align-right"><button class="text-button" data-toggle-staff="${esc(user.id)}">${user.active ? '停用账号' : '启用账号'}</button></td></tr>`).join('')}</tbody></table></div>${!users.length ? empty('添加你的第一位业务人员', '创建客服或陪玩账号，用于处理和履约订单。', '<button class="secondary" data-open="staff">新增账号</button>') : ''}`}<div class="panel-note">${icon('shield')}${gameTab ? '下架游戏后，对应服务暂停接单；已有订单可继续核款、派单和履约。' : serviceTab ? '可自定义服务类型和 1–24 小时时长；用“复制套餐”添加不同小时选项。修改只影响新订单。' : '停用后账号无法登录；陪玩有未完成订单时不能停用。'}</div></section>`;
 }
 function support() {
   const threads = state.workspace.supportThreads;
@@ -172,7 +192,7 @@ function field(label, name, options = {}) {
   return `<label>${label}<input name="${name}" ${options.type ? `type="${options.type}"` : ''} ${options.attrs || ''} value="${esc(options.value ?? '')}" ${options.optional ? '' : 'required'} /></label>`;
 }
 function detail(order) {
-  return `<div data-order-id="${esc(order.id)}"><div class="detail-title"><div><p class="eyebrow">订单 #${shortId(order.id)}</p><h2 id="dialog-title">${esc(order.service_name)}</h2></div>${badge(order.status)}</div><div class="detail-hint">${icon('clock')}<span>${nextStep(order)}</span></div>${progress(order)}<dl class="detail-info"><div><dt>游戏</dt><dd>${esc(order.game_name || '历史订单未记录游戏')}</dd></div><div><dt>游戏类别</dt><dd>${esc(order.game_category || '—')}</dd></div><div><dt>订单金额</dt><dd class="price">${currency(order.price_cents)}</dd></div><div><dt>服务时长</dt><dd>${order.duration_hours} 小时</dd></div><div><dt>客户</dt><dd>${esc(order.customer)}</dd></div><div><dt>陪玩</dt><dd>${esc(order.escort || '待安排')}</dd></div><div><dt>联系方式</dt><dd>${esc(order.contact)}</dd></div><div><dt>下单时间</dt><dd>${date(order.created_at)}</dd></div></dl><section class="detail-section"><h3>需求备注</h3><p class="order-note">${esc(order.note || '暂无额外需求')}</p></section>${state.workspace.user.role === 'customer' && order.status === '待支付' ? `<p class="payment-contact">收款联系：${esc(state.paymentContact)}</p>` : ''}<section class="detail-section"><div class="section-heading"><h3>流程记录</h3>${isOperator() && !closed(order) ? '<button class="text-button" data-order-action="note">添加跟进</button>' : ''}</div><ol class="timeline">${order.events.map(event => `<li><i></i><div><b>${esc(event.action)}</b><small>${esc(event.actor)} · ${date(event.createdAt)}</small>${event.note ? `<p>${esc(event.note)}</p>` : ''}</div></li>`).join('')}</ol></section><p class="form-error" role="alert"></p><div class="detail-actions">${state.workspace.user.role === 'customer' ? `<button class="secondary" data-support-order="${esc(order.id)}">咨询此订单</button>` : ''}${actions(order)}${!isOperator() && closed(order) && state.services.some(s => s.id === order.service_id) ? `<button class="primary" data-order-service="${order.service_id}" data-reorder="${esc(order.id)}">再来一单</button>` : ''}<button class="secondary" data-close>关闭详情</button></div><p class="full-id">完整订单号：${esc(order.id)}</p></div>`;
+  return `<div data-order-id="${esc(order.id)}"><div class="detail-title"><div><p class="eyebrow">订单 #${shortId(order.id)}</p><h2 id="dialog-title">${esc(order.service_name)}</h2></div>${badge(order.status)}</div><div class="detail-hint">${icon('clock')}<span>${nextStep(order)}</span></div>${progress(order)}<dl class="detail-info"><div><dt>游戏</dt><dd>${esc(order.game_name || '历史订单未记录游戏')}</dd></div><div><dt>游戏类别</dt><dd>${esc(order.game_category || '—')}</dd></div><div><dt>服务类型</dt><dd>${esc(order.category)}</dd></div><div><dt>订单金额</dt><dd class="price">${currency(order.price_cents)}</dd></div><div><dt>服务时长</dt><dd>${order.duration_hours} 小时</dd></div><div><dt>客户</dt><dd>${esc(order.customer)}</dd></div><div><dt>陪玩</dt><dd>${esc(order.escort || '待安排')}</dd></div><div><dt>联系方式</dt><dd>${esc(order.contact)}</dd></div><div><dt>下单时间</dt><dd>${date(order.created_at)}</dd></div></dl><section class="detail-section"><h3>需求备注</h3><p class="order-note">${esc(order.note || '暂无额外需求')}</p></section>${state.workspace.user.role === 'customer' && order.status === '待支付' ? `<p class="payment-contact">收款联系：${esc(state.paymentContact)}</p>` : ''}<section class="detail-section"><div class="section-heading"><h3>流程记录</h3>${isOperator() && !closed(order) ? '<button class="text-button" data-order-action="note">添加跟进</button>' : ''}</div><ol class="timeline">${order.events.map(event => `<li><i></i><div><b>${esc(event.action)}</b><small>${esc(event.actor)} · ${date(event.createdAt)}</small>${event.note ? `<p>${esc(event.note)}</p>` : ''}</div></li>`).join('')}</ol></section><p class="form-error" role="alert"></p><div class="detail-actions">${state.workspace.user.role === 'customer' ? `<button class="secondary" data-support-order="${esc(order.id)}">咨询此订单</button>` : ''}${actions(order)}${!isOperator() && closed(order) && state.services.some(s => s.id === order.service_id) ? `<button class="primary" data-order-service="${order.service_id}" data-reorder="${esc(order.id)}">再来一单</button>` : ''}<button class="secondary" data-close>关闭详情</button></div><p class="full-id">完整订单号：${esc(order.id)}</p></div>`;
 }
 function modal() {
   const { type, id, mode } = state.dialog;
@@ -184,7 +204,7 @@ function modal() {
     body = `<p class="muted">${register ? '创建账号，开启你的第一场陪玩服务。' : '登录后查看订单，或进入你的工作台。'}</p>${field('账号', 'username', { attrs: 'minlength="3" maxlength="30" autocomplete="username"' })}${register ? field('称呼', 'name', { attrs: 'maxlength="30"' }) : ''}${field('密码', 'password', { type: 'password', attrs: `minlength="${register ? 8 : 6}" maxlength="128" autocomplete="${register ? 'new-password' : 'current-password'}"` })}<button type="button" class="text-button" data-switch-auth>${register ? '已有账号，去登录' : '没有账号？立即注册'}</button>`;
   } else if (type === 'service-detail') {
     const s = state.services.find(s => s.id === id); title = s.name; form = false;
-    body = `<span class="category">${esc(s.gameName || '通用游戏服务')} · ${esc(s.category)}</span><div class="service-detail-price"><strong>${currency(s.priceCents)}</strong><span> / ${s.durationHours} 小时</span></div><p class="service-description">${esc(s.description)}</p><div class="info-box"><h3>下单说明</h3><ul><li>填写游戏、区服和期望时间，客服会与你确认。</li><li>线下付款并报备，客服核实后安排陪玩。</li><li>服务结束后，在“我的订单”中确认验收。</li></ul></div><button class="primary full-width" data-order-service="${s.id}">预约这项服务 ${icon('arrow')}</button>`;
+    body = `<span class="category">${esc(s.gameName || '通用游戏服务')} · ${esc(s.category)}</span><div class="service-detail-price"><strong>${currency(s.priceCents)}</strong><span> / ${s.durationHours} 小时</span></div><p class="package-rate">套餐总价 · 折合 ${currency(s.priceCents / s.durationHours)} / 小时</p><p class="service-description">${esc(s.description)}</p><div class="info-box"><h3>下单说明</h3><ul><li>填写游戏、区服和期望时间，客服会与你确认。</li><li>线下付款并报备，客服核实后安排陪玩。</li><li>服务结束后，在“我的订单”中确认验收。</li></ul></div><button class="primary full-width" data-order-service="${s.id}">预约这项服务 ${icon('arrow')}</button>`;
   } else if (type === 'order') {
     const s = state.services.find(s => s.id === id); title = '填写服务需求'; submit = '确认下单';
     const games = state.games.filter(g => !s.gameId || g.id === s.gameId);
@@ -209,8 +229,22 @@ function modal() {
     const game = state.workspace.games.find(g => g.id === id); title = game.active ? '下架游戏' : '上架游戏'; submit = '确认';
     body = `<p class="summary">${esc(game.name)}</p><p class="muted">${game.active ? '下架后，该游戏及其专属服务不再接受新订单。已有订单仍可继续履约。' : '上架后，客户可以选择该游戏，并购买处于在售状态的服务。'}</p>`;
   } else if (type === 'service') {
-    const s = state.workspace.services.find(s => s.id === id) || {}; title = id ? '编辑服务项目' : '新增服务项目';
-    body = `${field('服务名称', 'name', { value: s.name, attrs: 'minlength="2" maxlength="50"' })}<label>所属游戏<select name="gameId"><option value="">通用服务 · 所有在架游戏</option>${state.workspace.games.filter(g => g.active || g.id === s.gameId).map(g => `<option value="${g.id}" ${g.id === s.gameId ? 'selected' : ''}>${esc(g.name)} · ${esc(g.category)}${g.active ? '' : '（已下架）'}</option>`).join('')}</select></label>${field('服务分类', 'category', { value: s.category, attrs: 'minlength="2" maxlength="30" list="category-options"' })}<datalist id="category-options">${[...new Set(state.workspace.services.map(s => s.category))].map(category => `<option value="${esc(category)}"></option>`).join('')}</datalist><div class="form-pair">${field('价格（元）', 'price', { value: s.priceCents ? s.priceCents / 100 : '', type: 'number', attrs: 'min="1" max="100000" step="0.01"' })}${field('时长（小时）', 'duration', { value: s.durationHours || 1, type: 'number', attrs: 'min="1" max="24" step="1"' })}</div><label>服务说明<textarea name="description" required minlength="5" maxlength="200">${esc(s.description || '')}</textarea></label><p class="form-tip">保存后同步到服务大厅，已创建的订单保持原价格。</p>`;
+    const copying = Boolean(state.dialog.copyId);
+    const s = state.workspace.services.find(s => s.id === (id || state.dialog.copyId)) || {};
+    title = id ? '编辑小时套餐' : copying ? '复制小时套餐' : '新增小时套餐';
+    submit = id ? '保存修改' : '创建套餐';
+    body = `<p class="muted">${copying ? '已带入原套餐的类型、游戏和说明。填写新的名称、时长和总价，创建独立套餐。' : '按服务类型设置小时套餐，例如：语音陪玩 · 2 小时 · 128 元。'}</p>
+      ${field('套餐名称', 'name', { value: copying ? '' : s.name, attrs: 'minlength="2" maxlength="50" placeholder="如：王者荣耀双人开黑 2 小时"' })}
+      <label>所属游戏<select name="gameId"><option value="">通用服务 · 所有在架游戏</option>${state.workspace.games.filter(g => g.active || g.id === s.gameId).map(g => `<option value="${g.id}" ${g.id === s.gameId ? 'selected' : ''}>${esc(g.name)} · ${esc(g.category)}${g.active ? '' : '（已下架）'}</option>`).join('')}</select></label>
+      ${field('服务类型', 'category', { value: s.category, attrs: 'minlength="2" maxlength="30" list="category-options" placeholder="如：语音陪玩、教学陪练、组队开黑" aria-describedby="service-type-help"' })}
+      <datalist id="category-options">${[...new Set([...state.workspace.services.map(s => s.category), '语音陪玩', '教学陪练', '组队开黑'])].map(category => `<option value="${esc(category)}"></option>`).join('')}</datalist>
+      <p id="service-type-help" class="form-tip compact-tip">可选择已有类型或直接输入新类型；同一类型可创建多个时长套餐。</p>
+      <div class="form-pair">${field('服务时长（小时）', 'duration', { value: s.durationHours || 1, type: 'number', attrs: 'min="1" max="24" step="1" aria-describedby="package-price-help"' })}${field('套餐总价（元）', 'price', { value: !copying && s.priceCents ? s.priceCents / 100 : '', type: 'number', attrs: 'min="1" max="100000" step="0.01" placeholder="整个套餐的价格" aria-describedby="package-price-help"' })}</div>
+      <div class="duration-presets" role="group" aria-label="常用服务时长"><span>快捷时长</span>${[1, 2, 3, 5, 8].map(hours => `<button type="button" class="chip" data-duration-preset="${hours}" aria-pressed="false">${hours} 小时</button>`).join('')}</div>
+      <p id="package-price-help" class="form-tip compact-tip">支持 1–24 整小时。总价包含所填全部时长；修改时长后请确认套餐总价。</p>
+      <output id="package-preview" class="package-preview" aria-live="polite"></output>
+      <label>服务说明<textarea name="description" required minlength="5" maxlength="200" placeholder="说明服务内容、适用玩家和预约要求">${esc(s.description || '')}</textarea></label>
+      <p class="form-tip">保存后同步到服务大厅；已有订单保留原服务类型、时长和价格。</p>`;
   } else if (type === 'staff') {
     title = '新增业务账号';
     body = `${field('账号', 'username', { attrs: 'minlength="3" maxlength="30" autocomplete="off"' })}${field('称呼', 'name', { attrs: 'maxlength="30"' })}<label>角色<select name="role"><option value="escort">陪玩 · 处理本人履约订单</option><option value="service">客服 · 核款与派单</option></select></label>${field('初始密码', 'password', { type: 'password', attrs: 'minlength="8" maxlength="128" autocomplete="new-password"' })}`;
@@ -242,6 +276,7 @@ function render() {
   if (state.dialog) {
     app.insertAdjacentHTML('beforeend', modal());
     const dialog = document.querySelector('dialog'); dialog.showModal();
+    if (state.dialog.type === 'service') updatePackagePreview();
     dialog.addEventListener('cancel', event => { event.preventDefault(); closeDialog(); });
   }
 }
@@ -267,7 +302,7 @@ app.addEventListener('click', event => {
   if ('browse' in data) return document.querySelector('#catalog')?.scrollIntoView({ block: 'start' });
   if ('category' in data) { state.catalogCategory = data.category; state.catalogGameId = ''; render(); return; }
   if ('gameId' in data) { state.catalogGameId = data.gameId; render(); return; }
-  if ('resetCatalog' in data) { state.catalogCategory = '全部'; state.catalogGameId = ''; state.catalogSearch = ''; state.catalogSort = 'default'; render(); return; }
+  if ('resetCatalog' in data) { state.catalogCategory = '全部'; state.catalogGameId = ''; state.catalogSearch = ''; state.catalogSort = 'default'; state.catalogServiceType = ''; state.catalogDuration = ''; render(); return; }
   if ('serviceDetail' in data) return openDialog({ type: 'service-detail', id: Number(data.serviceDetail) });
   if ('orderService' in data) return book(Number(data.orderService), data.reorder ? state.games.find(g => g.name === orderById(data.reorder)?.game_name)?.id : undefined);
   if ('orderDetail' in data) return openDialog({ type: 'detail', id: data.orderDetail });
@@ -282,6 +317,12 @@ app.addEventListener('click', event => {
   if ('editGame' in data) return openDialog({ type: 'game', id: Number(data.editGame) });
   if ('toggleGame' in data) return openDialog({ type: 'game-status', id: Number(data.toggleGame) });
   if ('editService' in data) return openDialog({ type: 'service', id: Number(data.editService) });
+  if ('copyService' in data) return openDialog({ type: 'service', copyId: Number(data.copyService) });
+  if ('durationPreset' in data) {
+    const input = document.querySelector('#dialog-form [name="duration"]');
+    if (input) { input.value = data.durationPreset; updatePackagePreview(); }
+    return;
+  }
   if ('toggleStaff' in data) return openDialog({ type: 'staff-status', id: data.toggleStaff });
   if ('toggleService' in data) return run(button, async () => { await api(`/services/${data.toggleService}`, { active: data.active === '1' }); await refresh(); render(); toast('服务状态已更新'); });
   if ('orderAction' in data) {
@@ -293,10 +334,13 @@ app.addEventListener('click', event => {
 });
 app.addEventListener('input', event => {
   if (event.target.id === 'order-search') { state.search = event.target.value; state.page = 1; document.querySelector('#order-list').innerHTML = orderList(); }
-  if (event.target.id === 'catalog-search') { state.catalogSearch = event.target.value; document.querySelector('#catalog-list').innerHTML = catalogList(); document.querySelector('#catalog-count').textContent = `${catalogServices().length} 个匹配项目`; }
+  if (event.target.id === 'catalog-search') { state.catalogSearch = event.target.value; updateCatalogResults(); }
+  if (state.dialog?.type === 'service' && event.target.closest('#dialog-form')) updatePackagePreview();
 });
 app.addEventListener('change', event => {
-  if (event.target.id === 'catalog-sort') { state.catalogSort = event.target.value; document.querySelector('#catalog-list').innerHTML = catalogList(); }
+  if (event.target.id === 'catalog-sort') { state.catalogSort = event.target.value; updateCatalogResults(); }
+  if (event.target.id === 'catalog-service-type') { state.catalogServiceType = event.target.value; updateCatalogResults(); }
+  if (event.target.id === 'catalog-duration') { state.catalogDuration = event.target.value; updateCatalogResults(); }
 });
 app.addEventListener('submit', event => {
   if (event.target.id === 'support-reply-form') {

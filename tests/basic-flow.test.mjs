@@ -77,7 +77,7 @@ test('basic edition does not expose other customer orders or allow out-of-order 
   assert.equal((await request(base, `/orders/${order.result.id}/actions`, { cookie: customer, body: { action: 'pay', reference: '付款' } })).response.status, 409);
 });
 
-test('catalog maintenance preserves order price snapshots and blocks ordering unavailable services', async t => {
+test('catalog edits preserve order type, duration and price snapshots and block unavailable services', async t => {
   const { app, base } = await start();
   t.after(() => { app.server.close(); app.close(); });
   const admin = await login(base, 'admin');
@@ -90,16 +90,53 @@ test('catalog maintenance preserves order price snapshots and blocks ordering un
   const catalog = (await request(base, '/public/services')).result.services;
   const serviceId = catalog.find(item => item.name === payload.name).id;
   const order = await request(base, '/orders', { cookie: customer, body: { gameId: 1, serviceId, contact: 'test-contact' } });
-  assert.equal((await request(base, `/services/${serviceId}`, { cookie: admin, body: { ...payload, name: '调整后的服务名称', priceCents: 8000 } })).response.status, 200);
+  const updated = { ...payload, name: '调整后的服务名称', category: '双人联机教学', durationHours: 3, priceCents: 12000 };
+  assert.equal((await request(base, `/services/${serviceId}`, { cookie: admin, body: updated })).response.status, 200);
   const preserved = (await request(base, '/me', { cookie: customer })).result.orders[0];
   assert.equal(preserved.price_cents, 5000);
   assert.equal(preserved.service_name, payload.name);
+  assert.equal(preserved.category, payload.category);
+  assert.equal(preserved.duration_hours, payload.durationHours);
   assert.equal(preserved.id, order.result.id);
+  const latest = (await request(base, '/public/services')).result.services.find(item => item.id === serviceId);
+  assert.equal(latest.category, updated.category);
+  assert.equal(latest.durationHours, updated.durationHours);
+  assert.equal(latest.priceCents, updated.priceCents);
+  const newOrder = await request(base, '/orders', { cookie: customer, body: { gameId: 1, serviceId, contact: 'test-contact', priceCents: 1, durationHours: 24, category: '伪造类型' } });
+  assert.equal(newOrder.response.status, 201);
+  assert.equal(newOrder.result.category, updated.category);
+  assert.equal(newOrder.result.duration_hours, updated.durationHours);
+  assert.equal(newOrder.result.price_cents, updated.priceCents);
   assert.equal((await request(base, `/services/${serviceId}`, { cookie: admin, body: { active: false } })).response.status, 200);
   assert.ok(!(await request(base, '/public/services')).result.services.some(item => item.id === serviceId));
   assert.equal((await request(base, '/orders', { cookie: customer, body: { gameId: 1, serviceId, contact: 'test-contact' } })).response.status, 404);
   assert.equal((await request(base, `/services/${serviceId}`, { cookie: admin, body: { active: true } })).response.status, 200);
   assert.ok((await request(base, '/public/services')).result.services.some(item => item.id === serviceId));
+});
+
+test('custom service types support independent hourly packages and reject invalid configurations', async t => {
+  const { app, base } = await start();
+  t.after(() => { app.server.close(); app.close(); });
+  const admin = await login(base, 'admin');
+  const payload = { name: '双人联机 2 小时', category: '自定义双人联机', description: '按预约安排双人联机服务', priceCents: 12800, durationHours: 2, gameId: 1 };
+  for (const invalid of [{ durationHours: 0 }, { durationHours: 1.5 }, { durationHours: 25 }, { durationHours: 'invalid' }, { category: '' }, { category: 'x'.repeat(31) }, { priceCents: 0 }]) {
+    assert.equal((await request(base, '/services', { cookie: admin, body: { ...payload, ...invalid } })).response.status, 400);
+  }
+  assert.equal((await request(base, '/services', { cookie: admin, body: payload })).response.status, 201);
+  const original = (await request(base, '/public/services')).result.services.find(item => item.name === payload.name);
+  const copied = { ...payload, name: '双人联机 5 小时', durationHours: 5, priceCents: 28000 };
+  assert.equal((await request(base, '/services', { cookie: admin, body: copied })).response.status, 201);
+  const packages = (await request(base, '/public/services')).result.services.filter(item => item.category === payload.category);
+  assert.equal(packages.length, 2);
+  assert.equal(packages.find(item => item.id === original.id).durationHours, 2);
+  assert.equal(packages.find(item => item.id === original.id).priceCents, 12800);
+  assert.equal(packages.find(item => item.name === copied.name).durationHours, 5);
+  const edited = { ...payload, category: '新的服务类型', durationHours: 24, priceCents: 88888 };
+  assert.equal((await request(base, `/services/${original.id}`, { cookie: admin, body: edited })).response.status, 200);
+  const catalog = (await request(base, '/public/services')).result.services;
+  assert.equal(catalog.find(item => item.id === original.id).durationHours, 24);
+  assert.equal(catalog.find(item => item.id === original.id).category, edited.category);
+  assert.equal(catalog.find(item => item.name === copied.name).category, payload.category);
 });
 
 test('staff accounts can be created only by administrators; password changes invalidate prior sessions', async t => {
