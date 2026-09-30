@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createBasicClubServer } from '../server.mjs';
@@ -69,6 +69,42 @@ test('customers can request an active escort while staff maintain profiles and g
   assert.equal(dispatched.result.escort_id, 'u_escort');
   assert.equal(dispatched.result.escortAvatarUrl, avatarUrl);
   assert.equal((await request(base, '/staff/u_escort', { cookie: admin, body: { active: false } })).response.status, 409);
+});
+
+test('game cover uploads validate content, preserve existing covers, and require administrators', async t => {
+  const { app, base } = await start();
+  t.after(() => { app.server.close(); app.close(); });
+  const admin = await login(base, 'admin'), customer = await login(base, 'user'), service = await login(base, 'service');
+  const coverUrl = `data:image/jpeg;base64,${readFileSync(new URL('../src/assets/gaming.jpg', import.meta.url)).toString('base64')}`;
+  assert.ok(coverUrl.length > 16_000, 'exercise the expanded game request limit');
+  const body = { name: '图片封面测试', category: '射击竞技', coverUrl };
+  assert.equal((await request(base, '/games', { body })).response.status, 401);
+  for (const cookie of [customer, service]) {
+    assert.equal((await request(base, '/games', { cookie, body })).response.status, 403);
+    assert.equal((await request(base, '/games/1', { cookie, body })).response.status, 403);
+  }
+  assert.equal((await request(base, '/games', { cookie: admin, body })).response.status, 201);
+  const game = (await request(base, '/public/services')).result.games.find(item => item.name === body.name);
+  assert.equal(game.coverUrl, coverUrl);
+  const path = `/games/${game.id}`;
+  const edited = { name: '修改名称保留图片', category: '射击竞技' };
+  assert.equal((await request(base, path, { cookie: admin, body: edited })).response.status, 200);
+  assert.equal(app.db.prepare('SELECT cover_url FROM games WHERE id=?').get(game.id).cover_url, coverUrl);
+  for (const invalid of [
+    'data:image/svg+xml;base64,PHN2Zy8+', 'data:image/png;base64,@@@',
+    'data:image/png;base64,aGVsbG8=', coverUrl.replace('image/jpeg', 'image/png'),
+    'javascript:alert(1)', '//example.com/image.png', 42,
+  ]) {
+    assert.equal((await request(base, path, { cookie: admin, body: { ...edited, coverUrl: invalid } })).response.status, 400);
+    assert.equal(app.db.prepare('SELECT cover_url FROM games WHERE id=?').get(game.id).cover_url, coverUrl);
+  }
+  for (const length of [1_800_000, 2_000_000]) {
+    assert.equal((await request(base, path, { cookie: admin, body: { ...edited, coverUrl: `data:image/jpeg;base64,${'A'.repeat(length)}` } })).response.status, 413);
+  }
+  assert.equal((await request(base, '/support', { cookie: customer, body: { subject: '普通接口限制', message: 'a'.repeat(17_000) } })).response.status, 413);
+  assert.equal((await request(base, path, { cookie: admin, body: { ...edited, coverUrl: '/src/assets/gaming.jpg' } })).response.status, 200);
+  assert.equal((await request(base, path, { cookie: admin, body: { ...edited, coverUrl: '' } })).response.status, 200);
+  assert.equal((await request(base, '/public/services')).result.games.find(item => item.id === game.id).coverUrl, '');
 });
 
 test('basic edition keeps the order chain from order submission to customer acceptance', async t => {
@@ -296,17 +332,21 @@ test('fresh database directories are created and persisted orders survive reopen
   const directory = mkdtempSync(join(tmpdir(), 'club-basic-test-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const database = join(directory, 'new-directory', 'club.sqlite');
+  const coverUrl = `data:image/jpeg;base64,${readFileSync(new URL('../src/assets/gaming.jpg', import.meta.url)).toString('base64')}`;
   const app = createBasicClubServer({ database });
   await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
   try {
     const base = `http://127.0.0.1:${app.server.address().port}`;
     const customer = await login(base, 'user');
+    const admin = await login(base, 'admin');
+    assert.equal((await request(base, '/games/1', { cookie: admin, body: { name: '三角洲行动', category: '射击竞技', coverUrl } })).response.status, 200);
     const created = await request(base, '/orders', { cookie: customer, body: { gameId: 1, serviceId: 1, hours: 1, contact: 'persisted-contact' } });
     assert.equal(created.response.status, 201);
   } finally { await new Promise(resolve => app.server.close(resolve)); app.close(); }
   const reopened = createBasicClubServer({ database });
   try {
     assert.equal(reopened.db.prepare('SELECT contact FROM orders').get().contact, 'persisted-contact');
+    assert.equal(reopened.db.prepare('SELECT cover_url FROM games WHERE id=1').get().cover_url, coverUrl);
     assert.equal(reopened.db.prepare('SELECT COUNT(*) count FROM order_events').get().count, 1);
   } finally { reopened.close(); }
   assert.throws(() => createBasicClubServer({ database, production: true, publicOrigin: 'https://club.example.com' }), /独立数据库/);

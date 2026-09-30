@@ -52,6 +52,72 @@ async function api(path, body) {
   if (!response.ok) throw Object.assign(new Error(result.error || '请求未完成'), { status: response.status });
   return result;
 }
+function imageFileToDataUrl(file) {
+  if (!(file instanceof File) || !file.size) return Promise.reject(new Error('图片文件为空，请重新选择'));
+  if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type)) return Promise.reject(new Error('请选择 PNG、JPG、WEBP 或 GIF 图片'));
+  if (file.size > 5 * 1024 * 1024) return Promise.reject(new Error('图片不能超过 5 MB'));
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('图片读取失败，请重试'));
+    reader.onload = () => {
+      const image = new Image();
+      image.onerror = () => reject(new Error('图片格式无法读取'));
+      image.onload = () => {
+        try {
+          if (!image.naturalWidth || !image.naturalHeight || image.naturalWidth * image.naturalHeight > 40_000_000) throw new Error('图片尺寸过大或无效，请缩小后重新选择');
+          const scale = Math.min(1, 1280 / Math.max(image.naturalWidth, image.naturalHeight));
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round(image.naturalWidth * scale)); canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+          const context = canvas.getContext('2d');
+          if (!context) throw new Error('浏览器无法处理图片，请重试');
+          context.fillStyle = '#fff'; context.fillRect(0, 0, canvas.width, canvas.height);
+          context.drawImage(image, 0, 0, canvas.width, canvas.height);
+          for (const quality of [.82, .68, .5]) {
+            const result = canvas.toDataURL('image/jpeg', quality);
+            if (result.startsWith('data:image/jpeg;base64,') && result.length <= 1_800_000) return resolve(result);
+          }
+          throw new Error('压缩后的图片仍过大，请选择较小的图片');
+        } catch (error) { reject(error); }
+      };
+      image.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+function updateCoverPreview(form, coverUrl, message = '') {
+  const preview = form.querySelector('#cover-preview');
+  preview.innerHTML = coverUrl ? `<img src="${esc(coverUrl)}" alt="游戏封面预览" />` : '<span>暂未设置封面</span>';
+  form.querySelector('[data-remove-cover]').disabled = !coverUrl;
+  form.querySelector('#cover-upload-status').textContent = message;
+}
+async function uploadGameCover(input) {
+  const file = input.files[0], form = input.form, dialog = state.dialog;
+  if (!file || !form || dialog?.type !== 'game' || form.coverPending) return;
+  form.coverPending = true;
+  const save = form.querySelector('[type="submit"]'), address = form.elements.coverUrl;
+  save.disabled = true; input.disabled = true; address.disabled = true;
+  form.querySelector('[data-remove-cover]').disabled = true;
+  form.querySelector('.form-error').textContent = '';
+  form.querySelector('#cover-upload-status').textContent = '正在处理图片…';
+  try {
+    const coverUrl = await imageFileToDataUrl(file);
+    if (!form.isConnected || state.dialog !== dialog) return;
+    dialog.coverUrl = coverUrl;
+    address.value = ''; address.setCustomValidity('');
+    updateCoverPreview(form, coverUrl, `已选择 ${file.name}，保存后生效`);
+  } catch (error) {
+    if (!form.isConnected || state.dialog !== dialog) return;
+    input.value = '';
+    form.querySelector('.form-error').textContent = error.message;
+    form.querySelector('#cover-upload-status').textContent = '上传未完成，原封面已保留';
+  } finally {
+    form.coverPending = false;
+    if (form.isConnected) {
+      save.disabled = false; input.disabled = false; address.disabled = false;
+      form.querySelector('[data-remove-cover]').disabled = !dialog.coverUrl;
+    }
+  }
+}
 function toast(message) {
   document.querySelector('#toast')?.remove();
   const el = document.createElement('div');
@@ -305,7 +371,18 @@ function modal() {
     body = `<p>${esc(member.name)} · ${esc(member.username)}</p><p class="muted">${member.active ? '停用后会立即退出已有登录，账号将无法登录。正在履约的陪玩需要先完成订单。' : '启用后，该人员可以重新登录并处理订单。'}</p>`;
   } else if (type === 'game') {
     const game = state.workspace.games.find(g => g.id === id) || {}; title = id ? '编辑游戏' : '新增游戏';
-     body = `${field('游戏名称', 'name', { value: game.name, attrs: 'minlength="2" maxlength="40" placeholder="如：王者荣耀"' })}${field('游戏类别', 'category', { value: game.category, attrs: 'minlength="2" maxlength="30" list="game-category-options" placeholder="如：MOBA、射击竞技、休闲娱乐"' })}${field('游戏封面地址（选填）', 'coverUrl', { value: game.coverUrl, optional: true, attrs: 'maxlength="500" placeholder="https://... 或 /src/assets/..."' })}<datalist id="game-category-options">${[...new Set(['MOBA', '射击竞技', '休闲娱乐', '角色扮演', ...state.workspace.games.map(g => g.category)])].map(c => `<option value="${esc(c)}"></option>`).join('')}</datalist><p class="form-tip">支持 https 图片地址或站内图片路径；留空使用默认图形封面。保存后服务大厅会立即更新。</p>`;
+    const coverUrl = state.dialog.coverUrl ?? game.coverUrl ?? '';
+    state.dialog.coverUrl = coverUrl;
+    body = `${field('游戏名称', 'name', { value: game.name, attrs: 'minlength="2" maxlength="40" placeholder="如：王者荣耀"' })}${field('游戏类别', 'category', { value: game.category, attrs: 'minlength="2" maxlength="30" list="game-category-options" placeholder="如：MOBA、射击竞技、休闲娱乐"' })}
+      <section class="cover-editor" aria-label="游戏封面">
+        <div class="cover-editor-heading"><b>游戏封面</b><button type="button" class="text-button" data-remove-cover ${coverUrl ? '' : 'disabled'}>移除封面</button></div>
+        <div id="cover-preview" class="cover-preview">${coverUrl ? `<img src="${esc(coverUrl)}" alt="游戏封面预览" />` : '<span>暂未设置封面</span>'}</div>
+        <label>上传游戏封面<input name="coverFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif" aria-label="上传游戏封面" aria-describedby="cover-upload-help" /></label>
+        <p id="cover-upload-help" class="form-tip">选择本地 PNG、JPG、WEBP 或 GIF 图片，最大 5 MB。自动压缩为静态封面，保存后生效。</p>
+        <p id="cover-upload-status" class="form-tip" role="status" aria-live="polite"></p>
+        <details class="cover-address"><summary>使用图片地址</summary>${field('游戏封面地址（选填）', 'coverUrl', { value: coverUrl.startsWith('data:') ? '' : coverUrl, optional: true, attrs: 'maxlength="500" placeholder="https://... 或 /src/assets/..."' })}<p class="form-tip">也可填写 https 图片地址或站内路径；填写后替换当前封面。</p></details>
+      </section>
+      <datalist id="game-category-options">${[...new Set(['MOBA', '射击竞技', '休闲娱乐', '角色扮演', ...state.workspace.games.map(g => g.category)])].map(c => `<option value="${esc(c)}"></option>`).join('')}</datalist>`;
   } else if (type === 'game-status') {
     const game = state.workspace.games.find(g => g.id === id); title = game.active ? '下架游戏' : '上架游戏'; submit = '确认';
     body = `<p class="summary">${esc(game.name)}</p><p class="muted">${game.active ? '下架后，该游戏及其专属服务不再接受新订单。已有订单仍可继续履约。' : '上架后，客户可以选择该游戏，并购买处于在售状态的服务。'}</p>`;
@@ -403,6 +480,14 @@ app.addEventListener('click', event => {
   if ('page' in data) { state.page = Number(data.page); document.querySelector('#order-list').innerHTML = orderList(); return; }
   if ('settingsTab' in data) { state.settingsTab = data.settingsTab; render(); return; }
   if ('editGame' in data) return openDialog({ type: 'game', id: Number(data.editGame) });
+  if ('removeCover' in data && state.dialog?.type === 'game') {
+    const form = button.closest('form');
+    if (form.coverPending) return;
+    state.dialog.coverUrl = ''; form.elements.coverUrl.value = ''; form.elements.coverUrl.setCustomValidity(''); form.elements.coverFile.value = '';
+    form.querySelector('.form-error').textContent = '';
+    updateCoverPreview(form, '', '保存后将使用默认封面');
+    return;
+  }
   if ('toggleGame' in data) return openDialog({ type: 'game-status', id: Number(data.toggleGame) });
   if ('editService' in data) return openDialog({ type: 'service', id: Number(data.editService) });
   if ('copyService' in data) return openDialog({ type: 'service', copyId: Number(data.copyService) });
@@ -454,12 +539,22 @@ app.addEventListener('click', event => {
   }
 });
 app.addEventListener('input', event => {
+  if (state.dialog?.type === 'game' && event.target.name === 'coverUrl') {
+    const input = event.target, url = input.value.trim();
+    const valid = !url || ((!/[\s\\]/.test(url)) && (/^https:\/\//i.test(url) || /^\/(?!\/)/.test(url)));
+    input.setCustomValidity(valid ? '' : '请填写 https 图片地址或站内路径');
+    if (valid) {
+      state.dialog.coverUrl = url; input.form.elements.coverFile.value = '';
+      updateCoverPreview(input.form, url, '保存后生效');
+    }
+  }
   if (event.target.id === 'order-search') { state.search = event.target.value; state.page = 1; document.querySelector('#order-list').innerHTML = orderList(); }
   if (event.target.id === 'catalog-search') { state.catalogSearch = event.target.value; updateCatalogResults(); }
   if (state.dialog?.type === 'service' && event.target.closest('#dialog-form')) updatePackagePreview();
   if (event.target.id === 'booking-hours') updateBookingQuote();
 });
 app.addEventListener('change', event => {
+  if (state.dialog?.type === 'game' && event.target.name === 'coverFile') { uploadGameCover(event.target); return; }
   if (event.target.id === 'catalog-sort') { state.catalogSort = event.target.value; updateCatalogResults(); }
   if (event.target.id === 'catalog-service-type') { state.catalogServiceType = event.target.value; updateCatalogResults(); }
   if (event.target.id === 'catalog-duration') { state.catalogDuration = event.target.value; updateCatalogResults(); }
@@ -476,6 +571,7 @@ app.addEventListener('submit', event => {
   }
   if (event.target.id !== 'dialog-form') return;
   event.preventDefault();
+  if (event.target.coverPending) return;
   const form = event.target, data = fields(form), dialog = { ...state.dialog };
   run(form.querySelector('[type="submit"]'), async () => {
     if (dialog.type === 'auth') await api(dialog.mode === 'register' ? '/register' : '/login', data);
@@ -496,7 +592,9 @@ app.addEventListener('submit', event => {
       }
     } else if (['pay', 'confirm', 'note', 'reject-payment'].includes(dialog.type)) await api(`/orders/${encodeURIComponent(dialog.id)}/actions`, { action: dialog.type === 'confirm' ? dialog.action : dialog.type, escortId: dialog.escortId, ...data });
     else if (dialog.type === 'service') await api(`/services${dialog.id ? `/${dialog.id}` : ''}`, { ...data, priceCents: Math.round(Number(data.price) * 100), durationHours: data.pricingMode === 'hourly' ? 1 : Number(data.duration) });
-    else if (dialog.type === 'game') await api(`/games${dialog.id ? `/${dialog.id}` : ''}`, data);
+    else if (dialog.type === 'game') {
+      await api(`/games${dialog.id ? `/${dialog.id}` : ''}`, { name: data.name, category: data.category, coverUrl: dialog.coverUrl });
+    }
     else if (dialog.type === 'game-status') await api(`/games/${dialog.id}`, { active: !state.workspace.games.find(g => g.id === dialog.id).active });
     else if (dialog.type === 'staff') await api('/staff', data);
     else if (dialog.type === 'staff-edit') await api(`/staff/${encodeURIComponent(dialog.id)}`, data);

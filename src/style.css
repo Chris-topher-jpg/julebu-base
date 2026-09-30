@@ -304,6 +304,18 @@ dialog h2 { font-size: 21px; padding-right: 24px; margin-bottom: 24px; }
 .service-cover { position: absolute; inset: 0; z-index: -2; width: 100%; height: 100%; object-fit: cover; }
 .service-art.has-cover .art-symbol { opacity: .22; }
 .game-choice-cover { width: 30px; height: 30px; flex: none; border-radius: 7px; object-fit: cover; }
+.cover-editor { display: grid; gap: 12px; min-width: 0; }
+.cover-editor-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; }
+.cover-preview { display: grid; place-items: center; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; border: 1px dashed #c6d5cc; border-radius: 8px; background: #f3f6f3; color: #65786a; font-size: 12px; }
+.cover-preview img { width: 100%; height: 100%; min-height: 0; object-fit: contain; }
+.cover-editor input[type="file"] { width: 100%; font-size: 12px; }
+.cover-editor input::file-selector-button { margin-right: 10px; padding: 7px 10px; border: 0; border-radius: 5px; background: #e5efe8; color: #315640; cursor: pointer; }
+.cover-editor #cover-upload-status { overflow-wrap: anywhere; }
+.cover-editor #cover-upload-status:empty { display: none; }
+.cover-address { min-width: 0; font-size: 12px; }
+.cover-address summary { color: #52705b; cursor: pointer; }
+.cover-address label { margin-top: 12px; }
+.cover-address .form-tip { margin-top: 8px; }
 .order-helper > div { min-width: 0; display: grid; gap: 4px; }
 .order-helper b { color: #4e515a; font-size: 12px; }
 .order-helper small { color: #8b8f99; font-size: 11px; }

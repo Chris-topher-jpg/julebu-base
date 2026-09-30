@@ -29,9 +29,28 @@ const usernameValue = input => {
   return username;
 };
 const imageUrlValue = (input, label = '图片地址') => {
+  if (input !== undefined && typeof input !== 'string') fail(`${label}格式不正确`);
   const url = typeof input === 'string' ? input.trim() : '';
   if (!url) return '';
-  if (url.length > 500 || !/^(https:\/\/|\/|data:image\/)/i.test(url)) fail(`${label}仅支持 https 地址、站内路径或图片 data 地址`);
+  if (/^data:/i.test(url)) {
+    if (url.length > 1_800_000) fail('图片内容过大，请压缩后重新上传', 413);
+    const match = /^data:image\/(jpeg|png|webp|gif);base64,([A-Za-z0-9+/]+={0,2})$/.exec(url);
+    if (!match) fail('仅支持 JPG、PNG、WEBP 或 GIF 图片');
+    const bytes = Buffer.from(match[2], 'base64');
+    const signatures = {
+      jpeg: bytes.length > 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff,
+      png: bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])),
+      webp: bytes.length > 12 && bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP',
+      gif: ['GIF87a', 'GIF89a'].includes(bytes.toString('ascii', 0, 6)),
+    };
+    if (bytes.toString('base64') !== match[2] || !signatures[match[1]]) fail('图片内容与格式不匹配');
+    return url;
+  }
+  if (url.length > 500 || /[\s\\]/.test(url)) fail(`${label}格式不正确`);
+  if (/^\/(?!\/)/.test(url)) return url;
+  let parsed;
+  try { parsed = new URL(url); } catch { fail(`${label}仅支持 https 地址或站内路径`); }
+  if (parsed.protocol !== 'https:' || !parsed.hostname || parsed.username || parsed.password) fail(`${label}仅支持 https 地址或站内路径`);
   return url;
 };
 function hash(password) {
@@ -45,13 +64,13 @@ function matches(password, stored) {
 function sessionToken(req) {
   return (req.headers.cookie || '').split(';').map(item => item.trim()).find(item => item.startsWith('club_session='))?.slice(13) || '';
 }
-async function jsonBody(req) {
+async function jsonBody(req, maxSize = 16_000) {
   if (req.headers['content-type']?.split(';')[0] !== 'application/json') fail('需要 JSON 请求', 415);
   const parts = [];
   let size = 0;
   for await (const part of req) {
     size += part.length;
-    if (size > 16_000) fail('请求内容过大', 413);
+    if (size > maxSize) fail('请求内容过大', 413);
     parts.push(part);
   }
   let body;
@@ -198,7 +217,9 @@ export function createBasicClubServer(options = {}) {
           authAttempts.set(key, attempt);
           if (++attempt.count > 30) fail('操作频繁，请稍后重试', 429);
         }
-        const body = req.method === 'POST' ? await jsonBody(req) : {};
+        const gameWrite = req.method === 'POST' && /^\/api\/games(?:\/\d+)?$/.test(url.pathname);
+        if (gameWrite && requireUser(req).role !== 'admin') fail('只有管理员可以维护游戏', 403);
+        const body = req.method === 'POST' ? await jsonBody(req, gameWrite ? 2_000_000 : 16_000) : {};
         if (url.pathname === '/api/public/services' && req.method === 'GET') return respond({ services: servicesFor(false), games: gamesFor(false), escorts: escortsFor(), demo: !production, paymentContact });
         if (url.pathname === '/api/register' && req.method === 'POST') {
           const username = usernameValue(body.username);
@@ -330,7 +351,7 @@ export function createBasicClubServer(options = {}) {
           if (Object.keys(body).length === 1 && typeof body.active === 'boolean') {
             db.prepare('UPDATE games SET active=? WHERE id=?').run(Number(body.active), gameId);
           } else {
-            const name = value(body.name, '游戏名称', 2, 40), category = value(body.category, '游戏类别', 2, 30), coverUrl = imageUrlValue(body.coverUrl, '游戏封面地址');
+            const name = value(body.name, '游戏名称', 2, 40), category = value(body.category, '游戏类别', 2, 30), coverUrl = body.coverUrl === undefined ? game.cover_url : imageUrlValue(body.coverUrl, '游戏封面地址');
             if (db.prepare('SELECT id FROM games WHERE name=? AND id<>?').get(name, gameId)) fail('游戏名称已存在', 409);
             db.prepare('UPDATE games SET name=?,category=?,cover_url=? WHERE id=?').run(name, category, coverUrl, gameId);
           }

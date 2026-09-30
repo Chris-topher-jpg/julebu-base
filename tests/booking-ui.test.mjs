@@ -109,6 +109,126 @@ test('customers can choose hours or an actual fixed package from the default cat
   }
 });
 
+test('administrators upload, preview, replace and remove game covers on desktop and mobile', async () => {
+  const app = createBasicClubServer();
+  let browser;
+  try {
+    await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
+    const base = `http://127.0.0.1:${app.server.address().port}`;
+    browser = await chromium.launch({ headless: true, ...(process.env.BOOKING_BROWSER_EXECUTABLE ? { executablePath: process.env.BOOKING_BROWSER_EXECUTABLE } : {}) });
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    page.setDefaultTimeout(8000);
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    assert.equal((await page.request.post(`${base}/api/login`, { data: { username: 'admin', password: '123456' } })).status(), 200);
+    const service = (await (await page.request.get(`${base}/api/public/services`)).json()).services[0];
+    assert.equal((await page.request.post(`${base}/api/services/${service.id}`, { data: { ...service, gameId: 1 } })).status(), 200);
+    await page.goto(`${base}/#/settings`);
+    const edit = () => page.locator('[data-edit-game="1"]').click();
+    const upload = page.getByLabel('上传游戏封面', { exact: true });
+    const cover = () => app.db.prepare('SELECT cover_url FROM games WHERE id=1').get().cover_url;
+    const save = async () => {
+      const [response] = await Promise.all([
+        page.waitForResponse(response => /\/api\/games(?:\/\d+)?$/.test(response.url()) && response.request().method() === 'POST'),
+        page.getByRole('button', { name: '保存', exact: true }).click(),
+      ]);
+      assert.ok(response.ok(), await response.text());
+      await page.locator('dialog').waitFor({ state: 'hidden' });
+    };
+    const uploaded = async name => {
+      await page.locator('#cover-upload-status').filter({ hasText: `已选择 ${name}` }).waitFor();
+      await page.waitForFunction(() => document.querySelector('#cover-preview img')?.naturalWidth > 0);
+    };
+    await edit();
+    await upload.setInputFiles('src/assets/gaming.jpg');
+    await uploaded('gaming.jpg');
+    assert.equal(cover(), '', 'choosing a file must not save before confirmation');
+    await mkdir('test-results', { recursive: true });
+    for (const width of [390, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      assert.ok(await page.locator('dialog').evaluate(dialog => dialog.scrollWidth <= dialog.clientWidth));
+      await page.screenshot({ path: `test-results/cover-upload-${width}.png` });
+    }
+    await save();
+    const firstCover = cover();
+    assert.match(firstCover, /^data:image\/jpeg;base64,/);
+    assert.ok(firstCover.length > 500);
+    await page.reload();
+    await edit();
+    assert.equal(await page.locator('[name="coverUrl"]').inputValue(), '', 'do not expose encoded image as an editable address');
+    assert.equal(await page.getByAltText('游戏封面预览').getAttribute('src'), firstCover);
+    await page.getByLabel('游戏名称', { exact: true }).fill('三角洲行动封面');
+    await save();
+    assert.equal(cover(), firstCover, 'editing other fields preserves uploaded cover');
+    await page.goto(base);
+    await page.waitForFunction(() => document.querySelector('.service-cover')?.naturalWidth > 0 && document.querySelector('[data-game-id="1"] img')?.naturalWidth > 0);
+    assert.equal(await page.locator('.service-cover').getAttribute('src'), firstCover);
+    await page.goto(`${base}/#/settings`);
+    await edit();
+    for (const [file, error] of [
+      [{ name: 'invalid.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg/>') }, '请选择 PNG、JPG、WEBP 或 GIF 图片'],
+      [{ name: 'large.jpg', mimeType: 'image/jpeg', buffer: Buffer.alloc(5 * 1024 * 1024 + 1) }, '图片不能超过 5 MB'],
+      [{ name: 'broken.png', mimeType: 'image/png', buffer: Buffer.from('invalid-image') }, '图片格式无法读取'],
+      [{ name: 'empty.png', mimeType: 'image/png', buffer: Buffer.alloc(0) }, '图片文件为空，请重新选择'],
+    ]) {
+      await upload.setInputFiles(file);
+      await page.locator('.form-error').filter({ hasText: error }).waitFor();
+      assert.equal(await page.getByAltText('游戏封面预览').getAttribute('src'), firstCover);
+      assert.equal(cover(), firstCover);
+    }
+    const replacement = { name: 'replacement.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jCfkAAAAASUVORK5CYII=', 'base64') };
+    await upload.setInputFiles(replacement);
+    await uploaded(replacement.name);
+    await page.getByRole('button', { name: '关闭', exact: true }).click();
+    assert.equal(cover(), firstCover, 'closing dialog cancels pending replacement');
+    await edit();
+    await upload.setInputFiles(replacement);
+    await uploaded(replacement.name);
+    await save();
+    assert.notEqual(cover(), firstCover);
+    await edit();
+    await page.getByRole('button', { name: '移除封面', exact: true }).click();
+    assert.equal(await page.locator('#cover-preview img').count(), 0);
+    await save();
+    assert.equal(cover(), '');
+    await page.getByRole('button', { name: '新增游戏', exact: true }).click();
+    await page.getByLabel('游戏名称', { exact: true }).fill('新游戏上传封面');
+    await page.getByLabel('游戏类别', { exact: true }).fill('休闲娱乐');
+    await upload.setInputFiles('src/assets/gaming.jpg');
+    await uploaded('gaming.jpg');
+    await save();
+    assert.match(app.db.prepare('SELECT cover_url FROM games WHERE name=?').get('新游戏上传封面').cover_url, /^data:image\/jpeg;base64,/);
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser?.close();
+    if (app.server.listening) await new Promise(resolve => app.server.close(resolve));
+    app.close();
+  }
+});
+
+test('the running preview offers cover uploads without changing existing games', { skip: !process.env.BOOKING_PREVIEW_URL }, async () => {
+  const base = process.env.BOOKING_PREVIEW_URL;
+  assert.equal(new URL(base).hostname, '127.0.0.1');
+  const browser = await chromium.launch({ headless: true, ...(process.env.BOOKING_BROWSER_EXECUTABLE ? { executablePath: process.env.BOOKING_BROWSER_EXECUTABLE } : {}) });
+  try {
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    page.setDefaultTimeout(8000);
+    const catalog = await (await page.request.get(`${base}/api/public/services`)).json();
+    assert.equal(catalog.demo, true);
+    assert.equal((await page.request.post(`${base}/api/login`, { data: { username: 'admin', password: '123456' } })).status(), 200);
+    const before = (await (await page.request.get(`${base}/api/me`)).json()).games;
+    await page.goto(`${base}/#/settings`);
+    await page.locator('[data-edit-game]').first().click();
+    await page.getByLabel('上传游戏封面', { exact: true }).setInputFiles('src/assets/gaming.jpg');
+    await page.locator('#cover-upload-status').filter({ hasText: '已选择 gaming.jpg' }).waitFor();
+    await page.waitForFunction(() => document.querySelector('#cover-preview img')?.naturalWidth > 0);
+    assert.equal(await page.getByRole('button', { name: '保存', exact: true }).isEnabled(), true);
+    await page.getByRole('button', { name: '关闭', exact: true }).click();
+    assert.deepEqual((await (await page.request.get(`${base}/api/me`)).json()).games, before);
+    await page.request.post(`${base}/api/logout`, { data: {} });
+  } finally { await browser.close(); }
+});
+
 test('the running preview offers editable hours without creating an order', { skip: !process.env.BOOKING_PREVIEW_URL }, async () => {
   const base = process.env.BOOKING_PREVIEW_URL;
   assert.equal(new URL(base).hostname, '127.0.0.1');
