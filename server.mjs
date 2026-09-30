@@ -111,10 +111,10 @@ function initialize(db, { production, adminPassword, adminUsername, adminName })
     const addUser = db.prepare('INSERT INTO users (id,username,password_hash,name,role,created_at) VALUES (?,?,?,?,?,?)');
     for (const user of users) addUser.run(user[0], user[1], hash(user[4] || '123456'), user[2], user[3], now());
     if (!production) {
-      const addService = db.prepare('INSERT INTO services (name,category,description,price_cents,duration_hours) VALUES (?,?,?,?,?)');
-      addService.run('竞技上分陪玩', '热门游戏', '语音组队，按约定时长提供陪玩服务。', 6800, 1);
-      addService.run('新手教学陪练', '新手入门', '基础设置、实战指导与对局复盘。', 8800, 1);
-      addService.run('开黑组队服务', '多人组队', '组队协调与游戏陪伴服务。', 12800, 2);
+      const addService = db.prepare('INSERT INTO services (name,category,description,price_cents,duration_hours,pricing_mode) VALUES (?,?,?,?,?,?)');
+      addService.run('竞技上分陪玩', '热门游戏', '语音组队，按约定时长提供陪玩服务。', 6800, 1, 'hourly');
+      addService.run('新手教学陪练', '新手入门', '基础设置、实战指导与对局复盘。', 8800, 1, 'package');
+      addService.run('开黑组队服务', '多人组队', '组队协调与游戏陪伴服务。', 12800, 2, 'package');
     }
     db.exec('COMMIT');
   } catch (error) { db.exec('ROLLBACK'); throw error; }

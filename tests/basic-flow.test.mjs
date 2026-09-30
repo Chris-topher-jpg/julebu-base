@@ -24,12 +24,31 @@ const login = async (base, username) => {
   return result.cookie;
 };
 
+test('default catalog offers selectable hours alongside fixed packages without admin setup', async t => {
+  const { app, base } = await start();
+  t.after(() => { app.server.close(); app.close(); });
+  const customer = await login(base, 'user');
+  const catalog = (await request(base, '/public/services')).result.services;
+  const hourly = catalog.find(service => service.name === '竞技上分陪玩');
+  assert.equal(hourly.pricingMode, 'hourly');
+  const created = await request(base, '/orders', { cookie: customer, body: { serviceId: hourly.id, gameId: 1, hours: 3, contact: 'hour-choice' } });
+  assert.equal(created.response.status, 201);
+  assert.equal(created.result.duration_hours, 3);
+  assert.equal(created.result.price_cents, 20400);
+  const fixed = catalog.find(service => service.name === '开黑组队服务');
+  assert.equal(fixed.pricingMode, 'package');
+  const packageOrder = await request(base, '/orders', { cookie: customer, body: { serviceId: fixed.id, gameId: 1, hours: 12, contact: 'package-choice' } });
+  assert.equal(packageOrder.response.status, 201);
+  assert.equal(packageOrder.result.duration_hours, fixed.durationHours);
+  assert.equal(packageOrder.result.price_cents, fixed.priceCents);
+});
+
 test('basic edition keeps the order chain from order submission to customer acceptance', async t => {
   const { app, base } = await start();
   t.after(() => { app.server.close(); app.close(); });
   const customer = await login(base, 'user');
   const service = (await request(base, '/public/services', { method: 'GET' })).result.services[0];
-  const created = await request(base, '/orders', { cookie: customer, body: { gameId: 1, serviceId: service.id, contact: 'wechat-demo', note: '今晚八点开始' } });
+  const created = await request(base, '/orders', { cookie: customer, body: { gameId: 1, serviceId: service.id, hours: 1, contact: 'wechat-demo', note: '今晚八点开始' } });
   assert.equal(created.response.status, 201);
   const orderId = created.result.id;
   assert.equal(created.result.status, '待支付');
@@ -59,7 +78,7 @@ test('basic edition does not expose other customer orders or allow out-of-order 
   t.after(() => { app.server.close(); app.close(); });
   const customer = await login(base, 'user');
   const service = (await request(base, '/public/services', { method: 'GET' })).result.services[0];
-  const order = await request(base, '/orders', { cookie: customer, body: { gameId: 1, serviceId: service.id, contact: 'wechat-demo', note: '' } });
+  const order = await request(base, '/orders', { cookie: customer, body: { gameId: 1, serviceId: service.id, hours: 1, contact: 'wechat-demo', note: '' } });
   const other = await request(base, '/register', { body: { username: 'other_customer', password: '12345678', name: '另一位用户', role: 'admin' } });
   assert.equal(other.response.status, 201);
   assert.equal(other.result.user.role, 'customer');
@@ -240,7 +259,7 @@ test('static assets cannot expose databases, repository files or removed modules
   }
   assert.equal((await fetch(base)).status, 200);
   assert.equal((await fetch(`${base}/src/main.js`)).status, 200);
-  assert.equal((await request(base, '/orders', { body: { gameId: 1, serviceId: 1, contact: 'test' } })).response.status, 401);
+  assert.equal((await request(base, '/orders', { body: { gameId: 1, serviceId: 1, hours: 1, contact: 'test' } })).response.status, 401);
   const crossSite = await fetch(`${base}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://untrusted.example' }, body: JSON.stringify({ username: 'admin', password: '123456' }) });
   assert.equal(crossSite.status, 403);
 });
@@ -254,7 +273,7 @@ test('fresh database directories are created and persisted orders survive reopen
   try {
     const base = `http://127.0.0.1:${app.server.address().port}`;
     const customer = await login(base, 'user');
-    const created = await request(base, '/orders', { cookie: customer, body: { gameId: 1, serviceId: 1, contact: 'persisted-contact' } });
+    const created = await request(base, '/orders', { cookie: customer, body: { gameId: 1, serviceId: 1, hours: 1, contact: 'persisted-contact' } });
     assert.equal(created.response.status, 201);
   } finally { await new Promise(resolve => app.server.close(resolve)); app.close(); }
   const reopened = createBasicClubServer({ database });
@@ -288,7 +307,7 @@ test('payment rejection requires a reason and allows resubmission without bypass
   t.after(() => { app.server.close(); app.close(); });
   const customer = await login(base, 'user');
   const service = await login(base, 'service');
-  const created = await request(base, '/orders', { cookie: customer, body: { gameId: 1, serviceId: 1, contact: 'test-contact' } });
+  const created = await request(base, '/orders', { cookie: customer, body: { gameId: 1, serviceId: 1, hours: 1, contact: 'test-contact' } });
   const path = `/orders/${created.result.id}/actions`;
   await request(base, path, { cookie: customer, body: { action: 'pay', reference: '付款凭证待核实' } });
   assert.equal((await request(base, path, { cookie: customer, body: { action: 'reject-payment', note: '自行退回' } })).response.status, 403);
@@ -307,7 +326,7 @@ test('follow-up notes retain actor and visibility without allowing unauthorized 
   const { app, base } = await start();
   t.after(() => { app.server.close(); app.close(); });
   const customer = await login(base, 'user'), service = await login(base, 'service'), escort = await login(base, 'escort');
-  const created = await request(base, '/orders', { cookie: customer, body: { gameId: 1, serviceId: 1, contact: 'test-contact' } });
+  const created = await request(base, '/orders', { cookie: customer, body: { gameId: 1, serviceId: 1, hours: 1, contact: 'test-contact' } });
   const path = `/orders/${created.result.id}/actions`;
   assert.equal((await request(base, path, { cookie: customer, body: { action: 'note', note: '用户不应该伪造跟进' } })).response.status, 403);
   assert.equal((await request(base, path, { cookie: escort, body: { action: 'note', note: '未派单不能跟进' } })).response.status, 404);
@@ -330,7 +349,7 @@ test('disabling staff invalidates sessions and rejects active assignments withou
   assert.equal((await request(base, '/me', { cookie: escort })).response.status, 401);
   assert.ok(!(await request(base, '/me', { cookie: service })).result.escorts.some(user => user.id === 'u_escort'));
   assert.equal((await request(base, '/login', { body: { username: 'escort', password: '123456' } })).response.status, 401);
-  const order = await request(base, '/orders', { cookie: customer, body: { gameId: 1, serviceId: 1, contact: 'test-contact' } });
+  const order = await request(base, '/orders', { cookie: customer, body: { gameId: 1, serviceId: 1, hours: 1, contact: 'test-contact' } });
   const path = `/orders/${order.result.id}/actions`;
   await request(base, path, { cookie: service, body: { action: 'confirm-payment' } });
   assert.equal((await request(base, path, { cookie: service, body: { action: 'dispatch', escortId: 'u_escort' } })).response.status, 400);
@@ -376,7 +395,7 @@ test('game categories, service associations and availability are enforced while 
   assert.equal(created.response.status, 201);
   assert.equal(created.result.game_name, game.name);
   assert.equal(created.result.game_category, game.category);
-  const generic = await request(base, '/orders', { cookie: customer, body: { ...orderPayload, serviceId: 1 } });
+  const generic = await request(base, '/orders', { cookie: customer, body: { ...orderPayload, serviceId: 1, hours: 1 } });
   assert.equal(generic.response.status, 201);
   assert.equal(generic.result.game_name, game.name);
   assert.equal((await request(base, `/games/${gameId}`, { cookie: admin, body: { name: '农场物语', category: '模拟经营' } })).response.status, 200);
@@ -389,7 +408,7 @@ test('game categories, service associations and availability are enforced while 
   assert.ok(!hidden.services.some(s => s.id === linked.id));
   assert.ok(hidden.services.some(s => s.id === 1));
   assert.equal((await request(base, '/orders', { cookie: customer, body: orderPayload })).response.status, 404);
-  assert.equal((await request(base, '/orders', { cookie: customer, body: { ...orderPayload, serviceId: 1 } })).response.status, 400);
+  assert.equal((await request(base, '/orders', { cookie: customer, body: { ...orderPayload, serviceId: 1, hours: 1 } })).response.status, 400);
   const workspace = (await request(base, '/me', { cookie: admin })).result;
   assert.equal(workspace.games.find(g => g.id === gameId).active, 0);
   const snapshot = workspace.orders.find(o => o.id === created.result.id);
@@ -417,7 +436,7 @@ test('support consultations keep replies private, link owned orders, and reopen 
   t.after(() => { app.server.close(); app.close(); });
   const customer = await login(base, 'user'), service = await login(base, 'service'), admin = await login(base, 'admin'), escort = await login(base, 'escort');
   const other = (await request(base, '/register', { body: { username: 'support_other', password: '12345678', name: '其他用户' } })).cookie;
-  const order = (await request(base, '/orders', { cookie: customer, body: { gameId: 1, serviceId: 1, contact: 'support-contact' } })).result;
+  const order = (await request(base, '/orders', { cookie: customer, body: { gameId: 1, serviceId: 1, hours: 1, contact: 'support-contact' } })).result;
   const payload = { subject: '预约时间咨询', message: '可以改到今晚九点吗？', orderId: order.id };
   assert.equal((await request(base, '/support', { body: payload })).response.status, 401);
   for (const cookie of [service, admin, escort]) assert.equal((await request(base, '/support', { cookie, body: payload })).response.status, 403);
@@ -466,7 +485,7 @@ test('support messages survive restarts and existing databases add support table
   await new Promise(resolve => original.server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${original.server.address().port}`;
   const customer = await login(base, 'user');
-  const order = await request(base, '/orders', { cookie: customer, body: { gameId: 1, serviceId: 1, contact: 'persistent-contact' } });
+  const order = await request(base, '/orders', { cookie: customer, body: { gameId: 1, serviceId: 1, hours: 1, contact: 'persistent-contact' } });
   await new Promise(resolve => original.server.close(resolve));
   original.db.exec('DROP TABLE support_messages; DROP TABLE support_threads;');
   original.close();
@@ -540,7 +559,7 @@ test('existing basic databases migrate without losing services, orders or order 
   await new Promise(resolve => old.server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${old.server.address().port}`;
   const customer = await login(base, 'user');
-  const created = await request(base, '/orders', { cookie: customer, body: { serviceId: 1, gameId: 1, contact: 'legacy-contact', note: '旧订单：王者荣耀微信区' } });
+  const created = await request(base, '/orders', { cookie: customer, body: { serviceId: 1, hours: 1, gameId: 1, contact: 'legacy-contact', note: '旧订单：王者荣耀微信区' } });
   assert.equal(created.response.status, 201);
   await new Promise(resolve => old.server.close(resolve));
   // Reproduce the pre-game basic schema, including its persisted business records.

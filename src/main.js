@@ -160,6 +160,34 @@ function updateBookingGameCategory() {
   category.innerHTML = `<option value="${esc(value)}">${esc(value || '请选择游戏类型')}</option>`;
   category.value = value;
 }
+function bookingServices(gameId) {
+  return state.services.filter(service => !gameId || !service.gameId || String(service.gameId) === String(gameId));
+}
+function switchBookingService(id) {
+  if (state.dialog?.type !== 'order' || state.busy) return;
+  const form = document.querySelector('#dialog-form'), service = state.services.find(item => item.id === id);
+  if (!form || !service) return;
+  const draft = { ...state.dialog.draft, ...fields(form) };
+  if (!bookingServices(draft.gameId).some(item => item.id === id)) return;
+  const scrollTop = form.scrollTop;
+  const focusId = document.activeElement?.id, focusMode = document.activeElement?.dataset.bookingMode;
+  state.dialog = { ...state.dialog, id, draft, servicesByMode: { ...state.dialog.servicesByMode, [service.pricingMode]: id } };
+  render();
+  const replacement = document.querySelector('#dialog-form');
+  const target = focusId ? document.getElementById(focusId) : replacement.querySelector(`[data-booking-mode="${focusMode}"]`);
+  target?.focus({ preventScroll: true });
+  replacement.scrollTop = scrollTop;
+}
+function updateBookingServiceOptions() {
+  if (state.dialog?.type !== 'order') return;
+  const form = document.querySelector('#dialog-form'), current = state.services.find(service => service.id === state.dialog.id);
+  if (!form || !current) return;
+  const services = bookingServices(form.elements.gameId.value);
+  for (const button of form.querySelectorAll('[data-booking-mode]')) {
+    button.disabled = !services.some(service => service.pricingMode === button.dataset.bookingMode);
+  }
+  form.querySelector('#booking-service').innerHTML = services.filter(service => service.pricingMode === current.pricingMode).map(service => `<option value="${service.id}" ${service.id === current.id ? 'selected' : ''}>${esc(service.name)} · ${esc(service.category)} · ${currency(service.priceCents)} / ${serviceUnit(service)}</option>`).join('');
+}
 function nextStep(order) {
   return ({ 待支付: '完成线下付款后，提交付款报备。', 待核款: '客服正在核实收款，请保留转账记录。', 待派单: '收款已确认，等待客服安排陪玩。', 待服务: '陪玩已安排，请确认服务时间后开始。', 服务中: '服务进行中，结束后由陪玩提交完成。', 待验收: '服务已结束，等待客户确认验收。', 已完成: '本次服务已完成，感谢你的信任。', 已取消: '这笔订单已取消，欢迎重新选择服务。' })[order.status];
 }
@@ -254,8 +282,9 @@ function modal() {
     body = `<div class="order-dialog-head"><div><h2 id="dialog-title">下单</h2><p>下单前，建议先与陪玩交流，减少等待时间</p></div></div>
       <div class="order-helper"><span class="order-avatar"><img src="/src/assets/gaming.jpg" alt="" /></span><div><b>客服安排陪玩</b><small>在线 · 提交订单后确认</small></div><button type="button" class="order-chat" data-go-support>${icon('people')}马上沟通</button></div>
       <div class="order-fields-grid"><label>游戏名称<select name="gameId" required aria-label="游戏名称"><option value="">请选择游戏</option>${games.map(g => `<option value="${g.id}" ${String(selectedGame) === String(g.id) ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</select></label><label>游戏类型<select id="booking-game-category" disabled aria-label="游戏类型"><option>${esc(selectedGameRecord?.category || '请选择游戏类型')}</option></select></label></div>
-      <label>服务类型<select disabled aria-label="服务类型"><option>${esc(s.name)} · ${esc(s.category)}</option></select></label>
-      <section class="order-price-section"><div class="order-section-label">单价</div><div class="order-price-line"><strong>${currency(s.priceCents)}<small>${isHourly(s) ? ' / 小时' : ' / 固定套餐'}</small></strong>${isHourly(s) ? `<div class="hours-stepper"><button type="button" class="order-step" data-hours-step="-1" aria-label="减少一小时">−</button><input id="booking-hours" name="hours" type="number" value="${esc(hours)}" min="1" max="24" step="1" required aria-describedby="booking-hours-help" /><span>小时</span><button type="button" class="order-step" data-hours-step="1" aria-label="增加一小时">＋</button></div><div class="duration-presets" role="group" aria-label="选择下单时长">${[1, 2, 3, 5, 8].map(preset => `<button type="button" class="booking-package" data-booking-hours="${preset}" aria-pressed="false">${preset} 小时</button>`).join('')}</div>` : `<div class="duration-presets" role="group" aria-label="固定套餐"><span class="booking-package selected">固定套餐（${s.durationHours} 小时）</span></div>`}</div><p id="booking-hours-help" class="form-tip">${isHourly(s) ? '1 小时起订，最多 24 小时，可按整小时调整。' : `固定套餐包含 ${s.durationHours} 小时服务。`}</p></section>
+      <div class="booking-modes" role="group" aria-label="选择计价方式">${[['hourly', '自选小时'], ['package', '固定套餐']].map(([value, label]) => `<button type="button" data-booking-mode="${value}" aria-pressed="${s.pricingMode === value}" class="${s.pricingMode === value ? 'selected' : ''}">${label}</button>`).join('')}</div>
+      <label>服务类型<select id="booking-service" aria-label="服务类型"><option value="${s.id}">${esc(s.name)} · ${esc(s.category)}</option></select></label>
+      <section class="order-price-section"><div class="order-section-label">单价</div><div class="order-price-line"><strong>${currency(s.priceCents)}<small>${isHourly(s) ? ' / 小时' : ' / 固定套餐'}</small></strong>${isHourly(s) ? `<div class="hours-stepper"><button type="button" class="order-step" data-hours-step="-1" aria-label="减少一小时">−</button><input id="booking-hours" name="hours" aria-label="服务时长（小时）" type="number" value="${esc(hours)}" min="1" max="24" step="1" required aria-describedby="booking-hours-help" /><span>小时</span><button type="button" class="order-step" data-hours-step="1" aria-label="增加一小时">＋</button></div><div class="duration-presets" role="group" aria-label="选择下单时长">${[1, 2, 3, 5, 8].map(preset => `<button type="button" class="booking-package" data-booking-hours="${preset}" aria-pressed="false">${preset} 小时</button>`).join('')}</div>` : `<div class="duration-presets" role="group" aria-label="固定套餐"><span class="booking-package selected">固定套餐（${s.durationHours} 小时）</span></div>`}</div><p id="booking-hours-help" class="form-tip">${isHourly(s) ? '1 小时起订，最多 24 小时，可按整小时调整。' : `固定套餐包含 ${s.durationHours} 小时服务。`}</p></section>
       <output id="booking-quote" class="package-preview" aria-live="polite"></output>
       <div class="order-extra-fields">${field('联系方式', 'contact', { value: draft.contact, attrs: 'minlength="2" maxlength="80" placeholder="微信号或手机号"' })}<div class="form-pair">${field('区服（选填）', 'region', { value: draft.region, optional: true, attrs: 'maxlength="60" placeholder="如：微信区 / 亚洲服"' })}${field('期望时间（选填）', 'appointment', { value: draft.appointment, optional: true, attrs: 'maxlength="60" placeholder="如：今晚 20:00"' })}</div></div>
       <label>备注<textarea name="note" aria-label="备注" maxlength="160" placeholder="可以备注您对陪玩的要求哦~">${esc(draft.note || '')}</textarea></label><div class="note-tags"><span>备注标签</span>${['往里靠！！！', '牛魔'].map(tag => `<button type="button" class="note-tag" data-note-tag="${esc(tag)}">${esc(tag)}</button>`).join('')}</div><p class="form-tip order-form-tip">预约时间以客服确认为准。下单后请联系收款客服，再报备付款。</p>`;
@@ -329,7 +358,7 @@ function render() {
     app.insertAdjacentHTML('beforeend', modal());
     const dialog = document.querySelector('dialog'); dialog.showModal();
     if (state.dialog.type === 'service') updatePackagePreview();
-    if (state.dialog.type === 'order') { updateBookingQuote(); updateBookingGameCategory(); }
+    if (state.dialog.type === 'order') { updateBookingQuote(); updateBookingGameCategory(); updateBookingServiceOptions(); }
     dialog.addEventListener('cancel', event => { event.preventDefault(); closeDialog(); });
   }
 }
@@ -376,6 +405,19 @@ app.addEventListener('click', event => {
     if (input) { input.value = data.durationPreset; updatePackagePreview(); }
     return;
   }
+  if ('bookingMode' in data && state.dialog?.type === 'order') {
+    const current = state.services.find(service => service.id === state.dialog.id);
+    if (current.pricingMode === data.bookingMode) return;
+    const gameId = document.querySelector('#dialog-form').elements.gameId.value;
+    const available = bookingServices(gameId).filter(service => service.pricingMode === data.bookingMode);
+    const remembered = state.dialog.servicesByMode?.[data.bookingMode];
+    const next = available.find(service => service.id === remembered) || available.find(service => service.category === current.category) || available[0];
+    if (next) {
+      state.dialog.servicesByMode = { ...state.dialog.servicesByMode, [current.pricingMode]: current.id };
+      switchBookingService(next.id);
+    }
+    return;
+  }
   if ('hoursStep' in data || 'bookingHours' in data) {
     const input = document.querySelector('#booking-hours');
     if (input) {
@@ -416,7 +458,8 @@ app.addEventListener('change', event => {
   if (event.target.id === 'catalog-duration') { state.catalogDuration = event.target.value; updateCatalogResults(); }
   if (event.target.id === 'catalog-pricing-mode') { state.catalogPricingMode = event.target.value; updateCatalogResults(); }
   if (state.dialog?.type === 'service' && event.target.name === 'pricingMode') updatePackagePreview();
-  if (state.dialog?.type === 'order' && event.target.name === 'gameId') updateBookingGameCategory();
+  if (state.dialog?.type === 'order' && event.target.name === 'gameId') { updateBookingGameCategory(); updateBookingServiceOptions(); }
+  if (state.dialog?.type === 'order' && event.target.id === 'booking-service') switchBookingService(Number(event.target.value));
 });
 app.addEventListener('submit', event => {
   if (event.target.id === 'support-reply-form') {
