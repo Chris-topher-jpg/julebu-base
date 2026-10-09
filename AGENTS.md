@@ -4,10 +4,11 @@
 
 - 本仓库唯一推送目标为 `https://github.com/Chris-topher-jpg/julebu-base.git`。
 - `https://github.com/sssyyyyy111/julebuguanli.git` 仅作为读取与同步来源，不得向该仓库提交或推送。
-- 根目录和 `main` 默认运行从 `julebuguanli` 同步的完整版本；用户要求“拉取主支并预览”时，预览此版本。
+- 根目录和 `main` 默认运行按腾讯文档简化的系统 A（A/B/C 中的最低档）；用户要求“拉取主支并预览”时，预览此版本。范围见 `docs/system-a.md`。
+- A 版调整前的完整版本保存在 `codex/full-preserved-2026-10-09`（`b238d50`），不覆盖该保留分支。
 - `editions/basic/` 完整保留同步前的基础版，另有 `codex/basic-preserved-2026-10-09` 分支保存原始提交。除非用户明确要求基础版，否则不要切换默认版本或改动该存档。
 - 用户要求“最基础原始版本”时，使用已保留的基础版；根目录 `npm run preview:basic` 可启动它。
-- 完整版使用 `data/club.sqlite`，基础版使用 `data/club-basic.sqlite`。不得混用、清空或将数据库提交到 Git。
+- 系统 A 继续使用根目录的 `data/club.sqlite`，保留已有业务记录；原始基础版使用 `data/club-basic.sqlite`。恢复完整版本预览时须使用独立数据库副本，不让两个服务同时操作同一业务库。不得混用、清空或将数据库提交到 Git。
 - 版本来源、保留范围和启动方式见 `docs/version-layout.md`。
 
 ## 修改后的提交与合并

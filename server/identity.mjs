@@ -52,7 +52,7 @@ export function personalData(data, user, roles) {
   const belongs = item => Boolean(customer && item.customerId === customer.id);
   const orders = data.orders.filter(belongs).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(o => ({
     id: o.id, version:o.version, boss: o.boss, game: o.game, product: o.product, orderType: o.orderType || '陪玩单', serviceNote: o.serviceNote || '', guarantee: o.guarantee || '', levelRequired: o.levelRequired !== false, hours: o.hours,
-    amountCents: o.amountCents, refundedCents: o.refundedCents || 0, pay: o.pay, status: o.status,
+    amountCents: o.amountCents, refundedCents: o.refundedCents || 0, pay: o.pay, status: o.status, review: o.review || null,
     requirement: o.requirement, createdAt: o.createdAt, levelName: o.levelName, paymentStatus: o.paymentStatus || '已支付', orderMode: o.orderMode || 'quick', preferredEscortId: o.preferredEscortId || null, region: o.region || '', voice: o.voice || '', appointmentAt: o.appointmentAt || null,
     participants: o.participants.map(p => ({ name: p.name, evidence:p.evidence||'', accepted: p.accepted, finished: p.finished })),
     selectionRequired: buyerSelectionRequired(o), participantMin: o.participantMin ?? data.games.find(g => g.name === o.game)?.min ?? 1,

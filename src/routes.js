@@ -1,4 +1,4 @@
-export const PUBLIC_PAGES = new Set(['overview', 'companions', 'dispatchHall', 'moments', 'guarantees']);
+export const PUBLIC_PAGES = new Set(['overview', 'companions', 'guarantees']);
 
 export function resolveRoute(mode = 'public', page = 'overview') {
   mode = String(mode || '').toLowerCase();

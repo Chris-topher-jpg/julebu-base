@@ -12,6 +12,7 @@ import { SmsLoginChallenges, loginPhoneForUser, normalizePhone } from './server/
 import { orderTypeOf, productStartingPrice, productEscortCount, productNeedsLevel, productGuarantee } from './src/product-config.js';
 import { DispatchHall, parseIceServers } from './server/dispatch.mjs';
 import { Moments, MOMENT_UPLOAD_LIMIT } from './server/moments.mjs';
+import { excludedSystemAEndpoint, memberAvailability } from './server/system-a.mjs';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 const jsonLimit = 24000;
@@ -71,13 +72,13 @@ function csvCell(value) {
   return `"${text.replaceAll('"', '""')}"`;
 }
 
-export function createClubServer({ database, production = process.env.NODE_ENV === 'production', publicOrigin = process.env.CLUB_PUBLIC_ORIGIN, bootstrapAdmin = { username: process.env.CLUB_ADMIN_USERNAME, password: process.env.CLUB_ADMIN_PASSWORD, name: process.env.CLUB_ADMIN_NAME } } = {}) {
+export function createClubServer({ database, edition = 'A', production = process.env.NODE_ENV === 'production', publicOrigin = process.env.CLUB_PUBLIC_ORIGIN, bootstrapAdmin = { username: process.env.CLUB_ADMIN_USERNAME, password: process.env.CLUB_ADMIN_PASSWORD, name: process.env.CLUB_ADMIN_NAME } } = {}) {
   const origin = configuredOrigin(publicOrigin, production);
-  const iceServers = parseIceServers(process.env.CLUB_ICE_SERVERS || '[]');
+  const iceServers = edition === 'full' ? parseIceServers(process.env.CLUB_ICE_SERVERS || '[]') : [];
   if (production && (!database || database === ':memory:')) throw new Error('正式环境必须通过 CLUB_DATABASE 指定独立且持久化的数据库路径');
-  const store = new ClubStore(database || resolve(root, 'data/club.sqlite'), { production, bootstrapAdmin });
-  const dispatchHall = new DispatchHall(store, { iceServers });
-  const moments = new Moments(store);
+  const store = new ClubStore(database || resolve(root, 'data/club.sqlite'), { production, bootstrapAdmin, edition });
+  const dispatchHall = edition === 'full' ? new DispatchHall(store, { iceServers }) : null;
+  const moments = edition === 'full' ? new Moments(store) : null;
   const attempts = new Map();
   const smsChallenges = new SmsLoginChallenges({ production });
   const findPhoneAccount = phone => {
@@ -113,6 +114,7 @@ export function createClubServer({ database, production = process.env.NODE_ENV =
       // accepting the default `:443` spelling that URL normalizes away.
       requireThat(origin ? url.origin === origin.origin : ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname), '不允许的访问主机', 403);
       if (url.pathname.startsWith('/api/')) {
+        requireThat(edition !== 'A' || !excludedSystemAEndpoint(url.pathname), 'A 版不提供此功能', 404);
         const token = (req.headers.cookie || '').split(';').map(s => s.trim()).find(s => s.startsWith('club_session='))?.slice(13) || '';
         let body = {};
         if (req.method !== 'GET') {
@@ -241,7 +243,7 @@ export function createClubServer({ database, production = process.env.NODE_ENV =
                 profileTags: Array.isArray(user.profileTags) ? user.profileTags : [],
               };
             }));
-          return json({ games, catalogGames: games, products, members, revision: data.revision });
+          return json({ edition, games, catalogGames: games, products, members: members.map(member => ({ ...member, availability: memberAvailability(data, data.users.find(user => user.id === member.id)) })), revision: data.revision });
         }
         const user = store.session(token);
         requireThat(user, '登录已失效，请重新登录', 401);

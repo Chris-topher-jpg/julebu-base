@@ -8,7 +8,7 @@ import { parseRoute } from '../src/routes.js';
 const png = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c6360000000020001e221bc330000000049454e44ae426082', 'hex');
 
 test('moments store publishes media, exposes public interactions, and enforces ownership', () => {
-  const app = createClubServer({ database: ':memory:', production: false, publicOrigin: '' });
+  const app = createClubServer({ edition: 'full', database: ':memory:', production: false, publicOrigin: '' });
   try {
     const moments = new Moments(app.store);
     const first = app.store.read().users.find(user => user.id === 'demo-user');
@@ -26,7 +26,7 @@ test('moments store publishes media, exposes public interactions, and enforces o
 });
 
 test('moments HTTP routes allow anonymous browsing and byte ranges', async t => {
-  const app = createClubServer({ database: ':memory:', production: false, publicOrigin: '' });
+  const app = createClubServer({ edition: 'full', database: ':memory:', production: false, publicOrigin: '' });
   t.after(() => app.server.listening ? app.close() : app.store.close());
   app.server.listen(0, '127.0.0.1');
   await once(app.server, 'listening');
@@ -35,7 +35,7 @@ test('moments HTTP routes allow anonymous browsing and byte ranges', async t => 
   const actor = app.store.read().users.find(user => user.id === 'demo-user');
   const token = app.store.login(actor.username, 'Test1234!').token;
   const get = path => fetch(base + path, { headers: { Cookie: `club_session=${token}` } });
-  assert.deepEqual(parseRoute('#/public/moments'), { mode: 'public', page: 'moments' });
+  assert.deepEqual(parseRoute('#/public/moments'), { mode: 'public', page: 'overview' });
   assert.equal((await fetch(base + '/api/public/moments')).status, 200);
   assert.equal((await fetch(base + '/api/moments/media', { method: 'POST', headers: { 'Content-Type': 'image/png' }, body: png })).status, 401);
   const upload = await fetch(base + '/api/moments/media', { method: 'POST', headers: { 'Content-Type': 'image/png', Cookie: `club_session=${token}` }, body: png });

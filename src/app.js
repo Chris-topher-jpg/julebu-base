@@ -19,8 +19,6 @@ import { admissionsMarkup, mountAdmissions, openAdmissions } from './admissions.
 import { admissionMatchesFilter } from './admission-queue.js';
 import { presenceButtonMarkup, updatePresenceControls, createPresenceController } from './presence.js';
 import { refundDetailsMarkup, refundQueueMarkup, refundProgress } from './refunds.js';
-import { dispatchHallMarkup, mountDispatchHall } from './dispatch-hall.js';
-import { momentsMarkup, mountMoments } from './moments.js';
 
 const labels = { overview: '工作台', serviceManagement: '客服管理', examinerCandidates: '考核与质检', orders: '订单管理', dispatch: '派单台', conversations: '会话中心', escorts: '陪玩成员', catalog: '游戏与商品', topups: '充值审核', flows: '资金流水', settlements: '提现与结算', accounts: '成员与权限', availableOrders: '接单大厅', myOrders: '我的订单', myEarnings: '我的收益', memberProfile: '个人中心', memberHome: '个人主页', memberOrders: '我的点单', memberAfterSales: '售后记录' };
 const symbols = { overview: 'grid', serviceManagement:'headset', examinerCandidates:'users', orders: 'receipt', dispatch: 'trend', conversations: 'users', escorts: 'headset', catalog: 'game', topups: 'wallet', flows: 'trend', settlements: 'wallet', accounts: 'users', availableOrders: 'game', myOrders: 'receipt', myEarnings: 'wallet', memberProfile: 'grid', memberHome: 'users', memberOrders: 'receipt', memberAfterSales: 'headset' };
@@ -29,10 +27,6 @@ labels.refunds = '退款处理'; symbols.refunds = 'receipt';
 let syncGeneration = 0, pendingMutations = 0, pendingRender = false, viewEpoch = 0;
 let notificationUser = null;
 let leaveAdmissions = () => {};
-let leaveDispatchHall = () => {};
-function stopDispatchHall() { leaveDispatchHall(); leaveDispatchHall = () => {}; }
-let leaveMoments = () => {};
-function stopMoments() { leaveMoments(); leaveMoments = () => {}; }
 const dirtyForms = new WeakSet();
 // Navigation has its own lifetime: creating a chat changes the data revision,
 // but must not cancel the view that is waiting to open that same chat.
@@ -177,10 +171,6 @@ function flushSyncedView() {
   if (!pendingRender || !state.workspace || state.busy || pendingMutations || document.querySelector('dialog[open]')) return;
   // The assessment view syncs its own records and preserves conversation drafts.
   if (state.page === 'admissions' && document.querySelector('.admissions')) { pendingRender = false; return; }
-  // The hall updates seats and messages itself; never tear down a live call
-  // because unrelated orders or notifications changed the workspace revision.
-  if (state.page === 'dispatchHall' && document.querySelector('.dispatch-hall')) { pendingRender = false; return; }
-  if (state.page === 'moments' && document.querySelector('.moments-page')) { pendingRender = false; return; }
   if ([...document.querySelectorAll('#app form')].some(form => dirtyForms.has(form))) return;
   // Keep filters, focus and scroll while rebuilding a list with new records.
   const controls = [...document.querySelectorAll('#app input, #app select, #app textarea')];
@@ -198,10 +188,6 @@ function flushSyncedView() {
   window.scrollTo(...scroll); pendingRender = false;
 }
 async function openNotification(item) {
-  if (item.kind === 'dispatchHall' && state.mode === 'public' && state.page === 'dispatchHall' && document.querySelector('.dispatch-hall')) {
-    (document.querySelector('[data-dh-orders]:not([hidden])') || document.querySelector('[data-dh-active]'))?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    return true;
-  }
   if (document.querySelector('dialog[open]') || [...document.querySelectorAll('#app form')].some(form => dirtyForms.has(form))) {
     toast('请先完成或关闭正在编辑的内容，再查看通知'); return false;
   }
@@ -228,7 +214,7 @@ async function openNotification(item) {
       const order = getOrder(item.orderId);
       if (order) {
         const workerNotice = state.mode === 'management' && (state.workspace.user.role === 'escort' || state.workspace.workerEnabled) && ['availableOrders', 'myOrders'].includes(item.page);
-        const action = workerNotice ? item.page === 'availableOrders' && order.status === '待接单' ? 'claim' : item.page === 'myOrders' && order.status === '待确认' ? 'accept' : 'detail' : has('order:dispatch') && order.status === '待接单' ? 'dispatch' : state.mode !== 'management' && order.status === '待接单' && order.applications?.length ? 'selectApplicant' : 'detail';
+        const action = workerNotice ? item.page === 'availableOrders' && order.status === '待接单' ? 'claim' : item.page === 'myOrders' && order.status === '待确认' ? 'accept' : 'detail' : has('order:dispatch') && order.status === '待接单' ? 'dispatch' : state.mode !== 'management' && order.selectionRequired && order.status === '待接单' && order.applications?.length ? 'selectApplicant' : 'detail';
         await perform({ dataset: { action, id: order.id } });
       }
     }
@@ -274,7 +260,7 @@ function navigate(page, filter = '全部') {
   syncGeneration++; viewEpoch++;
   if(state.workspace?.user.role==='admin') page=({memberManagement:'clubMembers',accounts:'clubMembers',escorts:'clubEscorts'})[page]||page;
   if (state.mode === 'public') {
-    const publicPage = ['companions', 'dispatchHall', 'moments', 'guarantees'].includes(page) ? page : 'overview';
+    const publicPage = ['companions', 'guarantees'].includes(page) ? page : 'overview';
     state.page = publicPage;
     history.replaceState(null, '', publicPage === 'overview' ? '#/' : `#/public/${publicPage}`);
     return renderPublicRoute(state.workspace, publicPage);
@@ -285,8 +271,6 @@ function navigate(page, filter = '全部') {
   window.scrollTo({ top: 0, behavior: 'instant' });
 }
 async function renderLogin() {
-  stopDispatchHall();
-  stopMoments();
   leaveAdmissions(); leaveAdmissions = () => {};
   syncGeneration++; viewEpoch++; liveSync.stop(); notifications.reset(); notificationUser = null; pendingRender = false;
   document.querySelectorAll('dialog[open]').forEach(modal => { modal.close(); modal.remove(); });
@@ -405,29 +389,6 @@ function renderPublicStandalone(page) {
   const help = home.querySelector('#help');
   const footer = home.querySelector('.public-footer');
   [hero, members, rules, help, footer, home.querySelector('.public-admission-entry'), home.querySelector('.public-services')].forEach(el => { if (el) el.hidden = true; });
-  if (page === 'dispatchHall') {
-    const main = home.querySelector('main');
-    main.insertAdjacentHTML('beforeend', dispatchHallMarkup());
-    leaveDispatchHall = mountDispatchHall(main.querySelector('.dispatch-hall'), {
-      workspace: state.workspace,
-      login: () => home.querySelector('.nav-login-link[data-action="openLogin"]')?.click(),
-      onOrders: () => openWorkspace('personal', 'memberOrders'),
-      onDispatch: () => openWorkspace('management', 'dispatch'),
-      onSupport: () => openHeaderChat({ consultationOnly: true }),
-      onSessionEnd: () => renderLogin(),
-    });
-    return;
-  }
-  if (page === 'moments') {
-    const main = home.querySelector('main');
-    main.insertAdjacentHTML('beforeend', momentsMarkup());
-    leaveMoments = mountMoments(main.querySelector('.moments-page'), {
-      workspace: state.workspace,
-      login: () => home.querySelector('.nav-login-link[data-action="openLogin"]')?.click(),
-      toast,
-    });
-    return;
-  }
   const active = page === 'companions' ? members : rules;
   if (!active) return;
   active.hidden = false;
@@ -518,8 +479,6 @@ async function openHeaderChat({ consultationOnly = false } = {}) {
   finally { openHeaderChat.pending = false; }
 }
 function renderPublicHome(workspace, page = 'overview') {
-  stopDispatchHall();
-  stopMoments();
   leaveAdmissions(); leaveAdmissions = () => {};
   if (!workspace?.user) return renderLogin();
   if (state.mode !== 'public' || state.page !== page || state.workspace?.user.id !== workspace.user.id) viewEpoch++;
@@ -633,12 +592,10 @@ function openAdmissionDialog() {
     mode: 'personal',
     onRealName: () => openWorkspace('personal', 'realName'),
     onTopup: () => perform({ dataset: { action: 'personalTopup' } }),
-    onNavigate: target => target === 'management' ? openWorkspace('management', 'overview') : target === 'managementOrders' ? openWorkspace('management', 'availableOrders') : target && openWorkspace('personal', target),
+    onNavigate: target => target === 'management' ? openWorkspace('management', 'overview') : target === 'managementOrders' ? openWorkspace('management', 'myOrders') : target && openWorkspace('personal', target),
   });
 }
 function renderApp() {
-  stopDispatchHall();
-  stopMoments();
   leaveAdmissions(); leaveAdmissions = () => {};
   const w = state.workspace; if (!w) return renderLogin();
   startWorkspaceSync();
@@ -662,7 +619,7 @@ function bindAdmissionPage(initialId) {
   leaveAdmissions();
   leaveAdmissions = mountAdmissions(document.querySelector('#app'), {
     api, workspace: state.workspace, mode: state.mode, initialId, initialFilter: state.filter,
-    onNavigate: page => page === 'management' ? openWorkspace('management', 'overview') : page === 'managementOrders' ? openWorkspace('management', 'availableOrders') : ['verifyRealName', 'topup'].includes(page) ? perform({ dataset: { action: page === 'topup' ? 'personalTopup' : 'verifyRealName' } }) : navigate(page),
+    onNavigate: page => page === 'management' ? openWorkspace('management', 'overview') : page === 'managementOrders' ? openWorkspace('management', 'myOrders') : ['verifyRealName', 'topup'].includes(page) ? perform({ dataset: { action: page === 'topup' ? 'personalTopup' : 'verifyRealName' } }) : navigate(page),
   });
 }
 function bindSharedActions() {
@@ -786,19 +743,21 @@ function overview() {
   const live = w.orders.filter(o => o.status === '陪玩中');
   const review = w.orders.filter(o => o.status === '待验收');
   const day = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
-  const stats = mine ? metric('可接订单', w.availableOrders.length, '匹配你的游戏项目', 'orange', 'game') + metric('我的待办', pending.length, '待确认或待开始服务', 'purple', 'receipt') + metric('可提现收益', money(w.wallet.balanceCents), '验收通过后入账', 'green', 'wallet') + metric('进行中的服务', live.length, '同一时段专心服务一单', 'blue', 'headset') : metric('待派单', w.orders.filter(o => o.status === '待接单').length, '已收款，等待匹配成员', 'orange', 'game') + metric('服务进行中', live.length, '及时跟进服务状态', 'purple', 'headset') + metric('完单待验收', review.length, '核验后计入成员收益', 'green', 'receipt') + metric('待跟进会话', w.conversations.filter(c => c.state !== '已结束').length, '客户咨询与服务安排', 'blue', 'users');
-  return `<section class="welcome"><div><p class="eyebrow">${day}</p><h1>欢迎回来，${e(w.user.name)}<span>。</span></h1><p class="subline">${mine ? '你的接单、服务与收益，都在这里。' : '从客户咨询到服务验收，让每一单都有着落。'}</p></div><span class="workspace-tag">${mine ? '我的专属工作台' : '俱乐部运营概况'}</span></section><section class="stats">${stats}</section><section class="grid-row">${panel(mine ? '我的服务待办' : '需要跟进的订单', '按订单状态推进下一步', orderList([...review, ...live, ...pending].slice(0, 4), mine), `<button class="text-btn" data-page="${mine ? 'myOrders' : 'orders'}">查看全部 →</button>`)}${panel(mine ? '接单机会' : '协作流程', mine ? '只展示你支持的游戏' : '职责独立，订单信息同步', mine ? (w.availableOrders.slice(0, 3).map(o => `<div class="dispatch-mini-row"><div class="event-date ${o.tone || 'purple'}">${icon('game')}</div><div class="event-info"><strong>${e(o.game)} · ${e(o.product)}</strong><span>${o.hours} 小时 · ${money(o.amountCents)}</span></div><button class="text-btn" data-page="availableOrders">查看 →</button></div>`).join('') || empty('暂时没有匹配的新订单')) : `<div class="workflow"><div><b>01</b><strong>老板下单，客服接收</strong><span>确认游戏、时长和收款</span></div><div><b>02</b><strong>邀请报名，老板选择</strong><span>符合条件的打手均可参与</span></div><div><b>03</b><strong>打手服务与完单</strong><span>记录服务过程，提交完单说明</span></div><div><b>04</b><strong>客服验收，收益入账</strong><span>管理员独立审核充值和提现</span></div></div>`)}</section>`;
+  const stats = mine ? metric('已接订单量', w.orders.length, '客服派给我的订单', 'orange', 'game') + metric('我的待办', pending.length, '待确认或待开始服务', 'purple', 'receipt') + metric('可提现收益', money(w.wallet.balanceCents), '验收通过后入账', 'green', 'wallet') + metric('进行中的服务', live.length, '同一时段专心服务一单', 'blue', 'headset') : metric('待派单', w.orders.filter(o => o.status === '待接单').length, '已收款，等待匹配成员', 'orange', 'game') + metric('服务进行中', live.length, '及时跟进服务状态', 'purple', 'headset') + metric('完单待验收', review.length, '核验后计入成员收益', 'green', 'receipt') + metric('待跟进会话', w.conversations.filter(c => c.state !== '已结束' && !c.contacted).length, '尚未回复的客户会话', 'blue', 'users');
+  return `<section class="welcome"><div><p class="eyebrow">${day}</p><h1>欢迎回来，${e(w.user.name)}<span>。</span></h1><p class="subline">${mine ? '你的接单、服务与收益，都在这里。' : '从客户咨询到服务验收，让每一单都有着落。'}</p></div><span class="workspace-tag">${mine ? '我的专属工作台' : '俱乐部运营概况'}</span></section><section class="stats">${stats}</section><section class="grid-row">${panel(mine ? '我的服务待办' : '需要跟进的订单', '按订单状态推进下一步', orderList([...review, ...live, ...pending].slice(0, 4), mine), `<button class="text-btn" data-page="${mine ? 'myOrders' : 'orders'}">查看全部 →</button>`)}${panel(mine ? '进行中服务' : '协作流程', mine ? '当前服务与待验收订单' : '职责独立，订单信息同步', mine ? orderList([...live, ...review].slice(0, 3), true) : `<div class="workflow"><div><b>01</b><strong>老板下单，客服接收</strong><span>确认游戏、时长和收款</span></div><div><b>02</b><strong>客服派单，打手确认</strong><span>按游戏、等级与忙闲状态分配</span></div><div><b>03</b><strong>打手服务与完单</strong><span>记录服务过程，提交完单说明</span></div><div><b>04</b><strong>老板验收，收益入账</strong><span>管理员独立审核充值和提现</span></div></div>`)}</section>`;
 }
 function orderList(list, mine) {
   if (!list.length) return empty('暂无待处理订单');
-  return `<div class="order-list">${list.map(o => `<article class="order-line" data-searchable><div><div class="order-line-title"><strong>${e(o.game)} · ${e(o.product)}</strong>${badge(o.status)}</div><p>${e(o.id)} · ${e(o.boss)} · ${o.hours} 小时</p><small>${mine ? '我的预计分成 ' + money(myIncome(o)) : '陪玩：' + e(o.participants.map(p => p.name).join(' / ') || (o.applications?.length ? `${o.applications.length} 位候选，待老板选择` : '等待打手报名')) + ' · 订单金额 ' + money(o.amountCents)}</small></div><div class="row-actions">${orderButtons(o, mine)}</div></article>`).join('')}</div>`;
+    return `<div class="order-list">${list.map(o => `<article class="order-line" data-searchable><div><div class="order-line-title"><strong>${e(o.game)} · ${e(o.product)}</strong>${badge(o.status)}</div><p>${e(o.id)} · ${e(o.boss)} · ${o.hours} 小时</p><small>${mine ? '我的预计分成 ' + money(myIncome(o)) : '陪玩：' + e(o.participants.map(p => p.name).join(' / ') || (['已取消', '已退款'].includes(o.status) ? '未安排' : '等待客服派单')) + ' · 订单金额 ' + money(o.amountCents)}</small></div><div class="row-actions">${o.review ? `<span class="muted-text">${o.review.rating} 星 · ${e(o.review.comment)}</span>` : ''}${orderButtons(o, mine)}</div></article>`).join('')}</div>`;
 }
 function myIncome(order) { if (!order.participants.length) return order.expectedIncomeCents || 0; const p = order.participants.find(p => p.userId === state.workspace.user.id); return p?.earningCents ?? Math.round(order.amountCents * (p?.shareBps || 0) / 10000); }
 function orderButtons(o, mine) {
   let actions = button('detail', '详情', o.id);
   if (['user','member'].includes(state.workspace.user.role)) {
     if (o.status === '待验收') actions += button('customerConfirm', '确认完成', o.id, true);
-    if (o.status === '待接单' && o.applications?.length) actions += button('selectApplicant', '选择打手', o.id, true);
+    if (o.status === '待接单' && o.selectionRequired && o.applications?.length) actions += button('selectApplicant', '选择打手', o.id, true);
+    if (['待接单', '待确认', '待服务'].includes(o.status) && ['余额支付', '在线支付'].includes(o.pay)) actions += button('cancelOrder', '取消订单', o.id);
+    if (o.status === '已完成') actions += o.review ? `<span class="muted-text">已评价 ${o.review.rating} 星</span>` : button('rateOrder', '评价服务', o.id);
     if (['待接单', '待确认', '待服务', '陪玩中', '已完成', '待验收'].includes(o.status)) actions += button('refundRequest', '申请退款', o.id);
     actions += button('orderSupport', '联系本单售后', o.id);
     return actions;
@@ -823,8 +782,9 @@ function placeOrderPage() { return personalCenterMarkup(state.workspace); }
 function orderPage(mine) {
   const statuses = ['全部', '待接单', '待确认', '待服务', '陪玩中', '待验收', '已完成', '退款审核', '已退款', '已取消'].filter(s => !mine || s !== '待接单');
   const source = mine ? state.workspace.workerOrders || state.workspace.orders : state.workspace.orders;
-  const orders = source.filter(o => state.filter === '全部' || o.status === state.filter);
-  return intro(mine ? '我的订单' : '订单管理', mine ? '只显示分配给你的订单；完单后由客服验收，收益按接单时的分成计算。' : '创建、派单、服务、验收，完整记录每一步。', !mine && has('order:create') ? button('newOrder','新建订单','',true) : '') + `<div class="filter-strip"><div class="filter-tabs">${statuses.map(s => `<button data-filter="${s}" class="${s === state.filter ? 'active' : ''}">${s} <b>${source.filter(o => s === '全部' || o.status === s).length}</b></button>`).join('')}</div></div>${panel(mine ? '我的服务记录' : '俱乐部订单', `共 ${orders.length} 笔`, `<label class="list-search">${icon('search', 16)}<input id="listSearch" type="search" placeholder="搜索订单号、老板、游戏" aria-label="搜索订单" value="${e(state.query)}"></label>${orderList(orders, mine)}<div id="noSearchResults" class="empty-state" hidden>没有找到匹配的订单</div>`)}`;
+  if (mine) statuses.push('差评记录');
+  const orders = source.filter(o => state.filter === '全部' || (state.filter === '差评记录' ? o.review?.rating <= 2 : o.status === state.filter));
+  return intro(mine ? '我的订单' : '订单管理', mine ? '只显示分配给你的订单；完单后由用户确认验收，收益按接单时的分成计算。' : '创建、派单、服务、验收，完整记录每一步。', !mine && has('order:create') ? button('newOrder','新建订单','',true) : '') + `<div class="filter-strip"><div class="filter-tabs">${statuses.map(s => `<button data-filter="${s}" class="${s === state.filter ? 'active' : ''}">${s} <b>${source.filter(o => s === '全部' || (s === '差评记录' ? o.review?.rating <= 2 : o.status === s)).length}</b></button>`).join('')}</div></div>${panel(mine ? '我的服务记录' : '俱乐部订单', `共 ${orders.length} 笔`, `<label class="list-search">${icon('search', 16)}<input id="listSearch" type="search" placeholder="搜索订单号、老板、游戏" aria-label="搜索订单" value="${e(state.query)}"></label>${orderList(orders, mine)}<div id="noSearchResults" class="empty-state" hidden>没有找到匹配的订单</div>`)}`;
 }
 function personalOverview() {
   const w = state.workspace, orders = w.orders;
@@ -851,9 +811,9 @@ function memberAfterSalesPage() {
 }
 function dispatchPage() {
   const queue = state.workspace.orders.filter(o => o.status === '待接单').sort((a,b) => a.createdAt.localeCompare(b.createdAt));
-  return intro('派单台', '客服邀请与打手报名同步进行；老板下单后由老板从候选名单最终选择。成员需在线、未冻结且满足游戏及等级要求。') + `<div class="dispatch-page-list">${queue.map(o => `<article class="panel dispatch-card"><div class="dispatch-card-top"><div><span class="flow-id">${e(o.id)}</span><h2>${e(o.game)} · ${e(o.product)}</h2><p>${e(o.boss)} · ${e(o.requirement)}</p></div>${badge('待接单')}</div><div class="dispatch-card-meta"><span>订单金额<strong>${money(o.amountCents)}</strong></span><span>服务时长<strong>${o.hours} 小时</strong></span><span>候选打手<strong>${o.applications?.length || 0} 人</strong></span><span>可邀请成员<strong>${eligible(o).length} 人</strong></span></div>${button('dispatch', buyerChoice(o) ? '拉打手 / 查看候选 →' : '选择成员并派单 →', o.id, true)}</article>`).join('') || empty('派单队列已处理完毕')}</div>`;
+  return intro('派单台', '由客服安排陪玩，成员确认后开始服务。成员需在线、空闲、未冻结且满足游戏及等级要求。') + `<div class="dispatch-page-list">${queue.map(o => `<article class="panel dispatch-card"><div class="dispatch-card-top"><div><span class="flow-id">${e(o.id)}</span><h2>${e(o.game)} · ${e(o.product)}</h2><p>${e(o.boss)} · ${e(o.requirement)}</p></div>${badge('待接单')}</div><div class="dispatch-card-meta"><span>订单金额<strong>${money(o.amountCents)}</strong></span><span>服务时长<strong>${o.hours} 小时</strong></span><span>服务人数<strong>${countLabel(orderLimits(o))}</strong></span><span>可派单成员<strong>${eligible(o).length} 人</strong></span></div>${button('dispatch', buyerChoice(o) ? '拉打手 / 查看候选 →' : '选择成员并派单 →', o.id, true)}</article>`).join('') || empty('派单队列已处理完毕')}</div>`;
 }
-function eligible(order) { const w=state.workspace; const rank=id=>w.levels.find(l=>l.id===id)?.rank||0; return w.members.filter(m => m.realNameVerification?.status === 'verified' && m.active && !m.escortFrozen && m.online && !(order.excludedEscortIds || []).includes(m.id) && (!order.preferredEscortId || order.preferredEscortId === m.id) && m.games.includes(order.game) && (!orderHasLevel(order) || rank(m.levelId)>=rank(order.levelId))); }
+function eligible(order) { const w=state.workspace; const rank=id=>w.levels.find(l=>l.id===id)?.rank||0; return w.members.filter(m => m.realNameVerification?.status === 'verified' && m.active && !m.escortFrozen && m.online && !(order.excludedEscortIds || []).includes(m.id) && (!order.preferredEscortId || order.preferredEscortId === m.id) && m.games.includes(order.game) && (w.edition !== 'A' || !w.orders.some(other => other.id !== order.id && (['待确认', '待服务', '陪玩中'].includes(other.status) || other.status === '退款审核' && w.refunds?.some(r => r.orderId === other.id && ['待审核', '待线下退款'].includes(r.status) && r.originalStatus === '陪玩中')) && other.participants.some(p => p.userId === m.id && !p.finished))) && (!orderHasLevel(order) || rank(m.levelId)>=rank(order.levelId))); }
 function availablePage() {
   const w = state.workspace;
   return intro('接单大厅', '陪玩单按游戏和等级匹配，趣味单和护航单按游戏匹配。报名后由老板选择打手，已有服务未结束时无法开始另一单。', presenceButtonMarkup(w.user)) + `<div class="available-order-grid">${w.availableOrders.map(o => { const applied = o.applications?.some(a => a.userId === w.user.id); return `<article class="panel available-order-card" data-searchable><div class="available-order-top"><span class="event-date ${o.tone || 'purple'}">${icon('game', 20)}</span>${badge('待接单')}</div><h2>${e(o.game)} · ${e(o.product)}</h2>${o.guarantee ? `<p>护航保障：${e(o.guarantee)}</p>` : ''}<p>${e(o.requirement)}</p><div class="available-order-meta"><span>${o.hours} 小时 · ${e(o.boss)}</span><strong>${money(o.amountCents)}</strong></div><small class="muted-text">${orderHasLevel(o) ? `${e(o.levelName)}及以上` : e(o.orderType)} · 预计分成 ${o.expectedShareBps/100}%（按最低服务人数估算）</small>${applied ? '<span class="muted-text">已进入候选名单，等待老板选择</span>' : button('claim', '报名这个订单 →', o.id, true, w.user.online ? '' : 'disabled title="请先切换为在线"')}</article>`; }).join('') || empty('暂无与你的游戏匹配的订单')}</div>`;
@@ -958,7 +918,7 @@ async function updateOrder(order, action, input = {}) {
 }
 function candidateSummary(order) {
   if (order.status !== '待接单') return '';
-  const applications = order.applications || [];
+  if (!order.selectionRequired) return ''; const applications = order.applications || [];
   const personal = state.mode !== 'management';
   const escort = !personal && (state.workspace.user.role === 'escort' || state.workspace.workerEnabled);
   const action = personal && applications.length ? button('selectApplicant', '选择打手', order.id, true) : escort && !applications.length ? button('claim', '报名这个订单', order.id, true, state.workspace.user.online ? '' : 'disabled') : '';
@@ -971,8 +931,8 @@ function orderDetail(o) {
   const stage=steps.indexOf(o.status);
   const stepLabels=['提交订单','匹配接单','开始服务','服务验收','完成结算'];
   const position = stage<0?-1:stage<=1?stage:stage===2?1:stage===3?2:stage===4?3:4;
-  const hints={ '待接单': personal && o.applications?.length ? `已有 ${o.applications.length} 位符合要求的打手报名，请选择心仪的打手。` : '等待客服匹配陪玩，符合条件的陪玩也可以自主报名。', '待确认':'已派单，等待服务成员确认接单。', '待服务':'陪玩已确认，请按约定时间开始服务。', '陪玩中':'服务进行中，完成后由陪玩提交服务说明。', '待验收':'服务说明已提交。确认服务达标后再验收，有问题可申请退款或补充服务。', '已完成':'订单已验收，收益已按派单时锁定的比例结算。', '退款审核':'退款申请正在审核，确认处理结果后再继续结算。', '已退款':'退款已完成，可在余额明细或退款记录中核对。', '已取消':'订单已取消。' };
-  return `<ol class="order-progress" aria-label="订单进度">${stepLabels.map((label,i)=>`<li class="${i<position?'done':i===position?'current':''}" ${i===position?'aria-current="step"':''}><b>${i<position?'✓':i+1}</b><span>${label}</span></li>`).join('')}</ol><p class="order-next-step">${e(hints[o.status] || '请查看下方订单记录，核对最新处理进度。')}</p><div class="detail-grid"><div><span>订单编号</span><strong>${e(o.id)}</strong></div><div><span>当前状态</span>${badge(o.status)}</div><div><span>下单用户</span><strong>${e(o.boss)}</strong></div><div><span>游戏商品</span><strong>${e(o.game)} · ${e(o.product)}</strong></div><div><span>订单类型</span><strong>${e(o.orderType || '陪玩单')}</strong></div>${orderHasLevel(o) ? `<div><span>陪玩等级</span><strong>${e(o.levelName||'金牌')}及以上</strong></div>` : ''}${o.guarantee ? `<div><span>护航保障</span><strong>${e(o.guarantee)}</strong></div>` : ''}<div><span>服务时长</span><strong>${o.hours} 小时</strong></div><div><span>订单总额</span><strong>${money(o.amountCents)}</strong></div><div><span>已退金额</span><strong>${money(o.refundedCents)}</strong></div>${mine?`<div><span>我的预计分成</span><strong>${money(myIncome(o))}</strong></div>`:`<div><span>支付方式</span><strong>${e(o.pay==='在线支付'?'余额支付':o.pay)}</strong></div>`}${o.appointmentAt?`<div><span>预约时间</span><strong>${date(o.appointmentAt)}</strong></div>`:''}${o.region?`<div><span>游戏区服</span><strong>${e(o.region)}</strong></div>`:''}</div>${o.serviceNote ? `<p class="detail-note">服务说明：${e(o.serviceNote)}</p>` : ''}<p class="detail-note">服务要求：${e(o.requirement)}</p>${candidateSummary(o)}<h3>服务成员</h3>${o.participants.map(p=>`<div class="detail-note"><strong>${e(p.name)}</strong> · ${p.accepted?'已接单':'待确认'} · ${p.finished?'已提交完单':'待完成'}${!personal && (!mine || p.userId===state.workspace.user.id) && p.shareBps!=null?` · 分成 ${p.shareBps/100}%`:''}${p.evidence?`<p>完单说明：${e(p.evidence)}</p>`:''}</div>`).join('')||'<p class="muted-text">等待派单</p>'}<h3>订单记录</h3><div class="timeline">${(o.history||[]).map(h=>`<div><i></i><strong>${e(h.action)}</strong><small>${h.by?e(h.by)+' · ':''}${date(h.at)}</small>${h.note?`<p>${e(h.note)}</p>`:''}</div>`).join('')}</div>`;
+  const hints={ '待接单': personal && o.applications?.length ? `已有 ${o.applications.length} 位符合要求的打手报名，请选择心仪的打手。` : '等待客服按游戏、等级与在线状态安排陪玩。', '待确认':'已派单，等待服务成员确认接单。', '待服务':'陪玩已确认，请按约定时间开始服务。', '陪玩中':'服务进行中，完成后由陪玩提交服务说明。', '待验收':'服务说明已提交。确认服务达标后再验收，有问题可申请退款或补充服务。', '已完成':'订单已验收，收益已按派单时锁定的比例结算。', '退款审核':'退款申请正在审核，确认处理结果后再继续结算。', '已退款':'退款已完成，可在余额明细或退款记录中核对。', '已取消':'订单已取消。' };
+  return `<ol class="order-progress" aria-label="订单进度">${stepLabels.map((label,i)=>`<li class="${i<position?'done':i===position?'current':''}" ${i===position?'aria-current="step"':''}><b>${i<position?'✓':i+1}</b><span>${label}</span></li>`).join('')}</ol><p class="order-next-step">${e(hints[o.status] || '请查看下方订单记录，核对最新处理进度。')}</p><div class="detail-grid"><div><span>订单编号</span><strong>${e(o.id)}</strong></div><div><span>当前状态</span>${badge(o.status)}</div><div><span>下单用户</span><strong>${e(o.boss)}</strong></div><div><span>游戏商品</span><strong>${e(o.game)} · ${e(o.product)}</strong></div><div><span>订单类型</span><strong>${e(o.orderType || '陪玩单')}</strong></div>${orderHasLevel(o) ? `<div><span>陪玩等级</span><strong>${e(o.levelName||'金牌')}及以上</strong></div>` : ''}${o.guarantee ? `<div><span>护航保障</span><strong>${e(o.guarantee)}</strong></div>` : ''}<div><span>服务时长</span><strong>${o.hours} 小时</strong></div><div><span>订单总额</span><strong>${money(o.amountCents)}</strong></div><div><span>已退金额</span><strong>${money(o.refundedCents)}</strong></div>${mine?`<div><span>我的预计分成</span><strong>${money(myIncome(o))}</strong></div>`:`<div><span>支付方式</span><strong>${e(o.pay==='在线支付'?'余额支付':o.pay)}</strong></div>`}${o.appointmentAt?`<div><span>预约时间</span><strong>${date(o.appointmentAt)}</strong></div>`:''}${o.region?`<div><span>游戏区服</span><strong>${e(o.region)}</strong></div>`:''}</div>${o.serviceNote ? `<p class="detail-note">服务说明：${e(o.serviceNote)}</p>` : ''}<p class="detail-note">服务要求：${e(o.requirement)}</p>${candidateSummary(o)}<h3>服务成员</h3>${o.participants.map(p=>`<div class="detail-note"><strong>${e(p.name)}</strong> · ${p.accepted?'已接单':'待确认'} · ${p.finished?'已提交完单':'待完成'}${!personal && (!mine || p.userId===state.workspace.user.id) && p.shareBps!=null?` · 分成 ${p.shareBps/100}%`:''}${p.evidence?`<p>完单说明：${e(p.evidence)}</p>`:''}</div>`).join('')||'<p class="muted-text">等待派单</p>'}${o.review ? `<h3>服务评价 · ${o.review.rating} 星</h3><p class="detail-note">${e(o.review.comment)}</p>` : ''}<h3>订单记录</h3><div class="timeline">${(o.history||[]).map(h=>`<div><i></i><strong>${e(h.action)}</strong><small>${h.by?e(h.by)+' · ':''}${date(h.at)}</small>${h.note?`<p>${e(h.note)}</p>`:''}</div>`).join('')}</div>`;
 }
 async function perform(el) {
   if (el.disabled || state.busy) return;
@@ -1006,6 +966,8 @@ async function perform(el) {
       return openPersonalSupport(id);
     }
     if (action === 'customerConfirm') return dialog('确认服务完成', orderDetail(o) + '<p class="detail-note">确认后订单完成，陪玩分成将按规则结算；如有问题可在售后记录中申请处理。</p>', '确认完成', () => updateOrder(o, 'approve'));
+    if (action === 'cancelOrder') return dialog('取消订单', `<p>${e(o.id)} · ${money(o.amountCents)}</p>${textarea('取消原因', 'reason', '请填写取消原因')}<p>服务尚未开始，取消后已支付金额退回账户余额。</p>`, '确认取消', form => updateOrder(o, 'cancel', { reason: form.get('reason') }));
+    if (action === 'rateOrder') return dialog('评价服务', `<p>${e(o.game)} · ${e(o.participants.map(p => p.name).join(' / '))}</p><label class="form-field">服务评分<select name="rating"><option value="5">5 星 · 非常满意</option><option value="4">4 星 · 满意</option><option value="3">3 星 · 一般</option><option value="2">2 星 · 不满意</option><option value="1">1 星 · 非常不满意</option></select></label>${textarea('评价内容', 'comment', '请描述本次服务体验')}`, '提交评价', form => updateOrder(o, 'rate', { rating: Number(form.get('rating')), comment: form.get('comment') }));
     if (action === 'claim') return dialog('报名订单', `<p>报名 ${e(o.boss)} 的「${e(o.game)} · ${e(o.product)}」订单？</p><p>${o.hours} 小时 · 订单总额 <strong>${money(o.amountCents)}</strong></p><p>我的分成 ${o.expectedShareBps / 100}% · 预计到手 <strong>${money(o.expectedIncomeCents)}</strong></p><p>${e(o.requirement)}</p><p class="detail-note">报名后由老板从符合要求的打手中选择，报名不会立即锁定订单。</p>`, '确认报名', () => updateOrder(o, 'apply'));
     if (action === 'selectApplicant') {
       const applicants = o.applications || []; const game = orderLimits(o);
@@ -1014,7 +976,7 @@ async function perform(el) {
     }
     if (action === 'accept') return dialog('确认派单', orderDetail(o), '确认接单', () => updateOrder(o, 'accept'));
     if (action === 'start') return dialog('开始服务', `<p>确认开始 ${e(o.game)} 的 ${o.hours} 小时服务？</p><p class="detail-note">开始后将记录服务时间。同一成员不能同时开始其他订单。</p>`, '开始服务', () => updateOrder(o, 'start'));
-    if (action === 'finish') return dialog('提交完单', `<p>${e(o.id)} · ${e(o.game)}</p>${textarea('完单说明', 'evidence', '请记录服务内容、完成情况及需要客服核验的信息（至少 5 个字符）')}<p class="detail-note">由客服验收后入账，提交不会直接增加可提现余额。</p>`, '提交验收', form => updateOrder(o, 'finish', { evidence: form.get('evidence') }));
+    if (action === 'finish') return dialog('提交完单', `<p>${e(o.id)} · ${e(o.game)}</p>${textarea('完单说明', 'evidence', '请记录服务内容、完成情况及需要客服核验的信息（至少 5 个字符）')}<p class="detail-note">用户确认或客服核验后入账，提交不会直接增加可提现余额。</p>`, '提交验收', form => updateOrder(o, 'finish', { evidence: form.get('evidence') }));
     if (action === 'reject') return dialog('退回派单池', textarea('退回原因', 'reason', '说明无法服务的原因，客服将重新匹配成员'), '确认退回', form => updateOrder(o, 'reject', { reason: form.get('reason') }));
     if (action === 'transfer') {
       const candidates = eligible(o).filter(m => !o.participants.some(p => p.userId === m.id)); const game = orderLimits(o);

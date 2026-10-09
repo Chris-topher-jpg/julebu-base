@@ -107,7 +107,7 @@ test('下单请求在数据库重启后仍去重，并按操作账号隔离', t 
 });
 
 test('个人 HTTP 下单、重试与验收响应仅返回买家可见字段', async t => {
-  const instance = createClubServer({ database: ':memory:' });
+  const instance = createClubServer({ edition: 'full', database: ':memory:' });
   instance.server.listen(0, '127.0.0.1');
   await once(instance.server, 'listening');
   t.after(() => new Promise(resolve => instance.server.close(resolve)));

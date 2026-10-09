@@ -16,7 +16,7 @@ const EXAMINER = 'demo-examiner';
 async function fixture(t, { persistent = false } = {}) {
   const directory = persistent ? await mkdtemp(join(tmpdir(), 'club-admissions-http-')) : null;
   const database = directory ? join(directory, 'club.sqlite') : ':memory:';
-  let instance = createClubServer({ database, production: false, publicOrigin: null });
+  let instance = createClubServer({ edition: 'full', database, production: false, publicOrigin: null });
   let base;
   const cookies = new Map();
   const credentials = new Map();
@@ -76,7 +76,7 @@ async function fixture(t, { persistent = false } = {}) {
     async restart() {
       assert.ok(persistent);
       await instance.close();
-      instance = createClubServer({ database, production: false, publicOrigin: null });
+      instance = createClubServer({ edition: 'full', database, production: false, publicOrigin: null });
       await start();
     },
   };

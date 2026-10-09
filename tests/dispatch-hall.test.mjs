@@ -9,7 +9,7 @@ import { addFixtureGames } from './catalog-fixture.mjs';
 import { parseRoute } from '../src/routes.js';
 
 function fixture(t) {
-  const app = createClubServer({ database: ':memory:', production: false, publicOrigin: '' });
+  const app = createClubServer({ edition: 'full', database: ':memory:', production: false, publicOrigin: '' });
   t.after(() => app.server.listening ? app.close() : app.store.close());
   const { store } = app;
   addFixtureGames(store, ['王者荣耀']);
@@ -28,7 +28,7 @@ function fixture(t) {
 
 test('dispatch hall route and public room list expose only aggregate availability', t => {
   const f = fixture(t);
-  assert.deepEqual(parseRoute('#/public/dispatchHall'), { mode: 'public', page: 'dispatchHall' });
+  assert.deepEqual(parseRoute('#/public/dispatchHall'), { mode: 'public', page: 'overview' });
   f.join('demo-user');
   const listing = f.hall.lobby();
   assert.equal(listing.rooms.length, 5);

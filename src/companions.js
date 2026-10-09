@@ -16,8 +16,8 @@ export function companionProfiles(workspace = {}) {
       service: '技术陪玩', price: Number.isSafeInteger(cents) && cents > 0 ? cents / 100 : null,
       orders: Number.isSafeInteger(member.orders) && member.orders >= 0 ? member.orders : null,
       rating: Number.isFinite(member.rating) && member.rating >= 0 && member.rating <= 100 ? member.rating : null,
-      online: Boolean(member.online),
-      tags: [...(Array.isArray(member.profileTags) ? member.profileTags : []), member.online ? '在线接单' : '支持预约', '俱乐部成员'].slice(0, 8),
+      online: Boolean(member.online), availability: member.availability || (member.online ? '空闲' : '离线'),
+      tags: [...(Array.isArray(member.profileTags) ? member.profileTags : []), member.availability === '服务中' ? '服务中' : member.online ? '在线接单' : '支持预约', '俱乐部成员'].slice(0, 8),
       bio: member.bio || game + ' 俱乐部成员，服务前可沟通区服、时长与陪玩要求。',
       image: member.avatar || defaultAvatar, reviews: [],
     };
@@ -41,7 +41,7 @@ function chatStore() {
   } catch { return {}; }
 }
 function saveChats(value) { try { localStorage.setItem('club.profile.chats', JSON.stringify(value)); } catch { /* Storage may be unavailable. */ } }
-const availability = profile => `<span class="pro-availability ${profile.online ? 'is-online' : ''}"><i></i>${profile.online ? '在线' : '离线'}</span>`;
+const availability = profile => `<span class="pro-availability ${profile.online ? 'is-online' : ''}"><i></i>${e(profile.availability)}</span>`;
 const price = profile => profile.price == null ? '<strong class="pro-price">价格待确认</strong>' : `<strong class="pro-price"><span>¥</span> ${profile.price.toFixed(2)}<small>/ 小时</small></strong>`;
 const orderCount = profile => profile.orders == null ? '暂无订单统计' : `${profile.orders} 单`;
 const ratingText = profile => profile.rating == null ? '暂无评价' : `好评率 ${profile.rating}%`;
@@ -54,7 +54,7 @@ export function mountCompanions(container, { workspace = {}, requestService, ope
   const filters = { game: '', query: '', online: Boolean(onlineOnly), collection: 'all', sort: 'default' };
   container.className = `pro-directory${onlineOnly ? ' pro-directory-online-only' : ''}${compact ? ' pro-directory-compact' : ''}`;
   const heading = compact
-    ? `<div class="pro-directory-heading"><div><span class="pro-eyebrow">找到合拍的队友</span><h2>在线陪玩</h2></div><a class="pro-directory-more" href="#/public/companions">查看全部陪玩 ${icon('arrow', 16)}</a></div>`
+    ? `<div class="pro-directory-heading"><div><span class="pro-eyebrow">找到合拍的队友</span><h2>在线空闲陪玩</h2></div><a class="pro-directory-more" href="#/public/companions">查看全部陪玩 ${icon('arrow', 16)}</a></div>`
     : `<div class="pro-directory-heading"><div><span class="pro-eyebrow">星河俱乐部</span><h2>大神陪玩</h2></div><span class="pro-showcase-label">展示档案</span></div>`;
   const controls = compact ? '' : `<div class="pro-filters"><div class="pro-game-filters" role="group" aria-label="陪玩游戏">${['', ...games].map(game => `<button type="button" data-pro-game="${e(game)}" aria-pressed="${!game}">${e(game || '全部游戏')}</button>`).join('')}</div>
     <label class="pro-search">${icon('search', 16)}<input type="search" placeholder="搜索昵称、游戏" aria-label="搜索大神陪玩"></label></div>
@@ -64,7 +64,7 @@ export function mountCompanions(container, { workspace = {}, requestService, ope
   </div>`;
 
   function draw() {
-    const list = availableProfiles.filter(p => (!filters.game || p.game === filters.game) && (!filters.online || p.online) &&
+    const list = availableProfiles.filter(p => (!filters.game || p.game === filters.game) && (!filters.online || p.online && (!onlineOnly || p.availability === '空闲')) &&
       [p.name, p.game, ...p.tags].join(' ').toLowerCase().includes(filters.query.toLowerCase().trim()) &&
       (filters.collection === 'blocked' ? blocked.has(p.id) : !blocked.has(p.id) && (filters.collection !== 'following' || followed.has(p.id))));
     if (filters.sort === 'priceLow') list.sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity));
@@ -74,7 +74,7 @@ export function mountCompanions(container, { workspace = {}, requestService, ope
     container.querySelector('.pro-empty').hidden = list.length > 0;
     container.querySelector('.pro-grid').innerHTML = list.map(p => `<article class="pro-card" data-pro-id="${e(p.id)}">
       <button type="button" class="pro-card-open" aria-label="查看${e(p.name)}的陪玩介绍" data-pro-open="${e(p.id)}">
-        <div class="pro-cover"><img src="${e(p.image)}" alt="${e(p.name)}的头像" loading="lazy" width="214" height="155"><span class="pro-cover-state ${p.online ? 'is-online' : ''}">${icon('headset', 12)}${p.online ? '空闲中' : '可预约'}</span><span class="pro-cover-stats">${icon('receipt', 12)} ${orderCount(p)}<i></i><span class="pro-star">${icon('star', 12)}</span> ${ratingText(p)}</span></div>
+        <div class="pro-cover"><img src="${e(p.image)}" alt="${e(p.name)}的头像" loading="lazy" width="214" height="155"><span class="pro-cover-state ${p.online ? 'is-online' : ''}">${icon('headset', 12)}${e(p.availability)}</span><span class="pro-cover-stats">${icon('receipt', 12)} ${orderCount(p)}<i></i><span class="pro-star">${icon('star', 12)}</span> ${ratingText(p)}</span></div>
         <div class="pro-card-info"><h3>${e(p.name)}${followed.has(p.id) ? `<span class="pro-follow-mark">${icon('heart', 13)}</span>` : ''}</h3><p>${e(p.game)} / ${e(p.service)} / ${e(p.level)}陪</p></div>
       </button>
       <div class="pro-card-bottom"><div class="pro-card-price">${availability(p)}${price(p)}</div><div class="pro-card-actions"><button type="button" class="pro-button" data-pro-open="${p.id}">去下单</button><button type="button" class="pro-button primary" data-pro-open="${p.id}" data-intent="consult">${icon('message', 14)}聊一聊</button></div></div>

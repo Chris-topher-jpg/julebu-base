@@ -40,7 +40,7 @@ export function recordNotifications(data, before, actor) {
     for (const application of order.applications || []) if (recruitmentOpen(order) && application.source === 'service' && !oldApplicants.has(application.userId)) {
       push(application.userId, { ...details, relation: 'available', mode: 'management', page: 'availableOrders', title: '客服邀请你参与订单', body: `订单 ${order.id}，你已进入候选名单，等待老板选择。` });
     }
-    if (recruitmentOpen(order) && (!previous || !recruitmentOpen(previous))) {
+    if (order.dispatchMode !== 'service' && recruitmentOpen(order) && (!previous || !recruitmentOpen(previous))) {
       data.users.filter(candidate => !oldMembers.has(candidate.id) && matchesOrder(data, order, candidate)).forEach(candidate => {
         push(candidate.id, { ...details, relation: 'available', mode: 'management', page: 'availableOrders', title: '有新的匹配订单', body: `订单 ${order.id} · ${order.game}，符合条件即可报名。` });
       });
@@ -166,11 +166,12 @@ export function recordNotifications(data, before, actor) {
   }
 }
 
-export function notificationFeed(data, user, roles) {
+export function notificationFeed(data, user, roles, edition = 'full') {
   const pages = user.role === 'admin' && isQualifiedWorker(user)
     ? [...new Set([...roles.admin.pages, ...roles.escort.pages])]
     : roles[user.role]?.pages || [];
   const allowed = item => {
+    if (edition === 'A' && (item.kind === 'dispatchHall' || item.page === 'availableOrders')) return false;
     if (item.recipientId !== user.id || item.mode === 'management' && !pages.includes(item.page)) return false;
     if (item.kind === 'dispatchHall') {
       if (item.expiresAt <= Date.now()) return false;

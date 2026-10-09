@@ -52,13 +52,13 @@ test('退款通知定位申请单并按顾客、售后、财务权限隔离，�
   assert.equal(notice(user(afterSales.id)), undefined);
 });
 
-async function httpFixture(t, persistent = false) {
+async function httpFixture(t, persistent = false, edition = 'A') {
   const folder = persistent ? mkdtempSync(join(tmpdir(), 'club-sync-test-')) : null;
   const database = folder ? join(folder, 'club.sqlite') : ':memory:';
   let instance, base;
   const cookies = new Map();
   const start = async () => {
-    instance = createClubServer({ database });
+    instance = createClubServer({ database, edition });
     addFixtureGames(instance.store, ['王者荣耀']);
     verifyFixtureUsers(instance.store, ['demo-user', 'demo-escort', 'escort']);
     instance.server.listen(0, '127.0.0.1');
@@ -123,9 +123,9 @@ test('多账号同步下单、客服派单、打手履约、验收和收益，�
     order = result.body;
   };
   await update('service', 'dispatch', { memberIds: [escort.id] });
-  assert.equal(order.status, '待接单');
-  assert.equal(order.participants.length, 0);
-  await update('buyer', 'selectApplicant', { memberIds: [escort.id] });
+  assert.equal(order.status, '待确认');
+  assert.equal(order.participants.length, 1);
+  assert.equal(order.selectionRequired, false);
   const assigned = await sync('escort', escortBefore.revision);
   assert.equal(assigned.workspace.orders.find(item => item.id === order.id).status, '待确认');
   assert.equal(orderNotice(assigned.notifications, order.id)?.page, 'myOrders');
@@ -146,13 +146,13 @@ test('多账号同步下单、客服派单、打手履约、验收和收益，�
     assert.equal(personal.workspace.orders.find(item => item.id === order.id).status, status);
     assert.equal(orderNotice(staff.notifications, order.id)?.readAt, null);
   }
-  await update('service', 'approve');
+  await update('buyer', 'approve', { context: 'personal' });
   const [finished, paid, finance] = await Promise.all([
     sync('buyer', 0, 'personal'), sync('escort'), sync('finance'),
   ]);
   assert.equal(finished.workspace.orders.find(item => item.id === order.id).status, '已完成');
   assert.equal(paid.workspace.orders.find(item => item.id === order.id).status, '已完成');
-  const earning = order.participants.find(item => item.userId === escort.id).earningCents;
+  const earning = paid.workspace.orders.find(item => item.id === order.id).participants.find(item => item.userId === escort.id).earningCents;
   assert.equal(paid.workspace.wallet.balanceCents, escortBefore.workspace.wallet.balanceCents + earning);
   assert.equal(paid.workspace.ledger.find(item => item.source === order.id).deltaCents, earning);
   assert.equal(finance.workspace.ledger.find(item => item.source === order.id && item.userId === escort.id).deltaCents, earning);
@@ -170,7 +170,7 @@ test('多账号同步下单、客服派单、打手履约、验收和收益，�
 });
 
 test('匹配打手可以报名，老板查看报名名单并选择最终打手', async t => {
-  const { call, login, sync } = await httpFixture(t);
+  const { call, login, sync } = await httpFixture(t, false, 'full');
   const buyer = await login('buyer', 'demo_user');
   await login('service', 'demo_service');
   const escort = await login('escort', 'demo_escort');

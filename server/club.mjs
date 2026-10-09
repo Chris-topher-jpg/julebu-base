@@ -3,9 +3,10 @@ import { randomBytes, randomUUID, scryptSync, timingSafeEqual, createHash } from
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { isProfileAvatarPreset } from '../src/profile-avatars.js';
+import { memberAvailability, systemAWorkspace } from './system-a.mjs';
 import * as seed from './seed.mjs';
 import { personalContext, walletPayment, serviceOccupiesMember, settleOrder, reverseRefundEarnings } from './flow.mjs';
-import { FOUR_HOURS, clubDay, metrics, dailyBusinessMetrics, dateRange, trend, ranking, analyticsOptions } from './analytics.mjs';
+import { FOUR_HOURS, clubDay, metrics, dailyBusinessMetrics, refundTotals, dateRange, trend, ranking, analyticsOptions } from './analytics.mjs';
 import { MIN_WITHDRAWAL_DEPOSIT_CENTS, defaultLevels, defaultLevelPrices, priceOf, levelOf, meetsLevel, rateOf, hasOpenOrders, profileConflicts, migrateMembership, memberRecord, lockEarnings, workerGames, workerLevelId, isQualifiedWorker, isQualifiedForGame } from './membership.mjs';
 import { isClubMember, attachCustomer, migrateIdentity, personalData } from './identity.mjs';
 import { recordNotifications, notificationFeed } from './notifications.mjs';
@@ -103,6 +104,7 @@ function managementConversation(data, chat) {
   const account = customer ? data.users.find(user => user.customerId === customer.id) : (!chat.customerId ? author : undefined);
   return {
     ...publicConversation(chat),
+    contacted: (chat.messages || []).some(message => data.users.some(user => user.id === message.authorId && ['admin', 'service', 'afterSales'].includes(user.role))),
     peer: {
       customerId: customer?.id || '', userId: account?.id || '',
       customerNo: account?.memberNo || customer?.customerNo || '',
@@ -200,7 +202,9 @@ function productionState(bootstrapAdmin = {}) {
 }
 
 export class ClubStore {
-  constructor(path, { production = false, bootstrapAdmin } = {}) {
+  constructor(path, { production = false, bootstrapAdmin, edition = 'full' } = {}) {
+    requireThat(['A', 'full'].includes(edition), '系统版本无效');
+    this.edition = edition;
     this.production = production;
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
@@ -427,7 +431,8 @@ export class ClubStore {
     const data = this.read();
     const actor = data.users.find(u => u.id === user.id && u.active);
     requireThat(actor, '账号已停用', 401);
-    return personalData(data, actor, roles);
+    const workspace = personalData(data, actor, roles);
+    return this.edition === 'A' ? systemAWorkspace(workspace) : workspace;
   }
   admissions(user) { return admissionSnapshot(this.read(), user); }
   admissionMutation(user, operation, id, input = {}) {
@@ -484,16 +489,16 @@ export class ClubStore {
     const previous = Number(since);
     requireThat((typeof since === 'number' || typeof since === 'string' && /^\d+$/.test(since)) && Number.isSafeInteger(previous) && previous >= 0, '同步版本无效');
     requireThat(['personal', 'management'].includes(context), '同步工作区无效');
-    const notifications = notificationFeed(data, actor, roles);
+    const notifications = notificationFeed(data, actor, roles, this.edition);
     if (previous === revision) return { changed: false, revision, userId: actor.id, notifications };
-    const workspace = context === 'personal' ? personalData(data, actor, roles) : this.workspace(actor);
+    const workspace = context === 'personal' ? this.personal(actor) : this.workspace(actor);
     return { changed: true, revision, userId: actor.id, workspace, notifications };
   }
   notifications(user) {
     const data = this.read();
     const actor = data.users.find(item => item.id === user.id && item.active);
     requireThat(actor, '账号已停用', 401);
-    return notificationFeed(data, actor, roles);
+    return notificationFeed(data, actor, roles, this.edition);
   }
   readNotifications(user, input = {}) {
     requireThat(Array.isArray(input.ids) && input.ids.length > 0 && input.ids.length <= 500 && input.ids.every(id => typeof id === 'string' && id.length > 0 && id.length <= 100), '请选择要标为已读的通知');
@@ -511,7 +516,7 @@ export class ClubStore {
         this.db.prepare('UPDATE club SET data=? WHERE id=1').run(JSON.stringify(data));
       }
       this.db.exec('COMMIT');
-      return { ...notificationFeed(data, actor, roles), revision: data.revision };
+      return { ...notificationFeed(data, actor, roles, this.edition), revision: data.revision };
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
   totalSnapshot(at = Date.now()) {
@@ -529,13 +534,17 @@ export class ClubStore {
     const at = Date.now();
     if (section === 'summary') {
       const day = input.day || clubDay(at); const range = dateRange(day, day);
-      return { totals: this.totalSnapshot(at), daily: { ...metrics(data, range, at), ...dailyBusinessMetrics(data, range, at), day, asOf: new Date(at).toISOString() }, today: clubDay(at), options: analyticsOptions(data) };
+      return { totals: this.totalSnapshot(at), daily: { ...metrics(data, range, at), ...dailyBusinessMetrics(data, range, at), ...refundTotals(data, day, at), day, asOf: new Date(at).toISOString() }, today: clubDay(at), options: analyticsOptions(data) };
     }
     if (section === 'trend') return trend(data, input, at);
     if (section === 'rankings' || section === 'details') return ranking(data, input, at, section === 'details');
     requireThat(false, '统计接口不存在', 404);
   }
   workspace(user) {
+    const workspace = this.fullWorkspace(user);
+    return this.edition === 'A' ? systemAWorkspace(workspace) : workspace;
+  }
+  fullWorkspace(user) {
     const data = this.read();
     const games = catalogList(data);
     const names = new Set(games.map(game => game.name));
@@ -544,11 +553,11 @@ export class ClubStore {
       order.participantMin ??= game?.min || 1;
       order.participantMax ??= game?.max || 1;
     }
-    const visibleUser = candidate => ({ ...publicUser(candidate), games: (candidate.role === 'admin' ? workerGames(candidate) : candidate.games || []).filter(game => names.has(game)) });
+    const visibleUser = candidate => ({ ...publicUser(candidate), availability: memberAvailability(data, candidate), games: (candidate.role === 'admin' ? workerGames(candidate) : candidate.games || []).filter(game => names.has(game)) });
     const visibleMember = candidate => {
       const member = memberRecord(data, candidate, publicUser);
       const supportedGames = candidate.role === 'admin' ? workerGames(candidate) : candidate.games || [];
-      return { ...member, games: supportedGames.filter(game => names.has(game)), commissionByGame: Object.fromEntries(Object.entries(member.commissionByGame).filter(([game]) => names.has(game))) };
+      return { ...member, availability: memberAvailability(data, candidate), games: supportedGames.filter(game => names.has(game)), commissionByGame: Object.fromEntries(Object.entries(member.commissionByGame).filter(([game]) => names.has(game))) };
     };
     user = data.users.find(u => u.id === user.id && u.active);
     requireThat(user, '账号已停用', 401);
@@ -563,7 +572,7 @@ export class ClubStore {
           id: candidate.id, memberNo: candidate.memberNo, name: candidate.name,
           games: (candidate.games || []).filter(game => names.has(game)),
           levelId: candidate.levelId, levelName: levelOf(data, candidate.levelId)?.name || '',
-          online: Boolean(candidate.online), avatar: candidate.avatar || '', bio: candidate.bio || '',
+          online: Boolean(candidate.online), availability: memberAvailability(data, candidate), avatar: candidate.avatar || '', bio: candidate.bio || '',
           profileTags: Array.isArray(candidate.profileTags) ? candidate.profileTags : [],
         }));
       return {
@@ -638,6 +647,7 @@ export class ClubStore {
     return user?.active && !user.escortFrozen && user.online && isQualifiedForGame(user, order.game) && isRealNameVerified(user)
       && !(order.excludedEscortIds || []).includes(user.id)
       && (!order.preferredEscortId || order.preferredEscortId === user.id)
+      && (this.edition !== 'A' || !serviceOccupiesMember(data, user.id, order.id) && !data.orders.some(other => other.id !== order.id && ['待确认', '待服务'].includes(other.status) && other.participants.some(p => p.userId === user.id)))
       && meetsLevel(data, user, order)
       && data.games.some(g => g.name === order.game);
   }
@@ -654,6 +664,7 @@ export class ClubStore {
     }
   }
   createOrder(user, input) {
+    if (this.edition === 'A') requireThat(input.dispatchProposalId === undefined, 'A 版请通过下单窗口创建订单', 404);
     return this.transaction(user, 'order:create', '创建订单', (data, actor) => {
       let dispatchProposal;
       if (input.dispatchProposalId !== undefined) {
@@ -747,7 +758,8 @@ export class ClubStore {
       requireThat(buyer?.active, '请先选择已注册并完成实名认证的下单用户', 403);
       requireRealName(buyer);
       if (customer) order.customerId = customer.id;
-      order.selectionRequired = actor.role === 'user' || Boolean(customer && data.users.some(account => account.customerId === customer.id));
+      order.selectionRequired = this.edition !== 'A' && (actor.role === 'user' || Boolean(customer && data.users.some(account => account.customerId === customer.id)));
+      if (this.edition === 'A') order.dispatchMode = 'service';
       if (input.pay === '余额支付' || input.pay === '在线支付') {
         requireThat(customer && customer.balanceCents >= total, '老板余额不足，请先充值');
         customer.balanceCents -= total;
@@ -763,13 +775,45 @@ export class ClubStore {
     }, personalContext(user,input));
   }
   orderAction(user, id, action, input) {
-    const permissions = { dispatch: 'order:dispatch', transfer: 'order:dispatch', apply: 'order:accept', selectApplicant: 'order:confirm', accept: 'order:accept', reject: 'order:accept', start: 'order:serve', finish: 'order:serve', approve: personalContext(user,input) ? 'order:confirm' : 'order:review', return: 'order:review' };
+    if (this.edition === 'A') requireThat(!['apply', 'selectApplicant'].includes(action), 'A 版订单由客服派单', 403);
+    const permissions = { dispatch: 'order:dispatch', transfer: 'order:dispatch', apply: 'order:accept', selectApplicant: 'order:confirm', accept: 'order:accept', reject: 'order:accept', start: 'order:serve', finish: 'order:serve', approve: personalContext(user,input) ? 'order:confirm' : 'order:review', return: 'order:review', cancel: 'order:confirm', rate: 'order:confirm' };
     requireThat(permissions[action], '未知订单操作', 404);
     return this.transaction(user, permissions[action], `订单 ${id} · ${action}`, (data, actor) => {
       const order = data.orders.find(o => o.id === id);
       requireThat(order, '订单不存在', 404);
       requireThat(order.version === input.version, '订单已被更新，请刷新后重试', 409);
       if (actor.role === 'user') requireThat(order.customerId === actor.customerId, '只能处理自己的订单', 403);
+      if (this.edition === 'A') {
+        requireThat(action !== 'accept' || order.status !== '待接单', '请等待客服派单后确认接单', 403);
+        order.selectionRequired = false;
+        order.dispatchMode = 'service';
+      }
+      if (action === 'rate') {
+        requireThat(actor.role === 'user' && order.customerId === actor.customerId, '只有下单用户可以评价', 403);
+        requireThat(order.status === '已完成' && order.participants.length, '服务完成后才能评价', 409);
+        requireThat(!order.review, '该订单已评价', 409);
+        requireThat(Number.isInteger(input.rating) && input.rating >= 1 && input.rating <= 5, '请选择 1 至 5 星');
+        order.review = { rating: input.rating, comment: textInput(input.comment, '评价内容', 300), at: now() };
+        order.version++;
+        order.history.push({ action: '用户评价', by: actor.name, at: now() });
+        return order;
+      }
+      if (action === 'cancel') {
+        requireThat(actor.role === 'user' && order.customerId === actor.customerId, '只能取消自己的订单', 403);
+        requireThat(['待接单', '待确认', '待服务'].includes(order.status), '服务已开始，请申请售后退款', 409);
+        requireThat(walletPayment(order), '线下收款订单请申请退款，由财务核实', 409);
+        const customer = data.customers.find(item => item.id === actor.customerId);
+        const refundCents = order.amountCents - (order.refundedCents || 0);
+        requireThat(customer && Number.isSafeInteger(refundCents) && refundCents > 0 && Number.isSafeInteger(customer.balanceCents + refundCents), '退款金额或账户异常', 409);
+        const reason = textInput(input.reason, '取消原因', 200);
+        customer.balanceCents += refundCents;
+        data.ledger.unshift({ id: randomUUID(), customerId: customer.id, userId: null, account: customer.name, deltaCents: refundCents, afterCents: customer.balanceCents, source: order.id, label: '取消订单退款', at: now(), by: actor.name });
+        data.refunds.unshift({ id: `RF${randomUUID()}`, orderId: order.id, customer: order.boss, amountCents: refundCents, reason, status: '已通过', originalStatus: order.status, requestedAt: now(), requestedBy: actor.name, requestedById: actor.id, channel: '余额原路', paidAt: now(), approvedAt: now(), approvedBy: actor.name });
+        order.refundedCents = order.amountCents;
+        order.status = '已取消'; order.cancelledAt = now(); order.version++;
+        order.history.push({ action: '老板取消订单并退回余额', by: actor.name, at: now(), note: reason });
+        return { id: order.id, status: order.status, refundedCents: order.refundedCents };
+      }
       if (['apply', 'accept', 'start', 'selectApplicant'].includes(action)) requireRealName(data.users.find(candidate => candidate.id === actor.id));
       let participant = order.participants.find(p => p.userId === actor.id);
       if (['start', 'finish', 'reject'].includes(action)) requireThat(participant, '只能处理分配给自己的订单', 403);
@@ -875,7 +919,7 @@ export class ClubStore {
         if (order.orderMode === 'designated' && order.preferredEscortId === actor.id) {
           order.orderMode = 'quick';
           order.preferredEscortId = null;
-          order.selectionRequired = true;
+          order.selectionRequired = this.edition !== 'A';
         }
         order.selectedAt = null; order.selectedBy = null;
         order.status = '待接单';

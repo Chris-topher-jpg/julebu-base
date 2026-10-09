@@ -54,7 +54,7 @@ export function loginMarkup(workspace = {}) {
   return `<div class="public-home">
     <header class="public-nav">
       <a class="public-brand" href="#/public/overview" aria-label="星河游戏俱乐部首页"><span class="brand-mark">${icon('game', 23)}</span><span><strong>星河游戏俱乐部</strong><small>陪玩服务平台</small></span></a>
-      <nav aria-label="主导航"><a href="#/public/overview">首页</a><a href="#/public/companions">大神陪玩</a><a href="#/public/dispatchHall">派单大厅</a><a href="#/public/moments">动态广场</a><a href="#/public/guarantees">服务保障</a></nav>
+      <nav aria-label="主导航"><a href="#/public/overview">首页</a><a href="#/public/companions">大神陪玩</a><a href="#/public/guarantees">服务保障</a></nav>
       <div class="public-nav-actions"><button class="public-header-message" type="button" data-action="headerMessages" aria-label="消息与售后">${icon('message', 20)}<span class="public-header-dot" hidden></span></button><a class="register-link" href="#login" data-action="openLogin">注册</a><a class="nav-login-link" href="#login" data-action="openLogin">登录</a></div>
     </header>
     <main>

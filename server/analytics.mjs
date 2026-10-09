@@ -5,6 +5,14 @@ import { catalogTags } from '../src/catalog-tags.js';
 export const FOUR_HOURS = 4 * 60 * 60 * 1000;
 const DAY = 86400000;
 export const clubDay = value => new Date(Number(new Date(value)) + 8 * 3600000).toISOString().slice(0, 10);
+export function refundTotals(data, day, at = Date.now()) {
+  const sumFor = prefix => (data.refunds || []).filter(refund => ['已通过', '已退款'].includes(refund.status))
+    .filter(refund => {
+      const time = refund.paidAt || refund.approvedAt || refund.reviewedAt;
+      return time && Number.isFinite(Date.parse(time)) && Date.parse(time) <= at && clubDay(time).startsWith(prefix);
+    }).reduce((sum, refund) => sum + Number(refund.amountCents || 0), 0);
+  return { dailyRefundCents: sumFor(day), monthlyRefundCents: sumFor(day.slice(0, 7)) };
+}
 function valid(condition, message) { if (!condition) throw Object.assign(new Error(message), { status: 400 }); }
 export function dateRange(start, end) {
   const parse = value => {

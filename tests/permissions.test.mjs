@@ -11,7 +11,7 @@ import { verifyFixtureUsers, userById } from './real-name-fixture.mjs';
 test('角色权限、数据归属、订单状态、金额与持久化', async t => {
   const folder = mkdtempSync(join(tmpdir(), 'club-role-test-'));
   const database = join(folder, 'club.sqlite');
-  let instance = createClubServer({ database });
+  let instance = createClubServer({ edition: 'full', database });
   addFixtureGames(instance.store, ['王者荣耀', '无畏契约', '和平精英', '英雄联盟']);
   verifyFixtureUsers(instance.store, ['demo-user', 'escort']);
   instance.server.listen(0, '127.0.0.1'); await once(instance.server, 'listening');
@@ -122,7 +122,7 @@ test('角色权限、数据归属、订单状态、金额与持久化', async t 
     const saved = clients.service; await call('service','/api/logout',{}); clients.service=saved;
     assert.equal((await call('service','/api/workspace')).status,401);
     await new Promise(r => instance.server.close(r));
-    instance = createClubServer({database}); instance.server.listen(0,'127.0.0.1'); await once(instance.server,'listening');
+    instance = createClubServer({ edition: 'full',database}); instance.server.listen(0,'127.0.0.1'); await once(instance.server,'listening');
     base=`http://127.0.0.1:${instance.server.address().port}`;
     const w = await workspace('admin'); assert.ok(w.orders.some(o=>o.id===createdId)); assert.ok(w.audit.length>0);
     assert.equal((await call('service','/api/workspace')).status,401);
