@@ -59,8 +59,8 @@ export function loginMarkup(workspace = {}) {
     </header>
     <main id="public-main" tabindex="-1">
       <section class="public-hero" id="games" aria-labelledby="publicHeroTitle">
-        <div class="hero-banner"><img class="hero-photo" src="/src/club-gaming.jpg" width="1400" height="933" alt="" fetchpriority="high"><div class="hero-copy"><span class="banner-kicker">星河陪玩 · 一起开黑</span><h1 id="publicHeroTitle">好队友，<br>值得一起开局。</h1><p>选好游戏，找到合拍的陪玩。<br>按需选择时长，安心享受每一场。</p><a class="hero-browse" href="#/public/companions">寻找我的队友 ${icon('arrow', 17)}</a></div></div>
-        <aside class="hero-login" id="login"><div class="login-card-head"><div class="login-logo">${icon('users', 21)}</div><div><strong>欢迎来到星河</strong><small>陪你玩，也替你安排好</small></div></div><h2>这次，想怎么玩？</h2><p class="login-subtitle">登录后即可点单，订单与消息随时可查。</p><ul class="login-benefits"><li>${icon('game', 17)}选择游戏与专属陪玩</li><li>${icon('receipt', 17)}查看订单与服务进度</li><li>${icon('headset', 17)}联系陪玩与在线客服</li></ul><button class="login-submit hero-login-trigger" type="button" data-action="openLogin">登录 / 注册 ${icon('arrow', 16)}</button></aside>
+        <div class="hero-banner"><img class="hero-photo" src="/src/club-gaming.jpg" width="1400" height="933" alt="" fetchpriority="high"><div class="hero-copy"><span class="banner-kicker">星河陪玩 · 一起开黑</span><h1 id="publicHeroTitle">找到好队友。<br>每一场，都尽兴。</h1><p>有人懂你的节奏，也有人接住你的配合。<br>选择游戏与陪玩，把时间留给好玩的事。</p><a class="hero-browse" href="#/public/companions">寻找我的队友 ${icon('arrow', 17)}</a></div></div>
+        <aside class="hero-login" id="login"><div class="login-card-head"><div class="login-logo">${icon('users', 21)}</div><div><strong>欢迎来到星河</strong><small>陪你玩，也替你安排好</small></div></div><p class="login-subtitle">你的订单、消息和专属队友，都在这里。</p><button class="login-submit hero-login-trigger" type="button" data-action="openLogin">登录 / 注册 ${icon('arrow', 16)}</button></aside>
       </section>
       <section class="public-content" id="members"></section>
     </main>
