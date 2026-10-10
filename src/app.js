@@ -321,6 +321,17 @@ function enhancePublicHome(workspace = state.workspace) {
   const home = document.querySelector('.public-home');
   if (!home || home.dataset.enhanced === 'true') return;
   home.dataset.enhanced = 'true';
+  home.querySelector('.public-skip-link')?.addEventListener('click', event => {
+    event.preventDefault();
+    const target = home.querySelector('.public-standalone-section:not([hidden])') || home.querySelector('main');
+    target?.setAttribute('tabindex', '-1');
+    target?.focus();
+    target?.scrollIntoView({ block: 'start' });
+  });
+  home.querySelector('[data-action="footerSupport"]')?.addEventListener('click', () => {
+    if (state.workspace?.user) openHeaderChat({ consultationOnly: true });
+    else home.querySelector('.nav-login-link[data-action="openLogin"]')?.click();
+  });
   const links = [...home.querySelectorAll('.public-nav nav a')];
   const markNavigation = hash => links.forEach(link => {
     if (link.hash === hash) link.setAttribute('aria-current', 'location');
@@ -330,7 +341,7 @@ function enhancePublicHome(workspace = state.workspace) {
   const parsed = parseRoute(location.hash);
   const admissionEntry = document.createElement('section');
   admissionEntry.className = 'public-admission-entry';
-  admissionEntry.innerHTML = `<div><span>加入星河 · 成为陪玩</span><strong>把你的游戏实力，变成接单资格</strong><p>选择游戏并确认考核，支付后由考官联系安排时间；通过后开启接单。</p></div><button type="button" class="public-admission-button" data-action="openAdmissions">${icon('game', 20)} 成为打手 ${icon('arrow', 17)}</button>`;
+  admissionEntry.innerHTML = `<div><span>加入星河</span><strong>擅长游戏？欢迎成为我们的队友。</strong><p>选择游戏、报名考核，通过后即可获得接单资格。</p></div><button type="button" class="public-admission-button" data-action="openAdmissions">成为打手 ${icon('arrow', 17)}</button>`;
   admissionEntry.querySelector('[data-action="openAdmissions"]').onclick = openAdmissionDialog;
   home.querySelector('.public-hero')?.after(admissionEntry);
   const publicProducts = (workspace.products || []).filter(product => product.id && product.name && (!workspace.user || product.state === '启用') && (workspace.catalogGames || workspace.games || []).some(game => game.name === product.game && game.state === '上架')).map(product => ({
@@ -339,14 +350,18 @@ function enhancePublicHome(workspace = state.workspace) {
   if (publicProducts.length) {
     const services = document.createElement('section');
     services.className = 'public-services';
-    services.innerHTML = `<div class="public-services-inner"><div class="public-services-heading"><div><span>俱乐部服务</span><h2>选择你的服务</h2></div></div><div class="public-service-filters" role="group" aria-label="筛选订单类型"></div><div class="public-service-list"></div></div>`;
+    services.innerHTML = `<div class="public-services-inner"><div class="public-services-heading"><div><h2>选择你的服务</h2><p>时长、陪玩与服务要求，由你决定。</p></div><div class="public-service-filters" role="group" aria-label="筛选订单类型"></div></div><div class="public-service-list"></div></div>`;
     admissionEntry.after(services);
     const types = ['全部', ...new Set(publicProducts.map(orderTypeOf))];
     let selectedType = '全部';
     const renderServices = () => {
       services.querySelector('.public-service-filters').innerHTML = types.map(type => `<button type="button" data-service-type="${e(type)}" aria-pressed="${type === selectedType}">${e(type)}</button>`).join('');
-      services.querySelector('.public-service-list').innerHTML = publicProducts.filter(product => selectedType === '全部' || orderTypeOf(product) === selectedType).map(product => `<article class="public-service-item"><div><span>${e(product.game)} · ${e(orderTypeOf(product))}</span><h3>${e(product.name)}</h3>${productGuarantee(product) ? `<span>护航保障 · ${e(productGuarantee(product))}</span>` : ''}<p>${e(product.note || '按需选择时长，由俱乐部安排打手')}</p></div><div class="public-service-action"><strong>${Number.isSafeInteger(product.priceCents) && product.priceCents > 0 ? `${money(product.priceCents)}${!productNeedsLevel(product) || product.pricingMode === 'fixed' ? '' : ' 起'}` : '暂未定价'}<small> / ${e(product.unit || '小时')}</small></strong><button type="button" data-public-product="${e(product.id)}">去点单 ${icon('arrow', 15)}</button></div></article>`).join('');
-      services.querySelectorAll('[data-service-type]').forEach(button => button.onclick = () => { selectedType = button.dataset.serviceType; renderServices(); });
+      services.querySelector('.public-service-list').innerHTML = publicProducts.filter(product => selectedType === '全部' || orderTypeOf(product) === selectedType).map(product => `<article class="public-service-item"><div class="public-service-copy"><div class="service-game-label">${icon('game', 19)}<span>${e(product.game)}</span><small>${e(orderTypeOf(product))}</small></div><h3>${e(product.name)}</h3>${productGuarantee(product) ? `<span>护航保障 · ${e(productGuarantee(product))}</span>` : ''}<p>${e(product.note || '按需选择时长，由俱乐部安排打手')}</p></div><div class="public-service-action"><strong>${Number.isSafeInteger(product.priceCents) && product.priceCents > 0 ? `${money(product.priceCents)}${!productNeedsLevel(product) || product.pricingMode === 'fixed' ? '' : ' 起'}` : '暂未定价'}<small> / ${e(product.unit || '小时')}</small></strong><button type="button" data-public-product="${e(product.id)}" aria-label="去点单：${e(product.game)} ${e(product.name)}">去点单 ${icon('arrow', 15)}</button></div></article>`).join('');
+      services.querySelectorAll('[data-service-type]').forEach(button => button.onclick = () => {
+        selectedType = button.dataset.serviceType;
+        renderServices();
+        [...services.querySelectorAll('[data-service-type]')].find(item => item.dataset.serviceType === selectedType)?.focus({ preventScroll: true });
+      });
       services.querySelectorAll('[data-public-product]').forEach(button => button.onclick = () => {
         if (state.workspace?.user) openPersonalOrder(undefined, button.dataset.publicProduct);
         else home.querySelector('.nav-login-link[data-action="openLogin"]')?.click();
@@ -359,6 +374,7 @@ function enhancePublicHome(workspace = state.workspace) {
   const online = home.querySelector('.public-online');
   if (online) online.textContent = '星河陪玩';
   const members = home.querySelector('#members');
+  members?.after(admissionEntry);
   if (members) mountCompanions(members, { workspace, onlineOnly: parsed.page === 'overview', compact: parsed.page === 'overview', requestService: profile => {
     if (state.workspace?.user) {
       openPersonalOrder(profile);
@@ -370,7 +386,7 @@ function enhancePublicHome(workspace = state.workspace) {
   const footer = home.querySelector('.public-footer'); footer?.removeAttribute('id');
   if (!home.querySelector('#rules')) {
     const section = document.createElement('section'); section.className = 'guarantee-section'; section.id = 'rules';
-    section.innerHTML = `<div class="section-heading"><div><span>服务保障</span><h1>每一单，都有清晰的进度和依据</h1><p class="section-caption">从支付到售后，平台记录关键节点，遇到问题可以随时追踪处理。</p></div><button class="filter-button" type="button" data-action="openLogin">开始下单 ${icon('arrow', 14)}</button></div><div class="guarantee-grid"><article class="guarantee-item"><span class="guarantee-icon blue">${icon('lock', 21)}</span><div><h3>交易留痕</h3><p>订单金额和余额变动可追踪，服务验收通过后再结算陪玩收益。</p></div></article><article class="guarantee-item"><span class="guarantee-icon green">${icon('check', 21)}</span><div><h3>接单确认</h3><p>订单同步给客服与匹配打手，接单前可查看服务要求和时间。</p></div></article><article class="guarantee-item"><span class="guarantee-icon orange">${icon('clock', 21)}</span><div><h3>过程留痕</h3><p>下单、接单、开始服务、完单和验收均有记录，状态变化清楚可查。</p></div></article><article class="guarantee-item"><span class="guarantee-icon pink">${icon('headset', 21)}</span><div><h3>售后介入</h3><p>迟到、掉线、时长不足或质量争议，可提交证据申请补做或退款。</p></div></article></div><div class="process-strip"><div><b>01</b><span>提交需求</span></div><i></i><div><b>02</b><span>余额支付</span></div><i></i><div><b>03</b><span>接单服务</span></div><i></i><div><b>04</b><span>服务验收</span></div><i></i><div><b>05</b><span>售后跟进</span></div></div>`;
+    section.innerHTML = `<div class="section-heading"><div><span>服务保障</span><h2>每一单，都有清晰的进度和依据</h2><p class="section-caption">从支付到售后，平台记录关键节点，遇到问题可以随时追踪处理。</p></div><button class="filter-button" type="button" data-action="openLogin">开始下单 ${icon('arrow', 14)}</button></div><div class="guarantee-grid"><article class="guarantee-item"><span class="guarantee-icon blue">${icon('lock', 21)}</span><div><h3>交易留痕</h3><p>订单金额和余额变动可追踪，服务验收通过后再结算陪玩收益。</p></div></article><article class="guarantee-item"><span class="guarantee-icon green">${icon('check', 21)}</span><div><h3>接单确认</h3><p>订单同步给客服与匹配打手，接单前可查看服务要求和时间。</p></div></article><article class="guarantee-item"><span class="guarantee-icon orange">${icon('clock', 21)}</span><div><h3>过程留痕</h3><p>下单、接单、开始服务、完单和验收均有记录，状态变化清楚可查。</p></div></article><article class="guarantee-item"><span class="guarantee-icon pink">${icon('headset', 21)}</span><div><h3>售后介入</h3><p>迟到、掉线、时长不足或质量争议，可提交证据申请补做或退款。</p></div></article></div><div class="process-strip"><div><b>01</b><span>提交需求</span></div><i></i><div><b>02</b><span>余额支付</span></div><i></i><div><b>03</b><span>接单服务</span></div><i></i><div><b>04</b><span>服务验收</span></div><i></i><div><b>05</b><span>售后跟进</span></div></div>`;
     footer?.before(section);
   }
   // Keep the footer's “联系客服” anchor meaningful. Previously it pointed to
@@ -379,7 +395,7 @@ function enhancePublicHome(workspace = state.workspace) {
     const help = document.createElement('section');
     help.className = 'help-section';
     help.id = 'help';
-    help.innerHTML = `<div class="section-heading"><div><span>需要帮助</span><h1>客服会跟进每一笔订单</h1><p class="section-caption">登录后可在会话中心查看处理进度；下单、支付或售后问题都可以留下说明。</p></div><button class="filter-button" type="button" data-action="openLogin">联系在线客服 ${icon('headset', 14)}</button></div><div class="help-cards"><article><strong>订单咨询</strong><p>下单前确认游戏、时长和陪玩要求，避免信息遗漏。</p></article><article><strong>支付与退款</strong><p>支付凭证、退款原因和处理结果都会保留记录。</p></article><article><strong>服务异常</strong><p>迟到、掉线或服务不足，可提交售后申请并填写说明。</p></article></div>`;
+    help.innerHTML = `<div class="section-heading"><div><span>需要帮助</span><h2>客服会跟进每一笔订单</h2><p class="section-caption">登录后可在会话中心查看处理进度；下单、支付或售后问题都可以留下说明。</p></div><button class="filter-button" type="button" data-action="openLogin">联系在线客服 ${icon('headset', 14)}</button></div><div class="help-cards"><article><strong>订单咨询</strong><p>下单前确认游戏、时长和陪玩要求，避免信息遗漏。</p></article><article><strong>支付与退款</strong><p>支付凭证、退款原因和处理结果都会保留记录。</p></article><article><strong>服务异常</strong><p>迟到、掉线或服务不足，可提交售后申请并填写说明。</p></article></div>`;
     footer?.before(help);
   }
   if (parsed.mode === 'public' && parsed.page === 'overview' && section !== '#games') requestAnimationFrame(() => home.querySelector(section)?.scrollIntoView({ block: 'start' }));
@@ -398,6 +414,10 @@ function renderPublicStandalone(page) {
   if (!active) return;
   active.hidden = false;
   active.classList.add('public-standalone-section');
+  if (page === 'guarantees') {
+    const title = active.querySelector('.section-heading h2');
+    if (title) { const heading = document.createElement('h1'); heading.textContent = title.textContent; title.replaceWith(heading); }
+  }
   // Standalone pages start directly with their content section; the former intro banner was visually redundant.
   if (page === 'guarantees' && !active.querySelector('.guarantee-detail-grid')) {
     active.insertAdjacentHTML('beforeend', `<div class="guarantee-detail-grid"><article class="guarantee-detail-card"><h3>下单确认</h3><p>确认游戏、区服、服务时长、预约时间和陪玩要求后再支付，订单内容会保留在订单详情中。</p></article><article class="guarantee-detail-card"><h3>计时与验收</h3><p>服务开始和结束节点由平台记录，完成后由你确认服务结果；如有异议请及时提交说明。</p></article><article class="guarantee-detail-card"><h3>支付凭证</h3><p>支付成功后可在个人中心查看订单金额和支付记录，客服可据此核对款项。</p></article><article class="guarantee-detail-card"><h3>售后申请</h3><p>遇到迟到、掉线、时长不足等情况，可在订单售后入口提交原因和凭证，客服会跟进处理。</p></article></div><div class="guarantee-steps"><h3>处理流程</h3><ol><li>提交订单与服务要求</li><li>陪玩接单并确认时间</li><li>开始服务与计时记录</li><li>完成验收并评价</li><li>异常时提交售后或退款申请</li></ol></div><div class="guarantee-faq"><h3>常见问题</h3><details><summary>什么时候可以申请退款？</summary><p>服务尚未开始或出现可核实的服务问题时，可提交退款申请，客服将根据订单记录和双方说明处理。</p></details><details><summary>售后需要准备什么？</summary><p>请提供订单号、问题描述及相关截图或支付凭证，便于客服快速核对。</p></details></div>`);

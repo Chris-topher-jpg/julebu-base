@@ -28,7 +28,7 @@ export function icon(name, size = 18) {
   paths.lock = '<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>';
   paths.check = '<path d="m5 12 4 4L19 6"/>';
   paths.clock = '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>';
-  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths[name] || paths.grid}</svg>`;
+  return `<svg aria-hidden="true" focusable="false" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths[name] || paths.grid}</svg>`;
 }
 
 
@@ -50,21 +50,21 @@ export function authFormMarkup() {
 }
 
 export function loginMarkup(workspace = {}) {
-  const games = workspace?.catalogGames || workspace?.games || [];
   return `<div class="public-home">
+    <a class="public-skip-link" href="#public-main">跳至主要内容</a>
     <header class="public-nav">
       <a class="public-brand" href="#/public/overview" aria-label="星河游戏俱乐部首页"><span class="brand-mark">${icon('game', 23)}</span><span><strong>星河游戏俱乐部</strong><small>陪玩服务平台</small></span></a>
       <nav aria-label="主导航"><a href="#/public/overview">首页</a><a href="#/public/companions">大神陪玩</a><a href="#/public/guarantees">服务保障</a></nav>
       <div class="public-nav-actions"><button class="public-header-message" type="button" data-action="headerMessages" aria-label="消息与售后">${icon('message', 20)}<span class="public-header-dot" hidden></span></button><a class="register-link" href="#login" data-action="openLogin">注册</a><a class="nav-login-link" href="#login" data-action="openLogin">登录</a></div>
     </header>
-    <main>
+    <main id="public-main" tabindex="-1">
       <section class="public-hero" id="games" aria-labelledby="publicHeroTitle">
-        <div class="hero-banner"><div class="hero-copy"><span class="banner-kicker">星河陪玩 · 一起开黑</span><h1 id="publicHeroTitle">找个靠谱的陪玩<br><em>一起赢下每一局</em></h1><p>选好游戏，找到合拍的队友。<br>从组队到完单，每一步都有保障。</p><a class="hero-browse" href="#/public/companions">寻找我的队友 ${icon('arrow', 17)}</a><div class="hero-tags"><span>${icon('game', 15)}${escapeHtml(games[0]?.name || '游戏陪玩')}</span><span>${icon('check', 15)}订单全程可追踪</span></div></div></div>
-        <aside class="hero-login" id="login"><div class="login-card-head"><div class="login-logo">${icon('users', 21)}</div><div><strong>欢迎来到星河</strong><small>你的专属陪玩工作台</small></div></div><h2>开启你的组队时刻</h2><p class="login-subtitle">登录后下单，随时查看订单和售后。</p><ul class="login-benefits"><li>${icon('game', 17)}选择游戏与专属陪玩</li><li>${icon('receipt', 17)}查看订单与服务进度</li><li>${icon('headset', 17)}联系陪玩与在线客服</li></ul><button class="login-submit hero-login-trigger" type="button" data-action="openLogin">登录 / 注册 ${icon('arrow', 16)}</button></aside>
+        <div class="hero-banner"><img class="hero-photo" src="/src/club-gaming.jpg" width="1400" height="933" alt="" fetchpriority="high"><div class="hero-copy"><span class="banner-kicker">星河陪玩 · 一起开黑</span><h1 id="publicHeroTitle">好队友，<br>值得一起开局。</h1><p>选好游戏，找到合拍的陪玩。<br>按需选择时长，安心享受每一场。</p><a class="hero-browse" href="#/public/companions">寻找我的队友 ${icon('arrow', 17)}</a></div></div>
+        <aside class="hero-login" id="login"><div class="login-card-head"><div class="login-logo">${icon('users', 21)}</div><div><strong>欢迎来到星河</strong><small>陪你玩，也替你安排好</small></div></div><h2>这次，想怎么玩？</h2><p class="login-subtitle">登录后即可点单，订单与消息随时可查。</p><ul class="login-benefits"><li>${icon('game', 17)}选择游戏与专属陪玩</li><li>${icon('receipt', 17)}查看订单与服务进度</li><li>${icon('headset', 17)}联系陪玩与在线客服</li></ul><button class="login-submit hero-login-trigger" type="button" data-action="openLogin">登录 / 注册 ${icon('arrow', 16)}</button></aside>
       </section>
       <section class="public-content" id="members"></section>
     </main>
-    <footer class="public-footer" id="rules"><span>© 星河游戏俱乐部</span><span><a href="#/public/guarantees">服务保障与交易须知</a><span aria-hidden="true"> · </span>联系客服</span></footer>
+    <footer class="public-footer" id="rules"><span>© 星河游戏俱乐部</span><span><a href="#/public/guarantees">服务保障与交易须知</a><span aria-hidden="true"> · </span><button type="button" data-action="footerSupport">联系客服</button></span></footer>
     <dialog class="auth-dialog" id="authDialog" aria-labelledby="authTitle"><form id="loginForm" method="dialog">${authFormMarkup()}</form></dialog>
   </div>`;
 }

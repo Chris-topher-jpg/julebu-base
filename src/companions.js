@@ -54,13 +54,13 @@ export function mountCompanions(container, { workspace = {}, requestService, ope
   const filters = { game: '', query: '', online: Boolean(onlineOnly), collection: 'all', sort: 'default' };
   container.className = `pro-directory${onlineOnly ? ' pro-directory-online-only' : ''}${compact ? ' pro-directory-compact' : ''}`;
   const heading = compact
-    ? `<div class="pro-directory-heading"><div><span class="pro-eyebrow">找到合拍的队友</span><h2>在线空闲陪玩</h2></div><a class="pro-directory-more" href="#/public/companions">查看全部陪玩 ${icon('arrow', 16)}</a></div>`
-    : `<div class="pro-directory-heading"><div><span class="pro-eyebrow">星河俱乐部</span><h2>大神陪玩</h2></div><span class="pro-showcase-label">展示档案</span></div>`;
+    ? `<div class="pro-directory-heading"><div><h2>在线空闲陪玩</h2><p class="pro-directory-caption">看看谁已准备好，和你一起开局。</p></div><a class="pro-directory-more" href="#/public/companions">查看全部陪玩 ${icon('arrow', 16)}</a></div>`
+    : `<div class="pro-directory-heading"><div><h1>大神陪玩</h1><p class="pro-directory-caption">按游戏、价格与在线状态，找到合拍的队友。</p></div></div>`;
   const controls = compact ? '' : `<div class="pro-filters"><div class="pro-game-filters" role="group" aria-label="陪玩游戏">${['', ...games].map(game => `<button type="button" data-pro-game="${e(game)}" aria-pressed="${!game}">${e(game || '全部游戏')}</button>`).join('')}</div>
-    <label class="pro-search">${icon('search', 16)}<input type="search" placeholder="搜索昵称、游戏" aria-label="搜索大神陪玩"></label></div>
+    <label class="pro-search">${icon('search', 16)}<input type="search" name="companionSearch" autocomplete="off" placeholder="搜索昵称、游戏…" aria-label="搜索大神陪玩"></label></div>
     <div class="pro-list-toolbar"><span class="pro-result-count" role="status"></span><div><label class="pro-online-filter"><input type="checkbox" ${onlineOnly ? 'checked disabled' : ''}>仅看在线</label><select aria-label="陪玩收藏筛选"><option value="all">全部陪玩</option><option value="following">我的关注</option><option value="blocked">已屏蔽</option></select><select aria-label="陪玩排序"><option value="default">综合排序</option><option value="priceLow">价格从低到高</option><option value="priceHigh">价格从高到低</option><option value="orders">服务单量优先</option></select></div></div>`;
   container.innerHTML = `<div class="pro-directory-inner">${heading}${controls}
-    <div class="pro-grid"></div><div class="pro-empty" hidden>${icon('search', 28)}<h3>暂无符合条件的陪玩</h3><button type="button" class="pro-button" data-pro-reset>重置筛选</button></div>
+    <div class="pro-grid"></div><div class="pro-empty" hidden role="status">${icon(onlineOnly ? 'headset' : 'search', 28)}<div><h3>${onlineOnly ? '暂时没有空闲陪玩' : '暂无符合条件的陪玩'}</h3><p>${onlineOnly ? '可以先浏览全部陪玩，选择心仪的队友咨询预约。' : '试试其他游戏或清除筛选条件。'}</p></div>${onlineOnly ? '<a class="pro-button" href="#/public/companions">浏览全部陪玩</a>' : '<button type="button" class="pro-button" data-pro-reset>重置筛选</button>'}</div>
   </div>`;
 
   function draw() {
