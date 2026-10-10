@@ -68,6 +68,13 @@ export function recordNotifications(data, before, actor) {
     staff(['admin', 'afterSales', 'finance'], { ...details, page: 'refunds' });
   }
 
+  const oldCompensations = index(before.compensations);
+  for (const item of data.compensations || []) {
+    if (same(item, oldCompensations.get(item.id))) continue;
+    const details = { kind: 'compensation', entityId: item.id, orderId: item.orderId, title: item.status === '待审核' ? '赔偿申请等待财务审核' : '赔偿处理进度已更新', body: `赔偿申请 ${item.id} · ${item.status}` };
+    customer(item.customerId, { ...details, page: 'memberAfterSales' });
+    staff(['admin', 'afterSales', 'finance'], { ...details, page: 'refunds' });
+  }
   const oldChats = index(before.conversations);
   for (const chat of data.conversations || []) {
     const previous = oldChats.get(chat.id);
@@ -195,6 +202,10 @@ export function notificationFeed(data, user, roles, edition = 'full') {
       const chat = data.conversations.find(chat => chat.id === item.entityId);
       if (!chat) return false;
       return item.mode === 'personal' ? Boolean(user.customerId && chat.customerId === user.customerId) : canManageConversation(user, chat);
+    }
+    if (item.kind === 'compensation') {
+      const record = (data.compensations || []).find(record => record.id === item.entityId);
+      return Boolean(record && (item.mode === 'personal' ? user.customerId && record.customerId === user.customerId : ['admin', 'afterSales', 'finance'].includes(user.role)));
     }
     if (item.kind === 'refund') {
       const refund = data.refunds.find(record => record.id === item.entityId);

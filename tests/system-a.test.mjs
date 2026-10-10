@@ -197,6 +197,21 @@ test('客服未联系会话仅在工作人员实际回复后移出待办，内�
   assert.equal(contacted(), true);
 });
 
+test('员工以买家身份咨询不算客服回复，登录个人目录保留忙闲状态', t => {
+  const { store, service, admin, buyer, worker, create, update } = fixture(t);
+  const chat = store.conversationCreate(service, { context: 'personal', type: 'consultation', message: '我作为买家咨询下单' });
+  const contacted = () => store.workspace(admin).conversations.find(item => item.id === chat.id).contacted;
+  assert.equal(contacted(), false);
+  store.conversationMessage(service, chat.id, { context: 'personal', message: '我要预约一小时' });
+  assert.equal(contacted(), false);
+  store.conversationMessage(admin, chat.id, { message: '客服已收到你的需求' });
+  assert.equal(contacted(), true);
+  const order = create(); update(service, order, 'dispatch', { memberIds: [worker.id] });
+  assert.equal(store.personal(buyer).members.find(item => item.id === worker.id).availability, '服务中');
+  update(worker, order, 'reject', { reason: '时间冲突' });
+  assert.equal(store.personal(buyer).members.find(item => item.id === worker.id).availability, '空闲');
+});
+
 test('陪玩目录包含空闲、忙碌和离线状态，退款统计按北京时间实际到账日期跨月区分', () => {
   const users = [{ id: 'free', online: true }, { id: 'busy', online: true }, { id: 'offline', online: false }];
   const data = { orders: [{ status: '待确认', participants: [{ userId: 'busy' }] }], refunds: [

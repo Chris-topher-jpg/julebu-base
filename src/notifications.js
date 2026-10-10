@@ -7,7 +7,7 @@ const displayTime = value => {
     ? date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
     : '';
 };
-const actionLabel = item => item.orderId || /order|assign/.test(String(item.kind || '')) ? '查看订单' : '查看详情';
+const actionLabel = item => item.kind === 'compensation' ? '查看赔偿' : item.orderId || /order|assign/.test(String(item.kind || '')) ? '查看订单' : '查看详情';
 
 /** The caller owns authentication, transport, and navigation; this module only presents notifications. */
 export function createNotificationCenter({ openItem, markRead, openSupport, onError } = {}) {

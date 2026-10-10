@@ -3,6 +3,7 @@ import { randomBytes, randomUUID, scryptSync, timingSafeEqual, createHash } from
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { isProfileAvatarPreset } from '../src/profile-avatars.js';
+import { createCompensation, resolveCompensation } from './compensations.mjs';
 import { memberAvailability, systemAWorkspace } from './system-a.mjs';
 import * as seed from './seed.mjs';
 import { personalContext, walletPayment, serviceOccupiesMember, settleOrder, reverseRefundEarnings } from './flow.mjs';
@@ -104,7 +105,7 @@ function managementConversation(data, chat) {
   const account = customer ? data.users.find(user => user.customerId === customer.id) : (!chat.customerId ? author : undefined);
   return {
     ...publicConversation(chat),
-    contacted: (chat.messages || []).some(message => data.users.some(user => user.id === message.authorId && ['admin', 'service', 'afterSales'].includes(user.role))),
+    contacted: (chat.messages || []).some(message => message.senderContext === 'staff' || message.senderContext == null && message.authorId !== account?.id && data.users.some(user => user.id === message.authorId && ['admin', 'service', 'afterSales'].includes(user.role))),
     peer: {
       customerId: customer?.id || '', userId: account?.id || '',
       customerNo: account?.memberNo || customer?.customerNo || '',
@@ -542,6 +543,7 @@ export class ClubStore {
   }
   workspace(user) {
     const workspace = this.fullWorkspace(user);
+    if (['admin', 'service', 'afterSales', 'finance'].includes(workspace.user.role)) workspace.compensations = this.read().compensations || [];
     return this.edition === 'A' ? systemAWorkspace(workspace) : workspace;
   }
   fullWorkspace(user) {
@@ -982,7 +984,7 @@ export class ClubStore {
       else requireThat(canManageConversation(actor,chat),'无权访问该会话',403);
       const text=textInput(input.message,'消息内容',1000);
       const unreadBefore=escortUnread(chat);
-      (chat.messages||=[]).push({text,author:actor.name,authorId:actor.id,at:now()});chat.last=text;chat.updatedAt=now();
+      (chat.messages||=[]).push({text,author:actor.name,authorId:actor.id,at:now(),senderContext:personal?'personal':actor.role==='escort'?'escort':'staff'});chat.last=text;chat.updatedAt=now();
       if(personal){chat.staffUnread=(chat.staffUnread??chat.unread??0)+1;chat.customerUnread=0;}
       else if(actor.role==='escort'){chat.customerUnread=(chat.customerUnread||0)+1;chat.staffUnread=(chat.staffUnread??chat.unread??0)+1;}
       else {chat.customerUnread=(chat.customerUnread||0)+1;chat.staffUnread=0;}
@@ -1136,6 +1138,15 @@ export class ClubStore {
       item.reviewNote = reason; item.reviewedAt = now(); item.reviewedBy = actor.name;
       return item;
     });
+  }
+  createCompensation(user, input) {
+    const personal = personalContext(user, input);
+    return this.transaction(user, personal ? 'refund:create' : can(user, 'refund:manage') ? 'refund:manage' : 'order:review', '提交赔偿申请', (data, actor) => createCompensation(data, actor, input), personal);
+  }
+  resolveCompensation(user, id, input) {
+    const retract = input.action === 'retract';
+    requireThat(retract || !personalContext(user, input), '请在财务管理工作区处理赔偿', 403);
+    return this.transaction(user, retract ? 'refund:create' : 'finance:manage', '处理赔偿申请', (data, actor) => resolveCompensation(data, actor, id, input), retract);
   }
   createRefund(user, input) {
     return this.transaction(user, personalContext(user,input) ? 'refund:create' : can(user, 'refund:manage') || can(user, 'refund:create') ? (can(user, 'refund:manage') ? 'refund:manage' : 'refund:create') : 'order:review', '创建退款申请', (data, actor) => {

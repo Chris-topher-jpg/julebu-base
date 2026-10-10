@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { personalCompensations } from './compensations.mjs';
+import { memberAvailability } from './system-a.mjs';
 import { priceOf } from './membership.mjs';
 import { catalogList, catalogNames, visibleProducts } from './game-catalog.mjs';
 import { applicationViews, buyerSelectionRequired } from './order-matching.mjs';
@@ -63,6 +65,7 @@ export function personalData(data, user, roles) {
   const orderIds = new Set(orders.map(o => o.id));
   return {
     mode: 'personal', clubName: '星河游戏俱乐部', revision: data.revision, role: roles.user,
+    compensations: personalCompensations(data, user),
     user: { id: user.id, memberNo: user.memberNo, username: user.username, name: user.name,
       role: 'user', roleLabel: '用户', tone: 'blue', phone: customer?.phone || '', online: Boolean(user.online), avatar: user.avatar || '', bio: user.bio || '', profileTags: Array.isArray(user.profileTags) ? user.profileTags : [], realNameVerification: realNameVerification(user) },
     membership: isClubMember(user) ? { role: user.role, label: roles[user.role].label, active: user.active } : null,
@@ -96,6 +99,6 @@ export function personalData(data, user, roles) {
     games,
     catalogGames: games,
     products: visibleProducts(data),
-    members: data.users.filter(candidate => candidate.role === 'escort' && candidate.active && !candidate.escortFrozen && isRealNameVerified(candidate)).map(candidate => ({ id: candidate.id, memberNo: candidate.memberNo || candidate.id, name: candidate.name, games: (candidate.games || []).filter(game => names.has(game)), online: candidate.online, levelId: candidate.levelId, avatar: candidate.avatar || '', bio: candidate.bio || '', profileTags: Array.isArray(candidate.profileTags) ? candidate.profileTags : [] })),
+    members: data.users.filter(candidate => candidate.role === 'escort' && candidate.active && !candidate.escortFrozen && isRealNameVerified(candidate)).map(candidate => ({ id: candidate.id, memberNo: candidate.memberNo || candidate.id, name: candidate.name, games: (candidate.games || []).filter(game => names.has(game)), online: candidate.online, availability: memberAvailability(data, candidate), levelId: candidate.levelId, avatar: candidate.avatar || '', bio: candidate.bio || '', profileTags: Array.isArray(candidate.profileTags) ? candidate.profileTags : [] })),
   };
 }

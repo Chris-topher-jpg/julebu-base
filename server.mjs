@@ -319,6 +319,10 @@ export function createClubServer({ database, edition = 'A', production = process
         const orderResponse = order => personalContext(user, body) ? store.personal(user).orders.find(item => item.id === order.id) : order;
         if (url.pathname === '/api/orders') return json(orderResponse(store.createOrder(user, body)), 201);
         const refundResponse = refund => personalContext(user, body) || body.action === 'retract' ? store.personal(user).refunds.find(item => item.id === refund.id) : refund;
+        const compensationResponse = item => personalContext(user, body) || body.action === 'retract' ? store.personal(user).compensations.find(record => record.id === item.id) : item;
+        if (url.pathname === '/api/compensations') return json(compensationResponse(store.createCompensation(user, body)), 201);
+        const compensation = url.pathname.match(/^\/api\/compensations\/([^/]+)$/);
+        if (compensation) return json(compensationResponse(store.resolveCompensation(user, compensation[1], body)));
         if (url.pathname === '/api/refunds') return json(refundResponse(store.createRefund(user, body)), 201);
         if (url.pathname === '/api/conversations') return json(store.conversationCreate(user, body), 201);
         const refund = url.pathname.match(/^\/api\/refunds\/([^/]+)$/);
